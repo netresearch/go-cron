@@ -1,8 +1,22 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/netresearch/go-cron.svg)](https://pkg.go.dev/github.com/netresearch/go-cron)
+[![CI](https://github.com/netresearch/go-cron/actions/workflows/ci.yml/badge.svg)](https://github.com/netresearch/go-cron/actions/workflows/ci.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/netresearch/go-cron)](https://goreportcard.com/report/github.com/netresearch/go-cron)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 # go-cron
 
-A maintained fork of [robfig/cron](https://github.com/robfig/cron) with bug fixes and improvements.
+A maintained fork of [robfig/cron](https://github.com/robfig/cron) — the most popular cron library for Go — with critical bug fixes, DST handling improvements, and modern toolchain support.
+
+## Why?
+
+The original `robfig/cron` has been unmaintained since 2020, accumulating 50+ open PRs and several critical panic bugs that affect production systems. Rather than waiting indefinitely, this fork provides:
+
+| Issue | Original | This Fork |
+|-------|----------|-----------|
+| TZ= parsing panics | Crashes on malformed input | Fixed (#554, #555) |
+| Chain decorators | `Entry.Run()` bypasses chains | Properly invokes wrappers (#551) |
+| DST spring-forward | Jobs silently skipped | Runs immediately (ISC behavior, #541) |
+| Go version | Stuck on 1.13 | Go 1.25+ with modern toolchain |
 
 ## Installation
 
@@ -10,26 +24,17 @@ A maintained fork of [robfig/cron](https://github.com/robfig/cron) with bug fixe
 go get github.com/netresearch/go-cron
 ```
 
-Import it in your program as:
 ```go
-import "github.com/netresearch/go-cron"
+import cron "github.com/netresearch/go-cron"
 ```
 
-Requires Go 1.25 or later.
-
-## Why This Fork?
-
-The original robfig/cron has been unmaintained since 2020, with 50+ open PRs and several
-critical panic bugs. This fork addresses:
-
-- **Panic fixes**: Fixed TZ= parsing panics (issues #554, #555)
-- **Chain behavior**: Added `Entry.Run()` method to properly invoke chain decorators (issue #551)
-- **DST handling**: Jobs scheduled during DST "spring forward" now run immediately (ISC cron behavior, PR #541)
-- **Go 1.25**: Updated to latest Go version with modern toolchain
+> [!NOTE]
+> Requires Go 1.25 or later.
 
 ## Migrating from robfig/cron
 
-Simply update your import path:
+Drop-in replacement — just change the import path:
+
 ```go
 // Before
 import "github.com/robfig/cron/v3"
@@ -38,76 +43,154 @@ import "github.com/robfig/cron/v3"
 import cron "github.com/netresearch/go-cron"
 ```
 
-The API is fully compatible with robfig/cron v3.
+The API is 100% compatible with robfig/cron v3.
 
-## Documentation
-
-Refer to the [package documentation](https://pkg.go.dev/github.com/netresearch/go-cron).
-
-## Features (inherited from robfig/cron v3)
-
-This fork maintains full compatibility with robfig/cron v3 while adding fixes.
-
-Original v3 features:
-
-- Standard cron spec parsing by default (first field is "minute"), with an easy
-  way to opt into the seconds field (quartz-compatible). Although, note that the
-  year field (optional in Quartz) is not supported.
-
-- Extensible, key/value logging via an interface that complies with
-  the https://github.com/go-logr/logr project.
-
-- The new Chain & JobWrapper types allow you to install "interceptors" to add
-  cross-cutting behavior like the following:
-  - Recover any panics from jobs
-  - Delay a job's execution if the previous run hasn't completed yet
-  - Skip a job's execution if the previous run hasn't completed yet
-  - Log each job's invocations
-  - Notification when jobs are completed
-
-## Usage Examples
+## Quick Start
 
 ```go
-// Seconds field, required
+package main
+
+import (
+    "fmt"
+    "time"
+
+    cron "github.com/netresearch/go-cron"
+)
+
+func main() {
+    c := cron.New()
+
+    // Run every minute
+    c.AddFunc("* * * * *", func() {
+        fmt.Println("Every minute:", time.Now())
+    })
+
+    // Run at specific times
+    c.AddFunc("30 3-6,20-23 * * *", func() {
+        fmt.Println("In the range 3-6am, 8-11pm")
+    })
+
+    // With timezone
+    c.AddFunc("CRON_TZ=Asia/Tokyo 30 04 * * *", func() {
+        fmt.Println("4:30 AM Tokyo time")
+    })
+
+    c.Start()
+
+    // Keep running...
+    select {}
+}
+```
+
+## Cron Expression Format
+
+Standard 5-field cron format (minute-first):
+
+| Field | Required | Values | Special Characters |
+|-------|----------|--------|-------------------|
+| Minutes | Yes | 0-59 | `* / , -` |
+| Hours | Yes | 0-23 | `* / , -` |
+| Day of month | Yes | 1-31 | `* / , - ?` |
+| Month | Yes | 1-12 or JAN-DEC | `* / , -` |
+| Day of week | Yes | 0-6 or SUN-SAT | `* / , - ?` |
+
+### Predefined Schedules
+
+| Entry | Description | Equivalent |
+|-------|-------------|------------|
+| `@yearly` | Once a year, midnight, Jan 1 | `0 0 1 1 *` |
+| `@monthly` | Once a month, midnight, first day | `0 0 1 * *` |
+| `@weekly` | Once a week, midnight Sunday | `0 0 * * 0` |
+| `@daily` | Once a day, midnight | `0 0 * * *` |
+| `@hourly` | Once an hour, beginning of hour | `0 * * * *` |
+| `@every <duration>` | Every interval | e.g., `@every 1h30m` |
+
+### Seconds Field (Optional)
+
+Enable Quartz-compatible seconds field:
+
+```go
+// Seconds field required
 cron.New(cron.WithSeconds())
 
-// Seconds field, optional
+// Seconds field optional
 cron.New(cron.WithParser(cron.NewParser(
-	cron.SecondOptional | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor,
+    cron.SecondOptional | cron.Minute | cron.Hour |
+    cron.Dom | cron.Month | cron.Dow | cron.Descriptor,
 )))
-
-// With panic recovery
-cron.New(cron.WithChain(
-  cron.Recover(logger),
-))
-
-// With verbose logging
-cron.New(
-  cron.WithLogger(cron.VerbosePrintfLogger(logger)))
 ```
 
 ## Timezone Support
 
-CRON_TZ is the recommended way to specify the timezone of a single schedule:
+Specify timezone per-schedule using `CRON_TZ=` prefix:
+
+```go
+// Runs at 6am New York time
+c.AddFunc("CRON_TZ=America/New_York 0 6 * * *", myFunc)
+
+// Legacy TZ= prefix also supported
+c.AddFunc("TZ=Europe/Berlin 0 9 * * *", myFunc)
 ```
-CRON_TZ=America/New_York 0 0 * * *
+
+Or set default timezone for all jobs:
+
+```go
+nyc, _ := time.LoadLocation("America/New_York")
+c := cron.New(cron.WithLocation(nyc))
 ```
 
-The legacy "TZ=" prefix is also supported.
+> [!WARNING]
+> Jobs scheduled during DST "spring forward" transitions (when clocks skip ahead) will run immediately rather than being silently skipped.
 
-### Background - Cron spec format
+## Job Wrappers (Middleware)
 
-There are two cron spec formats in common usage:
+Add cross-cutting behavior using chains:
 
-- The "standard" cron format, described on [the Cron wikipedia page] and used by
-  the cron Linux system utility.
+```go
+// Apply to all jobs
+c := cron.New(cron.WithChain(
+    cron.Recover(logger),              // Recover panics
+    cron.SkipIfStillRunning(logger),   // Skip if previous still running
+))
 
-- The cron format used by [the Quartz Scheduler], commonly used for scheduled
-  jobs in Java software
+// Apply to specific job
+job := cron.NewChain(
+    cron.DelayIfStillRunning(logger),  // Queue if previous still running
+).Then(myJob)
+```
 
-[the Cron wikipedia page]: https://en.wikipedia.org/wiki/Cron
-[the Quartz Scheduler]: http://www.quartz-scheduler.org/documentation/quartz-2.3.0/tutorials/tutorial-lesson-06.html
+Available wrappers:
+- **Recover** — Catch panics, log, and continue
+- **SkipIfStillRunning** — Skip execution if previous run hasn't finished
+- **DelayIfStillRunning** — Queue execution until previous run finishes
 
-The original version of this package included an optional "seconds" field, which
-made it incompatible with both of these formats. Now, the "standard" format is
-the default format accepted, and the Quartz format is opt-in.
+## Logging
+
+Compatible with [go-logr/logr](https://github.com/go-logr/logr):
+
+```go
+// Verbose logging
+c := cron.New(cron.WithLogger(
+    cron.VerbosePrintfLogger(log.New(os.Stdout, "cron: ", log.LstdFlags)),
+))
+```
+
+## API Reference
+
+Full documentation: [pkg.go.dev/github.com/netresearch/go-cron](https://pkg.go.dev/github.com/netresearch/go-cron)
+
+## Contributing
+
+Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting PRs.
+
+## Security
+
+For security issues, please see [SECURITY.md](SECURITY.md).
+
+## License
+
+MIT License — see [LICENSE](LICENSE) for details.
+
+---
+
+*This fork is maintained by [Netresearch](https://github.com/netresearch). The original cron library was created by [Rob Figueiredo](https://github.com/robfig).*

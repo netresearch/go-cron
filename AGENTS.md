@@ -32,14 +32,16 @@ Maintained fork of robfig/cron - a cron spec parser and job scheduler for Go.
 ## Pre-commit checks
 
 ```bash
-# Required (CI enforced)
-go build ./...                              # Typecheck
-golangci-lint run                           # Lint (gocyclo, govet, staticcheck, etc.)
-go test -race ./...                         # Tests with race detection
+# Quick verification (recommended before commit)
+make verify                    # Runs: tidy, lint, test-race
+
+# Individual targets
+make build                     # Typecheck
+make lint                      # golangci-lint (gocyclo, govet, staticcheck, etc.)
+make test-race                 # Tests with race detection
+make test-coverage             # Tests with coverage report
 
 # Coverage threshold: 70% (CI enforced)
-go test -coverprofile=coverage.out ./...
-go tool cover -func=coverage.out | tail -1
 ```
 
 ## Code style
@@ -83,13 +85,12 @@ import (
 
 ## PR/commit checklist
 
-- [ ] `go mod tidy` - go.mod is clean
-- [ ] `go build ./...` - Compiles without errors
-- [ ] `golangci-lint run` - No linter warnings
-- [ ] `go test -race ./...` - All tests pass
-- [ ] Coverage >= 70% for new code
+- [ ] `make verify` passes (tidy, lint, test-race)
+- [ ] Coverage >= 70% for new code (`make test-coverage`)
 - [ ] No breaking changes to public API (or documented in PR)
 - [ ] Test edge cases: DST transitions, timezone handling, panic recovery
+- [ ] Conventional commit message format used
+- [ ] PR template filled out completely
 
 ## Good vs bad examples
 
@@ -131,10 +132,12 @@ func TestSchedule(t *testing.T) {
 
 ## When stuck
 
-1. **Cron expression syntax**: See `doc.go` for comprehensive documentation
-2. **DST behavior**: Check `spec.go` and related tests for edge cases
-3. **Original design**: https://github.com/robfig/cron (issues/PRs reference context)
-4. **Go scheduling**: https://pkg.go.dev/time#Timer
+1. **Contributing**: See `CONTRIBUTING.md` for development workflow
+2. **Cron expression syntax**: See `doc.go` for comprehensive documentation
+3. **DST behavior**: Check `spec.go` and related tests for edge cases
+4. **Original design**: https://github.com/robfig/cron (issues/PRs reference context)
+5. **Go scheduling**: https://pkg.go.dev/time#Timer
+6. **Security issues**: See `SECURITY.md` for reporting vulnerabilities
 
 ## Index of scoped AGENTS.md
 

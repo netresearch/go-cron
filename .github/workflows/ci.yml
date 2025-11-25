@@ -38,8 +38,12 @@ jobs:
           go mod tidy
           git diff --exit-code -- go.mod go.sum
 
+      - name: Install gotestsum
+        run: go install gotest.tools/gotestsum@latest
+
       - name: Unit tests
-        run: go test -race -covermode=atomic -coverprofile=coverage.out ./...
+        run: |
+          gotestsum --format github-actions -- -race -covermode=atomic -coverprofile=coverage.out ./...
 
       - name: Coverage summary
         run: go tool cover -func=coverage.out | tail -n 1 || true
