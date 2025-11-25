@@ -74,6 +74,17 @@ type Entry struct {
 // Valid returns true if this is not the zero entry.
 func (e Entry) Valid() bool { return e.ID != 0 }
 
+// Run executes the entry's job through the configured chain wrappers.
+// This ensures that chain decorators like SkipIfStillRunning, DelayIfStillRunning,
+// and Recover are properly applied. Use this method instead of Entry.Job.Run()
+// when you need chain behavior to be respected.
+// Fix for issue #551: Provides a proper way to run jobs with chain decorators.
+func (e Entry) Run() {
+	if e.WrappedJob != nil {
+		e.WrappedJob.Run()
+	}
+}
+
 // byTime is a wrapper for sorting the entry array by time
 // (with zero time at the end).
 type byTime []*Entry
@@ -97,17 +108,17 @@ func (s byTime) Less(i, j int) bool {
 //
 // Available Settings
 //
-//   Time Zone
-//     Description: The time zone in which schedules are interpreted
-//     Default:     time.Local
+//	Time Zone
+//	  Description: The time zone in which schedules are interpreted
+//	  Default:     time.Local
 //
-//   Parser
-//     Description: Parser converts cron spec strings into cron.Schedules.
-//     Default:     Accepts this spec: https://en.wikipedia.org/wiki/Cron
+//	Parser
+//	  Description: Parser converts cron spec strings into cron.Schedules.
+//	  Default:     Accepts this spec: https://en.wikipedia.org/wiki/Cron
 //
-//   Chain
-//     Description: Wrap submitted jobs to customize behavior.
-//     Default:     A chain that recovers panics and logs them to stderr.
+//	Chain
+//	  Description: Wrap submitted jobs to customize behavior.
+//	  Default:     A chain that recovers panics and logs them to stderr.
 //
 // See "cron.With*" to modify the default behavior.
 func New(opts ...Option) *Cron {
@@ -337,7 +348,7 @@ func (c *Cron) Stop() context.Context {
 
 // entrySnapshot returns a copy of the current cron entry list.
 func (c *Cron) entrySnapshot() []Entry {
-	var entries = make([]Entry, len(c.entries))
+	entries := make([]Entry, len(c.entries))
 	for i, e := range c.entries {
 		entries[i] = *e
 	}

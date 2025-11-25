@@ -140,7 +140,16 @@ WRAP:
 			added = true
 			t = time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), 0, 0, 0, loc)
 		}
+		prev := t
 		t = t.Add(1 * time.Hour)
+		// ISC cron behavior: If time was adjusted one hour forward due to DST,
+		// jobs that would have run in the skipped interval will run immediately.
+		// Fix for PR #541: Don't skip crons when time jumps forward due to DST.
+		if t.Hour()-prev.Hour() == 2 {
+			if 1<<uint(t.Hour()-1)&s.Hour > 0 {
+				break
+			}
+		}
 
 		if t.Hour() == 0 {
 			goto WRAP
@@ -178,8 +187,8 @@ WRAP:
 // restrictions are satisfied by the given time.
 func dayMatches(s *SpecSchedule, t time.Time) bool {
 	var (
-		domMatch bool = 1<<uint(t.Day())&s.Dom > 0
-		dowMatch bool = 1<<uint(t.Weekday())&s.Dow > 0
+		domMatch = 1<<uint(t.Day())&s.Dom > 0
+		dowMatch = 1<<uint(t.Weekday())&s.Dow > 0
 	)
 	if s.Dom&starBit > 0 || s.Dow&starBit > 0 {
 		return domMatch && dowMatch

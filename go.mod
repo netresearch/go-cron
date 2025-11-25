@@ -1,3 +1,5 @@
-module github.com/robfig/cron/v3
+module github.com/netresearch/go-cron
 
-go 1.12
+go 1.25
+
+toolchain go1.25.0

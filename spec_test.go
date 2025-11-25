@@ -64,7 +64,7 @@ func TestActivation(t *testing.T) {
 		}
 		actual := sched.Next(getTime(test.time).Add(-1 * time.Second))
 		expected := getTime(test.time)
-		if test.expected && expected != actual || !test.expected && expected == actual {
+		if test.expected && expected != actual || !test.expected && expected.Equal(actual) {
 			t.Errorf("Fail evaluating %s on %s: (expected) %s != %s (actual)",
 				test.spec, test.time, expected, actual)
 		}
@@ -111,7 +111,8 @@ func TestNext(t *testing.T) {
 		{"Mon Jul 9 23:35 2012", "0 0 0 29 Feb ?", "Mon Feb 29 00:00 2016"},
 
 		// Daylight savings time 2am EST (-5) -> 3am EDT (-4)
-		{"2012-03-11T00:00:00-0500", "TZ=America/New_York 0 30 2 11 Mar ?", "2013-03-11T02:30:00-0400"},
+		// ISC cron behavior: Jobs in skipped DST hour run immediately at 3am
+		{"2012-03-11T00:00:00-0500", "TZ=America/New_York 0 30 2 11 Mar ?", "2012-03-11T03:30:00-0400"},
 
 		// hourly job
 		{"2012-03-11T00:00:00-0500", "TZ=America/New_York 0 0 * * * ?", "2012-03-11T01:00:00-0500"},
@@ -129,8 +130,8 @@ func TestNext(t *testing.T) {
 		{"2012-03-11T00:00:00-0500", "TZ=America/New_York 0 0 1 * * ?", "2012-03-11T01:00:00-0500"},
 		{"2012-03-11T01:00:00-0500", "TZ=America/New_York 0 0 1 * * ?", "2012-03-12T01:00:00-0400"},
 
-		// 2am nightly job (skipped)
-		{"2012-03-11T00:00:00-0500", "TZ=America/New_York 0 0 2 * * ?", "2012-03-12T02:00:00-0400"},
+		// 2am nightly job - ISC cron behavior: runs at 3am when DST skips 2am
+		{"2012-03-11T00:00:00-0500", "TZ=America/New_York 0 0 2 * * ?", "2012-03-11T03:00:00-0400"},
 
 		// Daylight savings time 2am EDT (-4) => 1am EST (-5)
 		{"2012-11-04T00:00:00-0400", "TZ=America/New_York 0 30 2 04 Nov ?", "2012-11-04T02:30:00-0500"},
@@ -219,7 +220,7 @@ func getTime(value string) time.Time {
 		return time.Time{}
 	}
 
-	var location = time.Local
+	location := time.Local
 	if strings.HasPrefix(value, "TZ=") {
 		parts := strings.Fields(value)
 		loc, err := time.LoadLocation(parts[0][len("TZ="):])
@@ -230,7 +231,7 @@ func getTime(value string) time.Time {
 		value = parts[1]
 	}
 
-	var layouts = []string{
+	layouts := []string{
 		"Mon Jan 2 15:04 2006",
 		"Mon Jan 2 15:04:05 2006",
 	}

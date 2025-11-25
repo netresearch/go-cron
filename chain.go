@@ -24,9 +24,12 @@ func NewChain(c ...JobWrapper) Chain {
 // Then decorates the given job with all JobWrappers in the chain.
 //
 // This:
-//     NewChain(m1, m2, m3).Then(job)
+//
+//	NewChain(m1, m2, m3).Then(job)
+//
 // is equivalent to:
-//     m1(m2(m3(job)))
+//
+//	m1(m2(m3(job)))
 func (c Chain) Then(j Job) Job {
 	for i := range c.wrappers {
 		j = c.wrappers[len(c.wrappers)-i-1](j)
@@ -77,7 +80,7 @@ func DelayIfStillRunning(logger Logger) JobWrapper {
 // still running. It logs skips to the given logger at Info level.
 func SkipIfStillRunning(logger Logger) JobWrapper {
 	return func(j Job) Job {
-		var ch = make(chan struct{}, 1)
+		ch := make(chan struct{}, 1)
 		ch <- struct{}{}
 		return FuncJob(func() {
 			select {

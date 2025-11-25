@@ -1,0 +1,55 @@
+version: "2"
+run:
+  tests: true
+linters:
+  default: none
+  enable:
+    - gocyclo
+    - govet
+    - ineffassign
+    - misspell
+    - staticcheck
+    - unused
+  settings:
+    gocyclo:
+      min-complexity: 25
+    misspell:
+      locale: US
+    staticcheck:
+      checks:
+        - all
+        - -S1000  # Allow single-case select for readability
+        - -S1037  # Allow select with timeout channel for test patterns
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - gocyclo
+        path: _test\.go
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  enable:
+    - gci
+    - gofmt
+    - gofumpt
+    - goimports
+  settings:
+    gci:
+      sections:
+        - standard
+        - default
+        - prefix(github.com/netresearch/go-cron)
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

@@ -119,7 +119,7 @@ func TestBits(t *testing.T) {
 }
 
 func TestParseScheduleErrors(t *testing.T) {
-	var tests = []struct{ expr, err string }{
+	tests := []struct{ expr, err string }{
 		{"* 5 j * * *", "failed to parse int from"},
 		{"@every Xm", "failed to parse duration"},
 		{"@unrecognized", "unrecognized descriptor"},
@@ -379,5 +379,88 @@ func annual(loc *time.Location) *SpecSchedule {
 		Month:    1 << months.min,
 		Dow:      all(dow),
 		Location: loc,
+	}
+}
+
+// TestTimezoneParsingPanic tests fix for issues #554 and #555
+// These bugs caused panics when parsing malformed timezone specs
+func TestTimezoneParsingPanic(t *testing.T) {
+	// Issue #554: TZ= without space causes slice bounds panic
+	// Previously: strings.Index(spec, " ") returns -1, then spec[eq+1 : i] panics
+	panicSpecs := []struct {
+		name string
+		spec string
+		err  string
+	}{
+		{
+			name: "TZ_without_space",
+			spec: "TZ=0",
+			err:  "missing fields after timezone",
+		},
+		{
+			name: "TZ_equals_only",
+			spec: "TZ=",
+			err:  "missing fields after timezone",
+		},
+		{
+			name: "CRON_TZ_without_space",
+			spec: "CRON_TZ=UTC",
+			err:  "missing fields after timezone",
+		},
+		{
+			name: "TZ_with_only_spaces",
+			spec: "TZ=UTC   ",
+			err:  "missing fields after timezone",
+		},
+		{
+			name: "TZ_valid_timezone_no_fields",
+			spec: "TZ=America/New_York",
+			err:  "missing fields after timezone",
+		},
+	}
+
+	for _, tc := range panicSpecs {
+		t.Run(tc.name, func(t *testing.T) {
+			// This should NOT panic - it should return an error
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("ParseStandard(%q) panicked: %v", tc.spec, r)
+				}
+			}()
+
+			_, err := ParseStandard(tc.spec)
+			if err == nil {
+				t.Errorf("ParseStandard(%q) expected error, got nil", tc.spec)
+				return
+			}
+			if !strings.Contains(err.Error(), tc.err) {
+				t.Errorf("ParseStandard(%q) error = %q, want error containing %q", tc.spec, err.Error(), tc.err)
+			}
+		})
+	}
+}
+
+// TestTimezoneValidParsing ensures valid timezone specs still work
+func TestTimezoneValidParsing(t *testing.T) {
+	validSpecs := []string{
+		"TZ=UTC * * * * *",
+		"CRON_TZ=UTC * * * * *",
+		"TZ=America/New_York 0 5 * * *",
+		"CRON_TZ=Asia/Tokyo 30 4 * * *",
+	}
+
+	for _, spec := range validSpecs {
+		t.Run(spec, func(t *testing.T) {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("ParseStandard(%q) panicked: %v", spec, r)
+				}
+			}()
+
+			_, err := ParseStandard(spec)
+			if err != nil {
+				t.Errorf("ParseStandard(%q) unexpected error: %v", spec, err)
+			}
+		})
 	}
 }
