@@ -86,7 +86,7 @@ jobs:
         with:
           version: v2.6.1
           install-mode: goinstall
-          args: --timeout=5m
+          args: --timeout=5m --allow-parallel-runners
           only-new-issues: false
 
   vulncheck:
