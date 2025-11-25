@@ -442,6 +442,9 @@ func parseDescriptor(descriptor string, loc *time.Location) (Schedule, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse duration %s: %s", descriptor, err)
 		}
+		if duration < time.Second {
+			return nil, fmt.Errorf("@every duration must be at least 1 second: %s", descriptor)
+		}
 		return Every(duration), nil
 	}
 
