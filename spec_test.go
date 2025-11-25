@@ -64,7 +64,7 @@ func TestActivation(t *testing.T) {
 		}
 		actual := sched.Next(getTime(test.time).Add(-1 * time.Second))
 		expected := getTime(test.time)
-		if test.expected && expected != actual || !test.expected && expected == actual {
+		if test.expected && expected != actual || !test.expected && expected.Equal(actual) {
 			t.Errorf("Fail evaluating %s on %s: (expected) %s != %s (actual)",
 				test.spec, test.time, expected, actual)
 		}
@@ -220,7 +220,7 @@ func getTime(value string) time.Time {
 		return time.Time{}
 	}
 
-	var location = time.Local
+	location := time.Local
 	if strings.HasPrefix(value, "TZ=") {
 		parts := strings.Fields(value)
 		loc, err := time.LoadLocation(parts[0][len("TZ="):])
@@ -231,7 +231,7 @@ func getTime(value string) time.Time {
 		value = parts[1]
 	}
 
-	var layouts = []string{
+	layouts := []string{
 		"Mon Jan 2 15:04 2006",
 		"Mon Jan 2 15:04:05 2006",
 	}
