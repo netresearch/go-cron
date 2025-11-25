@@ -276,6 +276,16 @@ func (c *Cron) run() {
 				now = now.In(c.location)
 				c.logger.Info("wake", "now", now)
 
+				// Handle system time moving backwards (NTP correction, VM snapshot restore).
+				// If Prev is in the future relative to now, time moved backwards.
+				for _, e := range c.entries {
+					if !e.Prev.IsZero() && e.Prev.After(now) {
+						e.Next = e.Schedule.Next(now)
+						c.logger.Info("reschedule", "reason", "time moved backwards",
+							"entry", e.ID, "prev", e.Prev, "now", now, "next", e.Next)
+					}
+				}
+
 				// Run every entry whose next time was less than now
 				for _, e := range c.entries {
 					if e.Next.After(now) || e.Next.IsZero() {
@@ -356,7 +366,9 @@ func (c *Cron) entrySnapshot() []Entry {
 }
 
 func (c *Cron) removeEntry(id EntryID) {
-	var entries []*Entry
+	// Pre-allocate to avoid reallocations during append.
+	// Use len(c.entries) as capacity to safely handle all edge cases.
+	entries := make([]*Entry, 0, len(c.entries))
 	for _, e := range c.entries {
 		if e.ID != id {
 			entries = append(entries, e)
