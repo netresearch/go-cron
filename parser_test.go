@@ -25,7 +25,7 @@ func TestRange(t *testing.T) {
 		{"5-6", 0, 7, 1<<5 | 1<<6, ""},
 		{"5-7", 0, 7, 1<<5 | 1<<6 | 1<<7, ""},
 
-		{"5-6/2", 0, 7, 1 << 5, ""},
+		{"5-6/2", 0, 7, zero, "step (2) must be less than range size (2)"},
 		{"5-7/2", 0, 7, 1<<5 | 1<<7, ""},
 		{"5-7/1", 0, 7, 1<<5 | 1<<6 | 1<<7, ""},
 
@@ -41,6 +41,18 @@ func TestRange(t *testing.T) {
 		{"6", 3, 5, zero, "above maximum"},
 		{"5-3", 3, 5, zero, "beyond end of range"},
 		{"*/0", 0, 0, zero, "should be a positive number"},
+
+		// Step validation: step must be less than range size
+		{"0-5/10", 0, 59, zero, "step (10) must be less than range size (6)"},
+		{"0-5/6", 0, 59, zero, "step (6) must be less than range size (6)"},
+		{"0-2/5", 0, 59, zero, "step (5) must be less than range size (3)"},
+		{"*/60", 0, 59, zero, "step (60) must be less than range size (60)"},
+		{"*/100", 0, 59, zero, "step (100) must be less than range size (60)"},
+		// Valid step cases (step < rangeSize)
+		{"0-10/5", 0, 59, 1<<0 | 1<<5 | 1<<10, ""},
+		{"*/30", 0, 59, 1<<0 | 1<<30, ""},
+		{"0-59/30", 0, 59, 1<<0 | 1<<30, ""},
+		{"0-5/5", 0, 59, 1<<0 | 1<<5, ""},
 	}
 
 	for _, c := range ranges {
