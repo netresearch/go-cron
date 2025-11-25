@@ -74,6 +74,17 @@ type Entry struct {
 // Valid returns true if this is not the zero entry.
 func (e Entry) Valid() bool { return e.ID != 0 }
 
+// Run executes the entry's job through the configured chain wrappers.
+// This ensures that chain decorators like SkipIfStillRunning, DelayIfStillRunning,
+// and Recover are properly applied. Use this method instead of Entry.Job.Run()
+// when you need chain behavior to be respected.
+// Fix for issue #551: Provides a proper way to run jobs with chain decorators.
+func (e Entry) Run() {
+	if e.WrappedJob != nil {
+		e.WrappedJob.Run()
+	}
+}
+
 // byTime is a wrapper for sorting the entry array by time
 // (with zero time at the end).
 type byTime []*Entry

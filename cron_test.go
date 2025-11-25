@@ -700,3 +700,83 @@ func stop(cron *Cron) chan bool {
 func newWithSeconds() *Cron {
 	return New(WithParser(secondParser), WithChain())
 }
+
+// TestEntryRunWithChain tests fix for issue #551
+// Entry.Run() should execute through the chain wrappers
+func TestEntryRunWithChain(t *testing.T) {
+	var callCount int64
+	var mu sync.Mutex
+
+	// Create cron with SkipIfStillRunning to test chain behavior
+	cron := New(
+		WithParser(secondParser),
+		WithChain(SkipIfStillRunning(DiscardLogger)),
+	)
+
+	// Add a job that blocks and counts calls
+	_, err := cron.AddFunc("* * * * * *", func() {
+		mu.Lock()
+		atomic.AddInt64(&callCount, 1)
+		mu.Unlock()
+		time.Sleep(100 * time.Millisecond)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	entries := cron.Entries()
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+
+	entry := entries[0]
+
+	// Test 1: Entry.Run() uses WrappedJob (respects chain)
+	// Start the job via Entry.Run()
+	go entry.Run()
+	time.Sleep(10 * time.Millisecond)
+
+	// Try to run again while first is still running
+	// With SkipIfStillRunning, this should be skipped
+	entry.Run()
+
+	// Wait for first job to complete
+	time.Sleep(150 * time.Millisecond)
+
+	count := atomic.LoadInt64(&callCount)
+	if count != 1 {
+		t.Errorf("Entry.Run() with SkipIfStillRunning: expected 1 call, got %d (chain not respected)", count)
+	}
+
+	// Test 2: Entry.Job.Run() bypasses chain (documenting existing behavior)
+	atomic.StoreInt64(&callCount, 0)
+
+	// Start job via Entry.Job.Run() (bypasses chain)
+	go entry.Job.Run()
+	time.Sleep(10 * time.Millisecond)
+
+	// Run again - this should NOT be skipped because chain is bypassed
+	entry.Job.Run()
+
+	// Wait for both to complete
+	time.Sleep(150 * time.Millisecond)
+
+	count = atomic.LoadInt64(&callCount)
+	if count != 2 {
+		t.Errorf("Entry.Job.Run() (bypass chain): expected 2 calls, got %d", count)
+	}
+}
+
+// TestEntryRunNilWrappedJob tests Entry.Run() with nil WrappedJob
+func TestEntryRunNilWrappedJob(t *testing.T) {
+	entry := Entry{}
+
+	// Should not panic when WrappedJob is nil
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("Entry.Run() panicked with nil WrappedJob: %v", r)
+		}
+	}()
+
+	entry.Run()
+}

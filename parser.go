@@ -96,10 +96,18 @@ func (p Parser) Parse(spec string) (Schedule, error) {
 		var err error
 		i := strings.Index(spec, " ")
 		eq := strings.Index(spec, "=")
+		// Fix for issue #554: Check if space exists after timezone
+		if i == -1 {
+			return nil, fmt.Errorf("missing fields after timezone in spec %q", spec)
+		}
 		if loc, err = time.LoadLocation(spec[eq+1 : i]); err != nil {
 			return nil, fmt.Errorf("provided bad location %s: %v", spec[eq+1:i], err)
 		}
 		spec = strings.TrimSpace(spec[i:])
+		// Fix for issue #555: Check if spec has content after timezone
+		if len(spec) == 0 {
+			return nil, fmt.Errorf("missing fields after timezone in spec")
+		}
 	}
 
 	// Handle named schedules (descriptors), if configured
