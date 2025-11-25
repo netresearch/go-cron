@@ -1,4 +1,4 @@
-module github.com/netresearch/cron
+module github.com/netresearch/go-cron
 
 go 1.25
 
