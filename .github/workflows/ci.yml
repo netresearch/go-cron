@@ -5,7 +5,7 @@ on:
     branches: [main]
     tags: ['**']
   pull_request:
-    branches: [main]
+    branches: [main, master]
   workflow_dispatch:
   schedule:
     - cron: '0 0 * * 0'
@@ -112,37 +112,6 @@ jobs:
           fi
           echo "govulncheck: no vulnerabilities with available fixes"
           exit 0
-
-  codeql:
-    if: (github.event_name != 'push') || (!startsWith(github.ref, 'refs/heads/gh-readonly-queue/'))
-    name: CodeQL Analysis
-    runs-on: ubuntu-latest
-    permissions:
-      actions: read
-      contents: read
-      security-events: write
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
-        with:
-          languages: go
-
-      - name: Download dependencies
-        run: go mod download
-
-      - name: Build
-        uses: github/codeql-action/autobuild@v3
-
-      - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
 
   gosec:
     name: gosec

@@ -1,0 +1,46 @@
+# Lefthook - Git hooks manager
+# https://github.com/evilmartians/lefthook
+#
+# Install: go install github.com/evilmartians/lefthook@latest
+# Setup:   lefthook install
+
+pre-commit:
+  parallel: true
+  jobs:
+    - name: tidy
+      run: go mod tidy && git diff --exit-code go.mod go.sum
+      stage_fixed: true
+
+    - name: fmt
+      glob: "*.go"
+      run: gofmt -l -w {staged_files} && git add {staged_files}
+      stage_fixed: true
+
+    - name: lint
+      glob: "*.go"
+      run: golangci-lint run --new-from-rev=HEAD~1 --fix
+      stage_fixed: true
+
+    - name: build
+      run: go build ./...
+
+pre-push:
+  parallel: true
+  jobs:
+    - name: test
+      run: go test -race -short ./...
+
+    - name: lint-full
+      run: golangci-lint run ./...
+
+commit-msg:
+  jobs:
+    - name: conventional-commit
+      run: |
+        MSG=$(cat {1})
+        if ! echo "$MSG" | grep -qE "^(feat|fix|docs|style|refactor|test|chore|perf|ci|build|revert)(\(.+\))?: .{1,}$"; then
+          echo "Error: Commit message must follow Conventional Commits format"
+          echo "Format: type(scope): description"
+          echo "Types: feat, fix, docs, style, refactor, test, chore, perf, ci, build, revert"
+          exit 1
+        fi
