@@ -94,7 +94,8 @@ WRAP:
 
 	// Find the first applicable month.
 	// If it's this month, then do nothing.
-	for 1<<uint(t.Month())&s.Month == 0 { // #nosec G115 -- Month() returns 1-12, safe for uint
+	// #nosec G115 -- Month() returns 1-12, safe for uint
+	for 1<<uint(t.Month())&s.Month == 0 {
 		// If we have to add a month, reset the other parts to 0.
 		if !added {
 			added = true
@@ -135,7 +136,8 @@ WRAP:
 		}
 	}
 
-	for 1<<uint(t.Hour())&s.Hour == 0 { // #nosec G115 -- Hour() returns 0-23, safe for uint
+	// #nosec G115 -- Hour() returns 0-23, safe for uint
+	for 1<<uint(t.Hour())&s.Hour == 0 {
 		if !added {
 			added = true
 			t = time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), 0, 0, 0, loc)
@@ -146,7 +148,8 @@ WRAP:
 		// jobs that would have run in the skipped interval will run immediately.
 		// Fix for PR #541: Don't skip crons when time jumps forward due to DST.
 		if t.Hour()-prev.Hour() == 2 {
-			if 1<<uint(t.Hour()-1)&s.Hour > 0 { // #nosec G115 -- Hour()-1 bounded 1-22 in DST context
+			// #nosec G115 -- Hour()-1 bounded 1-22 in DST context
+			if 1<<uint(t.Hour()-1)&s.Hour > 0 {
 				break
 			}
 		}
@@ -156,7 +159,8 @@ WRAP:
 		}
 	}
 
-	for 1<<uint(t.Minute())&s.Minute == 0 { // #nosec G115 -- Minute() returns 0-59, safe for uint
+	// #nosec G115 -- Minute() returns 0-59, safe for uint
+	for 1<<uint(t.Minute())&s.Minute == 0 {
 		if !added {
 			added = true
 			t = t.Truncate(time.Minute)
@@ -168,7 +172,8 @@ WRAP:
 		}
 	}
 
-	for 1<<uint(t.Second())&s.Second == 0 { // #nosec G115 -- Second() returns 0-59, safe for uint
+	// #nosec G115 -- Second() returns 0-59, safe for uint
+	for 1<<uint(t.Second())&s.Second == 0 {
 		if !added {
 			added = true
 			t = t.Truncate(time.Second)
@@ -186,9 +191,10 @@ WRAP:
 // dayMatches returns true if the schedule's day-of-week and day-of-month
 // restrictions are satisfied by the given time.
 func dayMatches(s *SpecSchedule, t time.Time) bool {
+	// #nosec G115 -- Day() returns 1-31, Weekday() returns 0-6, safe for uint
 	var (
-		domMatch = 1<<uint(t.Day())&s.Dom > 0     // #nosec G115 -- Day() returns 1-31, safe for uint
-		dowMatch = 1<<uint(t.Weekday())&s.Dow > 0 // #nosec G115 -- Weekday() returns 0-6, safe for uint
+		domMatch = 1<<uint(t.Day())&s.Dom > 0
+		dowMatch = 1<<uint(t.Weekday())&s.Dow > 0
 	)
 	if s.Dom&starBit > 0 || s.Dow&starBit > 0 {
 		return domMatch && dowMatch
