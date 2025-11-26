@@ -43,8 +43,9 @@ type Schedule interface {
 	Next(time.Time) time.Time
 }
 
-// EntryID identifies an entry within a Cron instance
-type EntryID int
+// EntryID identifies an entry within a Cron instance.
+// Using uint64 prevents overflow and ID collisions on all platforms.
+type EntryID uint64
 
 // Entry consists of a schedule and the func to execute on that schedule.
 type Entry struct {
