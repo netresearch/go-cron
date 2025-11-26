@@ -362,9 +362,10 @@ func validateTimezone(tz string) error {
 	// Valid timezone chars: letters, digits, slash, underscore, hyphen, plus, colon
 	// Examples: "America/New_York", "Etc/GMT+5", "UTC", "Europe/Isle_of_Man"
 	for i, r := range tz {
-		if !((r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') ||
+		isValid := (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') ||
 			(r >= '0' && r <= '9') || r == '/' || r == '_' ||
-			r == '-' || r == '+' || r == ':') {
+			r == '-' || r == '+' || r == ':'
+		if !isValid {
 			return fmt.Errorf("invalid character %q at position %d in timezone", r, i)
 		}
 	}
