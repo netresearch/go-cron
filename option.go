@@ -43,3 +43,22 @@ func WithLogger(logger Logger) Option {
 		c.logger = logger
 	}
 }
+
+// WithClock uses the provided clock function instead of time.Now.
+// This is useful for testing time-dependent behavior without waiting.
+//
+// Example usage:
+//
+//	// For testing, use a fixed time
+//	fixedTime := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+//	c := cron.New(cron.WithClock(func() time.Time { return fixedTime }))
+//
+//	// Or advance time manually
+//	var currentTime atomic.Value
+//	currentTime.Store(time.Now())
+//	c := cron.New(cron.WithClock(func() time.Time { return currentTime.Load().(time.Time) }))
+func WithClock(clock Clock) Option {
+	return func(c *Cron) {
+		c.clock = clock
+	}
+}

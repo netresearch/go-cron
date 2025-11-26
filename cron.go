@@ -7,6 +7,10 @@ import (
 	"time"
 )
 
+// Clock is a function that returns the current time.
+// It can be overridden using WithClock for testing purposes.
+type Clock func() time.Time
+
 // Cron keeps track of any number of entries, invoking the associated func as
 // specified by the schedule. It may be started, stopped, and the entries may
 // be inspected while running.
@@ -24,6 +28,7 @@ type Cron struct {
 	parser    ScheduleParser
 	nextID    EntryID
 	jobWaiter sync.WaitGroup
+	clock     Clock
 }
 
 // ScheduleParser is an interface for schedule spec parsers that return a Schedule
@@ -335,8 +340,12 @@ func (c *Cron) startJob(j Job) {
 	}()
 }
 
-// now returns current time in c location
+// now returns current time in c location.
+// If a custom clock is configured via WithClock, it will be used instead of time.Now.
 func (c *Cron) now() time.Time {
+	if c.clock != nil {
+		return c.clock().In(c.location)
+	}
 	return time.Now().In(c.location)
 }
 

@@ -40,3 +40,54 @@ func TestWithVerboseLogger(t *testing.T) {
 		t.Error("expected to see some actions, got:", out)
 	}
 }
+
+func TestWithClock(t *testing.T) {
+	fixedTime := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
+	c := New(WithClock(func() time.Time { return fixedTime }))
+	if c.clock == nil {
+		t.Error("expected clock to be set")
+	}
+
+	// Verify now() uses the custom clock
+	now := c.now()
+	if !now.Equal(fixedTime) {
+		t.Errorf("expected %v, got %v", fixedTime, now)
+	}
+}
+
+func TestWithClockAndLocation(t *testing.T) {
+	fixedTime := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
+	loc, _ := time.LoadLocation("America/New_York")
+
+	c := New(
+		WithClock(func() time.Time { return fixedTime }),
+		WithLocation(loc),
+	)
+
+	// Verify now() converts to the specified location
+	now := c.now()
+	if now.Location() != loc {
+		t.Errorf("expected location %v, got %v", loc, now.Location())
+	}
+
+	// The time should be the same instant, just in a different location
+	if !now.Equal(fixedTime) {
+		t.Errorf("times should represent the same instant: %v vs %v", now, fixedTime)
+	}
+}
+
+func TestWithClockNilFallback(t *testing.T) {
+	// When no clock is set, now() should use time.Now()
+	c := New()
+	if c.clock != nil {
+		t.Error("expected clock to be nil by default")
+	}
+
+	before := time.Now()
+	now := c.now()
+	after := time.Now()
+
+	if now.Before(before) || now.After(after) {
+		t.Errorf("now() should return current time, got %v (expected between %v and %v)", now, before, after)
+	}
+}
