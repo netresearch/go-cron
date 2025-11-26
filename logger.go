@@ -3,6 +3,7 @@ package cron
 import (
 	"io"
 	"log"
+	"log/slog"
 	"os"
 	"strings"
 	"time"
@@ -83,4 +84,27 @@ func formatTimes(keysAndValues []interface{}) []interface{} {
 		formattedArgs = append(formattedArgs, arg)
 	}
 	return formattedArgs
+}
+
+// SlogLogger adapts log/slog to the Logger interface.
+// This allows integration with Go 1.21+ structured logging.
+type SlogLogger struct {
+	logger *slog.Logger
+}
+
+// NewSlogLogger creates a Logger that writes to the given slog.Logger.
+// If l is nil, slog.Default() is used.
+func NewSlogLogger(l *slog.Logger) *SlogLogger {
+	if l == nil {
+		l = slog.Default()
+	}
+	return &SlogLogger{logger: l}
+}
+
+func (s *SlogLogger) Info(msg string, keysAndValues ...interface{}) {
+	s.logger.Info(msg, keysAndValues...)
+}
+
+func (s *SlogLogger) Error(err error, msg string, keysAndValues ...interface{}) {
+	s.logger.Error(msg, append([]interface{}{"error", err}, keysAndValues...)...)
 }
