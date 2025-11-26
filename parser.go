@@ -68,6 +68,17 @@ type Parser struct {
 //	specParser := NewParser(Dom | Month | DowOptional)
 //	sched, err := specParser.Parse("15 */3")
 func NewParser(options ParseOption) Parser {
+	// Count how many regular fields are configured
+	fields := 0
+	for _, place := range places {
+		if options&place > 0 {
+			fields++
+		}
+	}
+	if fields == 0 && options&Descriptor == 0 {
+		panic("at least one field or Descriptor must be configured")
+	}
+
 	optionals := 0
 	if options&DowOptional > 0 {
 		optionals++
