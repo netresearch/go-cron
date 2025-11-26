@@ -1,0 +1,79 @@
+package cron
+
+import (
+	"container/heap"
+)
+
+// entryHeap implements heap.Interface for scheduling entries by next execution time.
+// This provides O(log n) insertion and removal, and O(1) peek for the next entry.
+type entryHeap []*Entry
+
+// Len returns the number of entries in the heap.
+func (h entryHeap) Len() int { return len(h) }
+
+// Less reports whether entry i should fire before entry j.
+// Zero times are considered "infinite" and sort to the end.
+func (h entryHeap) Less(i, j int) bool {
+	// Zero times sort to the end (highest priority = earliest time)
+	if h[i].Next.IsZero() {
+		return false
+	}
+	if h[j].Next.IsZero() {
+		return true
+	}
+	return h[i].Next.Before(h[j].Next)
+}
+
+// Swap swaps elements i and j and updates their heap indices.
+func (h entryHeap) Swap(i, j int) {
+	h[i], h[j] = h[j], h[i]
+	h[i].heapIndex = i
+	h[j].heapIndex = j
+}
+
+// Push adds an entry to the heap.
+func (h *entryHeap) Push(x any) {
+	entry := x.(*Entry)
+	entry.heapIndex = len(*h)
+	*h = append(*h, entry)
+}
+
+// Pop removes and returns the minimum entry (earliest Next time).
+func (h *entryHeap) Pop() any {
+	old := *h
+	n := len(old)
+	entry := old[n-1]
+	old[n-1] = nil       // avoid memory leak
+	entry.heapIndex = -1 // mark as removed
+	*h = old[0 : n-1]
+	return entry
+}
+
+// Peek returns the entry with the earliest Next time without removing it.
+// Returns nil if the heap is empty.
+func (h entryHeap) Peek() *Entry {
+	if len(h) == 0 {
+		return nil
+	}
+	return h[0]
+}
+
+// Update re-establishes heap ordering after an entry's Next time has changed.
+// This is O(log n).
+func (h *entryHeap) Update(entry *Entry) {
+	if entry.heapIndex >= 0 && entry.heapIndex < len(*h) {
+		heap.Fix(h, entry.heapIndex)
+	}
+}
+
+// Remove removes a specific entry from the heap by ID.
+// Returns true if the entry was found and removed.
+func (h *entryHeap) Remove(id EntryID) bool {
+	for i, entry := range *h {
+		if entry.ID == id {
+			heap.Remove(h, i)
+			return true
+		}
+	}
+	return false
+}

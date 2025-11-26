@@ -13,10 +13,11 @@ features, bug fixes, and modernization improvements.
 ### Added
 - Comprehensive benchmark tests for parser, scheduler, and job operations
 - CI job to run benchmarks and upload results as artifacts
+- **WithClock option**: Inject custom time source for deterministic testing
+- **Min-heap scheduling**: O(log n) insertion/removal, O(1) next job lookup (upstream PR #423)
 
 ### Planned for v2
 - Context-aware Job interface with graceful shutdown support
-- Min-heap based scheduling for O(log n) operations
 
 ## [1.0.0] - 2025-01-XX
 
@@ -61,6 +62,8 @@ This fork includes all features from robfig/cron v3 plus:
 
 | Feature | robfig/cron | netresearch/go-cron |
 |---------|-------------|---------------------|
+| Scheduling algorithm | O(n) sort | O(log n) min-heap |
+| Custom time source | No | WithClock option |
 | Step range validation | No | Yes |
 | @every minimum duration | No | 1 second |
 | Timezone validation | No | Yes |
