@@ -99,8 +99,12 @@ func (p Parser) Parse(spec string) (Schedule, error) {
 		if i == -1 {
 			return nil, fmt.Errorf("missing fields after timezone in spec %q", spec)
 		}
-		if loc, err = time.LoadLocation(spec[eq+1 : i]); err != nil {
-			return nil, fmt.Errorf("provided bad location %s: %v", spec[eq+1:i], err)
+		tzName := spec[eq+1 : i]
+		if err = validateTimezone(tzName); err != nil {
+			return nil, fmt.Errorf("invalid timezone %q: %v", tzName, err)
+		}
+		if loc, err = time.LoadLocation(tzName); err != nil {
+			return nil, fmt.Errorf("provided bad location %s: %v", tzName, err)
 		}
 		spec = strings.TrimSpace(spec[i:])
 		// Fix for issue #555: Check if spec has content after timezone
@@ -343,6 +347,30 @@ func parseIntOrName(expr string, names map[string]uint) (uint, error) {
 }
 
 // mustParseInt parses the given expression as an int or returns an error.
+
+// validateTimezone checks if the timezone string is safe to pass to time.LoadLocation.
+// It enforces length limits and character restrictions to prevent DoS attacks via
+// crafted timezone strings.
+func validateTimezone(tz string) error {
+	const maxTimezoneLen = 64 // IANA timezone names are well under this limit
+	if len(tz) == 0 {
+		return fmt.Errorf("empty timezone string")
+	}
+	if len(tz) > maxTimezoneLen {
+		return fmt.Errorf("timezone string too long (max %d chars)", maxTimezoneLen)
+	}
+	// Valid timezone chars: letters, digits, slash, underscore, hyphen, plus, colon
+	// Examples: "America/New_York", "Etc/GMT+5", "UTC", "Europe/Isle_of_Man"
+	for i, r := range tz {
+		if !((r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') ||
+			(r >= '0' && r <= '9') || r == '/' || r == '_' ||
+			r == '-' || r == '+' || r == ':') {
+			return fmt.Errorf("invalid character %q at position %d in timezone", r, i)
+		}
+	}
+	return nil
+}
+
 func mustParseInt(expr string) (uint, error) {
 	num, err := strconv.Atoi(expr)
 	if err != nil {
