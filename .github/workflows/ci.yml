@@ -42,17 +42,19 @@ jobs:
         run: go install gotest.tools/gotestsum@latest
 
       - name: Unit tests
+        shell: bash
         run: |
-          gotestsum --format github-actions -- -race -covermode=atomic -coverprofile=${{ runner.temp }}/coverage.out ./...
+          gotestsum --format github-actions -- -race -covermode=atomic -coverprofile=coverage-${{ matrix.platform }}.out ./...
 
       - name: Coverage summary
-        run: go tool cover -func=${{ runner.temp }}/coverage.out | tail -n 1 || true
+        shell: bash
+        run: go tool cover -func=coverage-${{ matrix.platform }}.out | tail -n 1 || true
 
       - name: Enforce coverage threshold
         shell: bash
         run: |
           THRESHOLD=70.0
-          TOTAL=$(go tool cover -func=${{ runner.temp }}/coverage.out | awk '/^total:/ {gsub("%","",$3); print $3}')
+          TOTAL=$(go tool cover -func=coverage-${{ matrix.platform }}.out | awk '/^total:/ {gsub("%","",$3); print $3}')
           echo "Total coverage: ${TOTAL}% (threshold ${THRESHOLD}%)"
           awk -v t="$THRESHOLD" -v a="$TOTAL" 'BEGIN { if (a+0 < t+0) { exit 1 } }'
 
@@ -60,7 +62,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: coverage-${{ matrix.platform }}
-          path: ${{ runner.temp }}/coverage.out
+          path: coverage-${{ matrix.platform }}.out
 
   lint:
     name: golangci-lint
