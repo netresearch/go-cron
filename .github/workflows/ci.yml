@@ -21,7 +21,7 @@ jobs:
       fail-fast: false
       matrix:
         go-version: [1.25.x]
-        platform: [ubuntu-latest]
+        platform: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -58,7 +58,7 @@ jobs:
       - name: Upload coverage
         uses: actions/upload-artifact@v4
         with:
-          name: coverage
+          name: coverage-${{ matrix.platform }}
           path: coverage.out
 
   lint:
