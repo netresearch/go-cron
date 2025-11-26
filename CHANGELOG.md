@@ -10,50 +10,57 @@ features, bug fixes, and modernization improvements.
 
 ## [Unreleased]
 
-### Added
-- Comprehensive benchmark tests for parser, scheduler, and job operations
-- CI job to run benchmarks and upload results as artifacts
-- **WithClock option**: Inject custom time source for deterministic testing
-- **Min-heap scheduling**: O(log n) insertion/removal, O(1) next job lookup (upstream PR #423)
-
 ### Planned for v2
 - Context-aware Job interface with graceful shutdown support
 
-## [1.0.0] - 2025-01-XX
+## [1.0.0] - Unreleased
+
+### Added
+- **Min-heap scheduling**: O(log n) insertion/removal, O(1) next job lookup (upstream PR #423)
+- **WithClock option**: Inject custom time source for deterministic testing
+- **Benchmark suite**: Comprehensive benchmark tests for parser, scheduler, and job operations
+- **CI benchmarks**: CI job to run benchmarks and upload results as artifacts
+- **Input validation**: Maximum spec length limit (1024 chars) to prevent DoS
+- **Timeout JobWrapper**: `chain.Timeout(duration)` for job execution time limits
+- **slog adapter**: `SlogLogger` for structured logging with Go 1.21+ slog
+- **Multi-platform CI**: Windows, macOS, and Linux testing
+
+### Fixed
+- **Panic on NewParser with no fields**: Returns error instead of panicking
+
+### Changed
+- **EntryID uint64**: Changed from `int` to `uint64` for larger job capacity
+- **slices package**: Uses Go 1.21+ `slices.SortFunc` and `slices.DeleteFunc`
+- **Linting**: Uses golangci-lint v2.6.1 with modern rule set
+
+### Security
+- **Timezone validation**: Character and length restrictions for timezone strings to prevent DoS
+
+## [0.5.0] - 2025-11-25
 
 Initial release of netresearch/go-cron fork.
 
 ### Added
-- **Input validation**: Maximum spec length limit (1024 chars) to prevent DoS
-- **Timezone validation**: Character and length restrictions for timezone strings
 - **Step range validation**: Step size must be less than range size (upstream #543)
 - **Minimum duration enforcement**: `@every` requires at least 1 second duration
-- **Timeout JobWrapper**: `chain.Timeout(duration)` for job execution time limits
-- **slog adapter**: `SlogLogger` for structured logging with Go 1.21+ slog
-- **EntryID uint64**: Changed from `int` to `uint64` for larger job capacity
 - **DST handling**: ISC cron-compatible behavior for spring forward transitions
-- **Multi-platform CI**: Windows, macOS, and Linux testing
-- **Benchmark suite**: Performance tests for critical paths
-- **slices package**: Uses Go 1.21+ `slices.SortFunc` and `slices.DeleteFunc`
+- **Time backwards handling**: Scheduler handles system time moving backwards gracefully
+- **GitHub Actions CI**: Migrated from Travis CI with comprehensive workflow
 
 ### Fixed
 - **Panic on nil receiver** (upstream #551): `Entry.Run()` no longer panics
 - **Panic on empty timezone** (upstream #554): Parser returns error instead
 - **Panic on timezone-only spec** (upstream #555): Parser returns error instead
-- **Panic on NewParser with no fields**: Returns error instead of panicking
-- **System time backwards**: Scheduler handles time moving backwards gracefully
 - **removeEntry optimization**: Pre-allocates slice to reduce allocations
+- **SkipIfStillRunning graceful quit**: Fixed jobWrapper cleanup behavior
 
 ### Changed
 - **Go version**: Requires Go 1.25+
 - **Module path**: Changed to `github.com/netresearch/go-cron`
-- **CI/CD**: Migrated from Travis CI to GitHub Actions
-- **Linting**: Uses golangci-lint v2.6.1 with modern rule set
 - **Code style**: Applied De Morgan's law optimizations
+- **Spelling**: Corrected 'cancelled' to 'canceled' (American English)
 
 ### Security
-- Added timezone string validation to prevent potential DoS attacks
-- Added input length limits for cron spec strings
 - Integrated gosec, govulncheck, gitleaks, and trivy security scanning
 
 ## Differences from upstream robfig/cron
@@ -102,4 +109,5 @@ This fork includes all features from robfig/cron v3 plus:
    ```
 
 [Unreleased]: https://github.com/netresearch/go-cron/compare/v1.0.0...HEAD
-[1.0.0]: https://github.com/netresearch/go-cron/releases/tag/v1.0.0
+[1.0.0]: https://github.com/netresearch/go-cron/compare/v0.5.0...v1.0.0
+[0.5.0]: https://github.com/netresearch/go-cron/releases/tag/v0.5.0
