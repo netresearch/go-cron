@@ -236,3 +236,121 @@ func TestChainSkipIfStillRunning(t *testing.T) {
 		}
 	})
 }
+
+func TestChainTimeout(t *testing.T) {
+	t.Run("job completes within timeout", func(t *testing.T) {
+		var j countJob
+		j.delay = 5 * time.Millisecond
+		wrappedJob := NewChain(Timeout(DiscardLogger, 50*time.Millisecond)).Then(&j)
+		wrappedJob.Run()
+		if c := j.Done(); c != 1 {
+			t.Errorf("expected job to complete, got done count %d", c)
+		}
+	})
+
+	t.Run("job exceeds timeout", func(t *testing.T) {
+		var j countJob
+		j.delay = 50 * time.Millisecond
+		wrappedJob := NewChain(Timeout(DiscardLogger, 5*time.Millisecond)).Then(&j)
+
+		start := time.Now()
+		wrappedJob.Run()
+		elapsed := time.Since(start)
+
+		// Wrapper should return quickly after timeout
+		if elapsed > 20*time.Millisecond {
+			t.Errorf("expected wrapper to return after timeout (~5ms), took %v", elapsed)
+		}
+
+		// Job should not be done yet (still running in background)
+		if c := j.Done(); c != 0 {
+			t.Errorf("expected job not done yet (abandoned), got %d", c)
+		}
+
+		// Wait for abandoned goroutine to complete
+		time.Sleep(100 * time.Millisecond)
+		if c := j.Done(); c != 1 {
+			t.Errorf("expected abandoned job to eventually complete, got %d", c)
+		}
+	})
+
+	t.Run("zero timeout passes through unchanged", func(t *testing.T) {
+		var j countJob
+		j.delay = 5 * time.Millisecond
+		wrappedJob := NewChain(Timeout(DiscardLogger, 0)).Then(&j)
+		wrappedJob.Run()
+		if c := j.Done(); c != 1 {
+			t.Errorf("expected job to complete with zero timeout, got %d", c)
+		}
+	})
+
+	t.Run("negative timeout passes through unchanged", func(t *testing.T) {
+		var j countJob
+		j.delay = 5 * time.Millisecond
+		wrappedJob := NewChain(Timeout(DiscardLogger, -1*time.Second)).Then(&j)
+		wrappedJob.Run()
+		if c := j.Done(); c != 1 {
+			t.Errorf("expected job to complete with negative timeout, got %d", c)
+		}
+	})
+
+	t.Run("multiple jobs with different timeouts", func(t *testing.T) {
+		var j1, j2 countJob
+		j1.delay = 5 * time.Millisecond
+		j2.delay = 100 * time.Millisecond
+
+		// Short timeout - j1 should complete, j2 should timeout
+		chain := NewChain(Timeout(DiscardLogger, 20*time.Millisecond))
+		wrappedJob1 := chain.Then(&j1)
+		wrappedJob2 := chain.Then(&j2)
+
+		wrappedJob1.Run()
+		wrappedJob2.Run()
+
+		if c := j1.Done(); c != 1 {
+			t.Errorf("expected j1 to complete, got %d", c)
+		}
+		if c := j2.Done(); c != 0 {
+			t.Errorf("expected j2 to timeout (not done yet), got %d", c)
+		}
+
+		// Wait for abandoned j2 to complete
+		time.Sleep(150 * time.Millisecond)
+		if c := j2.Done(); c != 1 {
+			t.Errorf("expected j2 to eventually complete, got %d", c)
+		}
+	})
+
+	t.Run("combined with other wrappers", func(t *testing.T) {
+		var j countJob
+		j.delay = 5 * time.Millisecond
+		// Timeout + Recover combination
+		wrappedJob := NewChain(Recover(DiscardLogger), Timeout(DiscardLogger, 50*time.Millisecond)).Then(&j)
+		wrappedJob.Run()
+		if c := j.Done(); c != 1 {
+			t.Errorf("expected job to complete with combined wrappers, got %d", c)
+		}
+	})
+
+	t.Run("panic propagates to Recover wrapper when job completes within timeout", func(t *testing.T) {
+		panicJob := FuncJob(func() {
+			panic("test panic")
+		})
+		// Recover should catch the panic propagated from Timeout
+		wrappedJob := NewChain(Recover(DiscardLogger), Timeout(DiscardLogger, 50*time.Millisecond)).Then(panicJob)
+		// This should not panic because Recover catches it
+		wrappedJob.Run()
+	})
+
+	t.Run("panic after timeout does not propagate", func(t *testing.T) {
+		panicJob := FuncJob(func() {
+			time.Sleep(20 * time.Millisecond)
+			panic("delayed panic")
+		})
+		// Timeout returns before panic occurs
+		wrappedJob := NewChain(Recover(DiscardLogger), Timeout(DiscardLogger, 5*time.Millisecond)).Then(panicJob)
+		wrappedJob.Run()
+		// Wait for abandoned goroutine's panic (won't propagate)
+		time.Sleep(50 * time.Millisecond)
+	})
+}
