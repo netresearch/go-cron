@@ -3,15 +3,15 @@ Package cron implements a cron spec parser and job runner.
 
 # Installation
 
-To download the specific tagged release, run:
+To download the package, run:
 
-	go get github.com/robfig/cron/v3@v3.0.0
+	go get github.com/netresearch/go-cron
 
 Import it in your program as:
 
-	import "github.com/robfig/cron/v3"
+	import "github.com/netresearch/go-cron"
 
-It requires Go 1.11 or later due to usage of Go Modules.
+It requires Go 1.25 or later.
 
 # Usage
 
@@ -159,10 +159,10 @@ For example:
 	# Runs at 6am in Asia/Tokyo
 	cron.New().AddFunc("CRON_TZ=Asia/Tokyo 0 6 * * ?", ...)
 
-	# Runs at 6am in Asia/Tokyo
-	c := cron.New(cron.WithLocation(nyc))
-	c.SetLocation("America/New_York")
-	c.AddFunc("CRON_TZ=Asia/Tokyo 0 6 * * ?", ...)
+	# Runs at 6am in Asia/Tokyo, overriding the cron's default location
+	tokyo, _ := time.LoadLocation("Asia/Tokyo")
+	c := cron.New(cron.WithLocation(tokyo))
+	c.AddFunc("0 6 * * ?", ...)
 
 The prefix "TZ=(TIME ZONE)" is also supported for legacy compatibility.
 
