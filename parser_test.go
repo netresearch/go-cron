@@ -403,6 +403,31 @@ func TestNoDescriptorParser(t *testing.T) {
 	}
 }
 
+func TestNewParserPanicsWithNoFields(t *testing.T) {
+	// Test that NewParser panics when called with no fields
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("NewParser(0) should panic with no fields configured")
+		}
+	}()
+	NewParser(0)
+}
+
+func TestNewParserDescriptorOnlyValid(t *testing.T) {
+	// Test that NewParser with only Descriptor is valid
+	// (even though it only accepts @descriptors)
+	parser := NewParser(Descriptor)
+	_, err := parser.Parse("@daily")
+	if err != nil {
+		t.Errorf("expected @daily to parse with Descriptor-only parser, got: %v", err)
+	}
+
+	_, err = parser.Parse("* * * * *")
+	if err == nil {
+		t.Error("expected cron expression to fail with Descriptor-only parser")
+	}
+}
+
 func every5min(loc *time.Location) *SpecSchedule {
 	return &SpecSchedule{1 << 0, 1 << 5, all(hours), all(dom), all(months), all(dow), loc}
 }
