@@ -59,9 +59,9 @@ func TestHeapZeroTimes(t *testing.T) {
 
 	now := time.Now()
 	entries := []*Entry{
-		{ID: 1, Next: time.Time{}, heapIndex: -1},        // Zero time
+		{ID: 1, Next: time.Time{}, heapIndex: -1}, // Zero time
 		{ID: 2, Next: now.Add(1 * time.Hour), heapIndex: -1},
-		{ID: 3, Next: time.Time{}, heapIndex: -1},        // Zero time
+		{ID: 3, Next: time.Time{}, heapIndex: -1}, // Zero time
 		{ID: 4, Next: now.Add(2 * time.Hour), heapIndex: -1},
 	}
 
