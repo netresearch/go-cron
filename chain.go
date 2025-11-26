@@ -99,7 +99,7 @@ func SkipIfStillRunning(logger Logger) JobWrapper {
 // goroutine continues running until completion.
 //
 // WARNING: This implements an "abandonment model" - when a timeout occurs,
-// the wrapper returns but the job's goroutine is NOT cancelled. The job will
+// the wrapper returns but the job's goroutine is NOT canceled. The job will
 // continue executing in the background until it naturally completes. This means:
 //   - Resources held by the job will not be released until completion
 //   - Side effects will still occur even after timeout
