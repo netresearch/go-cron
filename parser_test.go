@@ -483,3 +483,56 @@ func TestTimezoneValidParsing(t *testing.T) {
 		})
 	}
 }
+
+// TestTimezoneValidation tests security validation of timezone strings (issue #6)
+func TestTimezoneValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		spec    string
+		wantErr string
+	}{
+		// Valid timezones should pass validation (may still fail LoadLocation)
+		{"valid UTC", "TZ=UTC * * * * *", ""},
+		{"valid America/New_York", "TZ=America/New_York * * * * *", ""},
+		{"valid Etc/GMT+5", "TZ=Etc/GMT+5 * * * * *", ""},
+		{"valid Europe/Isle_of_Man", "TZ=Europe/Isle_of_Man * * * * *", ""},
+		{"valid with colon", "TZ=Etc/GMT+0:00 * * * * *", ""},
+
+		// Invalid: path traversal attempts
+		{"path traversal dots", "TZ=../../../etc/passwd * * * * *", "invalid character"},
+		{"path traversal encoded", "TZ=%2e%2e%2f * * * * *", "invalid character"},
+
+		// Invalid: special characters
+		{"null byte", "TZ=UTC\x00evil * * * * *", "invalid character"},
+		{"space in name", "TZ=America/New York * * * * *", "bad location"}, // space splits, leaving "America/New"
+		{"newline", "TZ=UTC\nevil * * * * *", "invalid character"},
+		{"semicolon", "TZ=UTC;evil * * * * *", "invalid character"},
+		{"backtick", "TZ=UTC`evil * * * * *", "invalid character"},
+		{"dollar sign", "TZ=UTC$HOME * * * * *", "invalid character"},
+
+		// Invalid: empty timezone
+		{"empty timezone", "TZ= * * * * *", "empty timezone"},
+
+		// Invalid: too long timezone (65+ chars)
+		{"too long timezone", "TZ=" + strings.Repeat("A", 65) + " * * * * *", "too long"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ParseStandard(tt.spec)
+			if tt.wantErr == "" {
+				// Some valid format timezones may not exist on all systems
+				// but they should pass validation (only fail LoadLocation)
+				if err != nil && strings.Contains(err.Error(), "invalid") {
+					t.Errorf("ParseStandard(%q) validation error: %v", tt.spec, err)
+				}
+			} else {
+				if err == nil {
+					t.Errorf("ParseStandard(%q) expected error containing %q, got nil", tt.spec, tt.wantErr)
+				} else if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Errorf("ParseStandard(%q) error = %v, want error containing %q", tt.spec, err, tt.wantErr)
+				}
+			}
+		})
+	}
+}
