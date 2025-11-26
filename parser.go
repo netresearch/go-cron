@@ -81,12 +81,19 @@ func NewParser(options ParseOption) Parser {
 	return Parser{options}
 }
 
+// MaxSpecLength is the maximum allowed length for a cron spec string.
+// This limit prevents potential resource exhaustion from extremely long inputs.
+const MaxSpecLength = 1024
+
 // Parse returns a new crontab schedule representing the given spec.
 // It returns a descriptive error if the spec is not valid.
 // It accepts crontab specs and features configured by NewParser.
 func (p Parser) Parse(spec string) (Schedule, error) {
 	if len(spec) == 0 {
 		return nil, fmt.Errorf("empty spec string")
+	}
+	if len(spec) > MaxSpecLength {
+		return nil, fmt.Errorf("spec too long: %d > %d", len(spec), MaxSpecLength)
 	}
 
 	// Extract timezone if present

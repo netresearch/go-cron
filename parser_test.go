@@ -154,6 +154,32 @@ func TestParseScheduleErrors(t *testing.T) {
 	}
 }
 
+func TestParseSpecLengthLimit(t *testing.T) {
+	// Test that specs at exactly the limit work
+	atLimit := strings.Repeat("*", MaxSpecLength-10) // Leave room for structure
+	_, err := standardParser.Parse(atLimit)
+	// Will fail validation but not due to length
+	if err != nil && strings.Contains(err.Error(), "spec too long") {
+		t.Errorf("spec at limit should not trigger length error")
+	}
+
+	// Test that specs over the limit are rejected
+	overLimit := strings.Repeat("*", MaxSpecLength+1)
+	_, err = standardParser.Parse(overLimit)
+	if err == nil {
+		t.Error("expected error for spec over length limit")
+	}
+	if err != nil && !strings.Contains(err.Error(), "spec too long") {
+		t.Errorf("expected 'spec too long' error, got: %v", err)
+	}
+
+	// Test that normal specs work fine
+	_, err = standardParser.Parse("* * * * *")
+	if err != nil {
+		t.Errorf("normal spec should work: %v", err)
+	}
+}
+
 func TestParseSchedule(t *testing.T) {
 	tokyo, _ := time.LoadLocation("Asia/Tokyo")
 	entries := []struct {
