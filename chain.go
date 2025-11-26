@@ -93,3 +93,52 @@ func SkipIfStillRunning(logger Logger) JobWrapper {
 		})
 	}
 }
+
+// Timeout wraps a job with a timeout. If the job takes longer than the given
+// duration, the wrapper returns and logs an error, but the underlying job
+// goroutine continues running until completion.
+//
+// WARNING: This implements an "abandonment model" - when a timeout occurs,
+// the wrapper returns but the job's goroutine is NOT cancelled. The job will
+// continue executing in the background until it naturally completes. This means:
+//   - Resources held by the job will not be released until completion
+//   - Side effects will still occur even after timeout
+//   - Multiple abandoned goroutines can accumulate if jobs consistently timeout
+//
+// For jobs that need true cancellation support, consider implementing the Job
+// interface with context awareness and checking for cancellation signals.
+//
+// A timeout of zero or negative disables the timeout and returns the job unchanged.
+func Timeout(logger Logger, timeout time.Duration) JobWrapper {
+	return func(j Job) Job {
+		if timeout <= 0 {
+			return j
+		}
+		return FuncJob(func() {
+			done := make(chan struct{})
+			var panicVal interface{}
+			go func() {
+				defer close(done)
+				defer func() {
+					if r := recover(); r != nil {
+						panicVal = r
+					}
+				}()
+				j.Run()
+			}()
+
+			timer := time.NewTimer(timeout)
+			defer timer.Stop()
+
+			select {
+			case <-done:
+				// Job completed within timeout - propagate any panic
+				if panicVal != nil {
+					panic(panicVal)
+				}
+			case <-timer.C:
+				logger.Error(fmt.Errorf("job exceeded timeout of %v", timeout), "timeout", "duration", timeout)
+			}
+		})
+	}
+}
