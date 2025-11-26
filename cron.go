@@ -2,7 +2,7 @@ package cron
 
 import (
 	"context"
-	"sort"
+	"slices"
 	"sync"
 	"time"
 )
@@ -86,23 +86,23 @@ func (e Entry) Run() {
 	}
 }
 
-// byTime is a wrapper for sorting the entry array by time
-// (with zero time at the end).
-type byTime []*Entry
-
-func (s byTime) Len() int      { return len(s) }
-func (s byTime) Swap(i, j int) { s[i], s[j] = s[j], s[i] }
-func (s byTime) Less(i, j int) bool {
-	// Two zero times should return false.
-	// Otherwise, zero is "greater" than any other time.
-	// (To sort it at the end of the list.)
-	if s[i].Next.IsZero() {
-		return false
-	}
-	if s[j].Next.IsZero() {
-		return true
-	}
-	return s[i].Next.Before(s[j].Next)
+// sortEntriesByTime sorts entries by Next time, with zero times at the end.
+func sortEntriesByTime(entries []*Entry) {
+	slices.SortFunc(entries, func(a, b *Entry) int {
+		// Two zero times should return 0.
+		// Otherwise, zero is "greater" than any other time.
+		// (To sort it at the end of the list.)
+		if a.Next.IsZero() {
+			if b.Next.IsZero() {
+				return 0
+			}
+			return 1
+		}
+		if b.Next.IsZero() {
+			return -1
+		}
+		return a.Next.Compare(b.Next)
+	})
 }
 
 // New returns a new Cron job runner, modified by the given options.
@@ -260,7 +260,7 @@ func (c *Cron) run() {
 
 	for {
 		// Determine the next entry to run.
-		sort.Sort(byTime(c.entries))
+		sortEntriesByTime(c.entries)
 
 		var timer *time.Timer
 		if len(c.entries) == 0 || c.entries[0].Next.IsZero() {
@@ -367,13 +367,7 @@ func (c *Cron) entrySnapshot() []Entry {
 }
 
 func (c *Cron) removeEntry(id EntryID) {
-	// Pre-allocate to avoid reallocations during append.
-	// Use len(c.entries) as capacity to safely handle all edge cases.
-	entries := make([]*Entry, 0, len(c.entries))
-	for _, e := range c.entries {
-		if e.ID != id {
-			entries = append(entries, e)
-		}
-	}
-	c.entries = entries
+	c.entries = slices.DeleteFunc(c.entries, func(e *Entry) bool {
+		return e.ID == id
+	})
 }
