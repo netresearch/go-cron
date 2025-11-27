@@ -166,8 +166,8 @@ For example:
 
 The prefix "TZ=(TIME ZONE)" is also supported for legacy compatibility.
 
-Be aware that jobs scheduled during daylight-savings leap-ahead transitions will
-not be run!
+Jobs scheduled during daylight-savings leap-ahead transitions will run
+immediately after the skipped hour (ISC cron-compatible behavior).
 
 # Job Wrappers
 
@@ -218,13 +218,14 @@ Activate it with a one-off logger as follows:
 
 # Implementation
 
-Cron entries are stored in an array, sorted by their next activation time.  Cron
-sleeps until the next job is due to be run.
+Cron entries are stored in a min-heap ordered by their next activation time,
+providing O(log n) insertion/removal and O(1) access to the next entry.
+Cron sleeps until the next job is due to be run.
 
 Upon waking:
   - it runs each entry that is active on that second
   - it calculates the next run times for the jobs that were run
-  - it re-sorts the array of entries by next activation time.
+  - it re-heapifies the entries by next activation time
   - it goes to sleep until the soonest job.
 */
 package cron
