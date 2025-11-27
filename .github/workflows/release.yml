@@ -1,0 +1,103 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    name: Test before release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run tests
+        run: go test -race -v ./...
+
+  release:
+    name: Create Release
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get version from tag
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # Get the previous tag
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+
+          if [ -z "$PREV_TAG" ]; then
+            echo "First release - no previous tag found"
+            COMMITS=$(git log --oneline --no-merges)
+          else
+            echo "Previous tag: $PREV_TAG"
+            COMMITS=$(git log --oneline --no-merges ${PREV_TAG}..HEAD)
+          fi
+
+          # Format commits into categories
+          FEATURES=$(echo "$COMMITS" | grep -E "^[a-f0-9]+ feat" || true)
+          FIXES=$(echo "$COMMITS" | grep -E "^[a-f0-9]+ fix" || true)
+          DOCS=$(echo "$COMMITS" | grep -E "^[a-f0-9]+ docs" || true)
+          OTHER=$(echo "$COMMITS" | grep -vE "^[a-f0-9]+ (feat|fix|docs)" || true)
+
+          # Build changelog
+          {
+            echo "changelog<<EOF"
+            if [ -n "$FEATURES" ]; then
+              echo "### Features"
+              echo "$FEATURES" | sed 's/^[a-f0-9]* feat[:(]/- /' | sed 's/)$//'
+              echo ""
+            fi
+            if [ -n "$FIXES" ]; then
+              echo "### Bug Fixes"
+              echo "$FIXES" | sed 's/^[a-f0-9]* fix[:(]/- /' | sed 's/)$//'
+              echo ""
+            fi
+            if [ -n "$DOCS" ]; then
+              echo "### Documentation"
+              echo "$DOCS" | sed 's/^[a-f0-9]* docs[:(]/- /' | sed 's/)$//'
+              echo ""
+            fi
+            if [ -n "$OTHER" ]; then
+              echo "### Other Changes"
+              echo "$OTHER" | sed 's/^[a-f0-9]*/- /'
+              echo ""
+            fi
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ steps.version.outputs.version }}
+          body: |
+            ## What's Changed
+
+            ${{ steps.changelog.outputs.changelog }}
+
+            **Full Changelog**: https://github.com/${{ github.repository }}/compare/${{ steps.version.outputs.version }}...HEAD
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.version, '-') }}
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
