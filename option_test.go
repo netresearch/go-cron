@@ -43,7 +43,7 @@ func TestWithVerboseLogger(t *testing.T) {
 
 func TestWithClock(t *testing.T) {
 	fixedTime := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
-	c := New(WithClock(func() time.Time { return fixedTime }))
+	c := New(WithClock(ClockFunc(func() time.Time { return fixedTime })))
 	if c.clock == nil {
 		t.Error("expected clock to be set")
 	}
@@ -60,7 +60,7 @@ func TestWithClockAndLocation(t *testing.T) {
 	loc, _ := time.LoadLocation("America/New_York")
 
 	c := New(
-		WithClock(func() time.Time { return fixedTime }),
+		WithClock(ClockFunc(func() time.Time { return fixedTime })),
 		WithLocation(loc),
 	)
 
@@ -76,11 +76,15 @@ func TestWithClockAndLocation(t *testing.T) {
 	}
 }
 
-func TestWithClockNilFallback(t *testing.T) {
-	// When no clock is set, now() should use time.Now()
+func TestWithClockDefaultRealClock(t *testing.T) {
+	// Default clock should be RealClock
 	c := New()
-	if c.clock != nil {
-		t.Error("expected clock to be nil by default")
+	if c.clock == nil {
+		t.Error("expected clock to be set by default")
+	}
+	// Verify it's a RealClock
+	if _, ok := c.clock.(RealClock); !ok {
+		t.Errorf("expected RealClock, got %T", c.clock)
 	}
 
 	before := time.Now()

@@ -120,15 +120,15 @@ func FuzzParseOptionalSeconds(f *testing.F) {
 // This ensures the schedule calculation doesn't panic on edge case times.
 func FuzzScheduleNext(f *testing.F) {
 	// Various timestamps
-	f.Add(int64(0))                    // Unix epoch
-	f.Add(int64(1609459200))           // 2021-01-01 00:00:00 UTC
-	f.Add(int64(1735689600))           // 2025-01-01 00:00:00 UTC
-	f.Add(int64(4102444800))           // 2100-01-01 00:00:00 UTC
-	f.Add(int64(-62135596800))         // 0001-01-01 00:00:00 UTC
-	f.Add(int64(253402300799))         // 9999-12-31 23:59:59 UTC
-	f.Add(int64(1615705200))           // 2021-03-14 03:00:00 UTC (DST transition)
-	f.Add(int64(1636268400))           // 2021-11-07 02:00:00 UTC (DST transition)
-	f.Add(time.Now().Unix())           // Current time
+	f.Add(int64(0))            // Unix epoch
+	f.Add(int64(1609459200))   // 2021-01-01 00:00:00 UTC
+	f.Add(int64(1735689600))   // 2025-01-01 00:00:00 UTC
+	f.Add(int64(4102444800))   // 2100-01-01 00:00:00 UTC
+	f.Add(int64(-62135596800)) // 0001-01-01 00:00:00 UTC
+	f.Add(int64(253402300799)) // 9999-12-31 23:59:59 UTC
+	f.Add(int64(1615705200))   // 2021-03-14 03:00:00 UTC (DST transition)
+	f.Add(int64(1636268400))   // 2021-11-07 02:00:00 UTC (DST transition)
+	f.Add(time.Now().Unix())   // Current time
 	f.Add(time.Now().Add(time.Hour).Unix())
 
 	// Create a simple schedule for testing
@@ -150,8 +150,8 @@ func FuzzScheduleNext(f *testing.F) {
 
 // FuzzConstantDelaySchedule tests the ConstantDelaySchedule against arbitrary times and durations.
 func FuzzConstantDelaySchedule(f *testing.F) {
-	f.Add(int64(0), int64(1000000000))           // 1 second
-	f.Add(int64(1609459200), int64(60000000000)) // 1 minute
+	f.Add(int64(0), int64(1000000000))             // 1 second
+	f.Add(int64(1609459200), int64(60000000000))   // 1 minute
 	f.Add(int64(1735689600), int64(3600000000000)) // 1 hour
 
 	f.Fuzz(func(t *testing.T, timestamp int64, delayNanos int64) {

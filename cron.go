@@ -8,10 +8,6 @@ import (
 	"time"
 )
 
-// Clock is a function that returns the current time.
-// It can be overridden using WithClock for testing purposes.
-type Clock func() time.Time
-
 // Cron keeps track of any number of entries, invoking the associated func as
 // specified by the schedule. It may be started, stopped, and the entries may
 // be inspected while running.
@@ -129,6 +125,7 @@ func New(opts ...Option) *Cron {
 		logger:    DefaultLogger,
 		location:  time.Local,
 		parser:    standardParser,
+		clock:     RealClock{},
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -259,19 +256,19 @@ func (c *Cron) run() {
 
 	for {
 		// Determine the next entry to run using the heap (O(1) peek).
-		var timer *time.Timer
+		var timer Timer
 		next := c.entries.Peek()
 		if next == nil || next.Next.IsZero() {
 			// If there are no entries yet, just sleep - it still handles new entries
 			// and stop requests.
-			timer = time.NewTimer(100000 * time.Hour)
+			timer = c.clock.NewTimer(100000 * time.Hour)
 		} else {
-			timer = time.NewTimer(next.Next.Sub(now))
+			timer = c.clock.NewTimer(next.Next.Sub(now))
 		}
 
 		for {
 			select {
-			case now = <-timer.C:
+			case now = <-timer.C():
 				now = now.In(c.location)
 				c.logger.Info("wake", "now", now)
 
@@ -341,12 +338,9 @@ func (c *Cron) startJob(j Job) {
 }
 
 // now returns current time in c location.
-// If a custom clock is configured via WithClock, it will be used instead of time.Now.
+// Uses the configured clock (defaults to RealClock).
 func (c *Cron) now() time.Time {
-	if c.clock != nil {
-		return c.clock().In(c.location)
-	}
-	return time.Now().In(c.location)
+	return c.clock.Now().In(c.location)
 }
 
 // Stop stops the cron scheduler if it is running; otherwise it does nothing.

@@ -107,7 +107,6 @@ jobs:
           set +e
           TMP_OUT=$(mktemp)
           go run golang.org/x/vuln/cmd/govulncheck@latest ./... | tee "$TMP_OUT"
-          status=$?
           set -e
           if grep -E "^\s*Fixed in:\s+" "$TMP_OUT" | grep -v "Fixed in: N/A" >/dev/null; then
             echo "govulncheck: vulnerabilities with available fixes detected"
@@ -133,7 +132,7 @@ jobs:
 
       - name: Run gosec
         run: |
-          $(go env GOPATH)/bin/gosec ./...
+          "$(go env GOPATH)/bin/gosec" ./...
 
   gitleaks:
     name: gitleaks
@@ -174,7 +173,7 @@ jobs:
           severity: CRITICAL,HIGH
           exit-code: 1
       - name: Upload Trivy SARIF
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-results.sarif
 

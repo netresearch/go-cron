@@ -2,7 +2,6 @@ package cron
 
 import (
 	"bytes"
-	"fmt"
 	"log"
 	"strings"
 	"sync"
@@ -228,10 +227,14 @@ func TestSnapshotEntries(t *testing.T) {
 // that the immediate entry runs immediately.
 // Also: Test that multiple jobs run in the same instant.
 func TestMultipleEntries(t *testing.T) {
+	// Use FakeClock for deterministic testing
+	startTime := time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
+	fakeClock := NewFakeClock(startTime)
+
 	wg := &sync.WaitGroup{}
 	wg.Add(2)
 
-	cron := newWithSeconds()
+	cron := New(WithParser(secondParser), WithClock(fakeClock))
 	cron.AddFunc("0 0 0 1 1 ?", func() {})
 	cron.AddFunc("* * * * * ?", func() { wg.Done() })
 	id1, _ := cron.AddFunc("* * * * * ?", func() { t.Fatal() })
@@ -244,8 +247,15 @@ func TestMultipleEntries(t *testing.T) {
 	cron.Remove(id2)
 	defer cron.Stop()
 
+	// Wait for scheduler to register timers
+	fakeClock.BlockUntil(1)
+
+	// Advance 1 second to trigger the every-second jobs
+	fakeClock.Advance(time.Second)
+	time.Sleep(10 * time.Millisecond)
+
 	select {
-	case <-time.After(OneSecond):
+	case <-time.After(100 * time.Millisecond):
 		t.Error("expected job run in proper order")
 	case <-wait(wg):
 	}
@@ -272,10 +282,17 @@ func TestRunningJobTwice(t *testing.T) {
 }
 
 func TestRunningMultipleSchedules(t *testing.T) {
+	// Use FakeClock for deterministic testing
+	startTime := time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
+	fakeClock := NewFakeClock(startTime)
+
 	wg := &sync.WaitGroup{}
+	// Two every-second jobs: "* * * * * ?" and Every(time.Second)
+	// Each 1-second advance triggers both → 2 Done() calls per second
+	// We'll advance once, so expect 2 calls
 	wg.Add(2)
 
-	cron := newWithSeconds()
+	cron := New(WithParser(secondParser), WithClock(fakeClock))
 	cron.AddFunc("0 0 0 1 1 ?", func() {})
 	cron.AddFunc("0 0 0 31 12 ?", func() {})
 	cron.AddFunc("* * * * * ?", func() { wg.Done() })
@@ -286,72 +303,108 @@ func TestRunningMultipleSchedules(t *testing.T) {
 	cron.Start()
 	defer cron.Stop()
 
+	// Wait for scheduler to register timers
+	fakeClock.BlockUntil(1)
+
+	// Advance 1 second - should trigger both every-second jobs (2 calls)
+	fakeClock.Advance(time.Second)
+	time.Sleep(10 * time.Millisecond)
+
 	select {
-	case <-time.After(2 * OneSecond):
-		t.Error("expected job fires 2 times")
+	case <-time.After(100 * time.Millisecond):
+		t.Error("expected both every-second jobs to fire")
 	case <-wait(wg):
 	}
 }
 
 // Test that the cron is run in the local time zone (as opposed to UTC).
 func TestLocalTimezone(t *testing.T) {
+	// Use FakeClock for deterministic testing
+	// Start at a known time: 2024-01-15 10:30:00 in local timezone
+	startTime := time.Date(2024, 1, 15, 10, 30, 0, 0, time.Local)
+	fakeClock := NewFakeClock(startTime)
+
+	// Schedule job to fire at seconds 1 and 2 of the next minute (10:31:01 and 10:31:02)
+	spec := "1,2 31 10 15 1 ?"
+
 	wg := &sync.WaitGroup{}
 	wg.Add(2)
 
-	now := time.Now()
-	// FIX: Issue #205
-	// This calculation doesn't work in seconds 58 or 59.
-	// Take the easy way out and sleep.
-	if now.Second() >= 58 {
-		time.Sleep(2 * time.Second)
-		now = time.Now()
-	}
-	spec := fmt.Sprintf("%d,%d %d %d %d %d ?",
-		now.Second()+1, now.Second()+2, now.Minute(), now.Hour(), now.Day(), now.Month())
-
-	cron := newWithSeconds()
+	cron := New(WithParser(secondParser), WithClock(fakeClock))
 	cron.AddFunc(spec, func() { wg.Done() })
 	cron.Start()
 	defer cron.Stop()
 
+	// Wait for the scheduler to register the timer
+	fakeClock.BlockUntil(1)
+
+	// Advance to first trigger time (10:31:01)
+	fakeClock.Advance(61 * time.Second)
+
+	// Wait for scheduler to process and register next timer
+	time.Sleep(10 * time.Millisecond)
+	fakeClock.BlockUntil(1)
+
+	// Advance to second trigger time (10:31:02)
+	fakeClock.Advance(1 * time.Second)
+
+	// Give time for job execution
+	time.Sleep(10 * time.Millisecond)
+
+	// Verify both jobs ran
 	select {
-	case <-time.After(OneSecond * 2):
-		t.Error("expected job fires 2 times")
+	case <-time.After(100 * time.Millisecond):
+		t.Error("expected job to fire 2 times")
 	case <-wait(wg):
+		// Success
 	}
 }
 
 // Test that the cron is run in the given time zone (as opposed to local).
 func TestNonLocalTimezone(t *testing.T) {
+	loc, err := time.LoadLocation("Atlantic/Cape_Verde")
+	if err != nil {
+		t.Fatalf("Failed to load time zone Atlantic/Cape_Verde: %+v", err)
+	}
+
+	// Use FakeClock for deterministic testing
+	// Start at a known time: 2024-01-15 10:30:00 in the target timezone
+	startTime := time.Date(2024, 1, 15, 10, 30, 0, 0, loc)
+	fakeClock := NewFakeClock(startTime)
+
+	// Schedule job to fire at seconds 1 and 2 of the next minute (10:31:01 and 10:31:02)
+	spec := "1,2 31 10 15 1 ?"
+
 	wg := &sync.WaitGroup{}
 	wg.Add(2)
 
-	loc, err := time.LoadLocation("Atlantic/Cape_Verde")
-	if err != nil {
-		fmt.Printf("Failed to load time zone Atlantic/Cape_Verde: %+v", err)
-		t.Fail()
-	}
-
-	now := time.Now().In(loc)
-	// FIX: Issue #205
-	// This calculation doesn't work in seconds 58 or 59.
-	// Take the easy way out and sleep.
-	if now.Second() >= 58 {
-		time.Sleep(2 * time.Second)
-		now = time.Now().In(loc)
-	}
-	spec := fmt.Sprintf("%d,%d %d %d %d %d ?",
-		now.Second()+1, now.Second()+2, now.Minute(), now.Hour(), now.Day(), now.Month())
-
-	cron := New(WithLocation(loc), WithParser(secondParser))
+	cron := New(WithLocation(loc), WithParser(secondParser), WithClock(fakeClock))
 	cron.AddFunc(spec, func() { wg.Done() })
 	cron.Start()
 	defer cron.Stop()
 
+	// Wait for the scheduler to register the timer
+	fakeClock.BlockUntil(1)
+
+	// Advance to first trigger time (10:31:01)
+	fakeClock.Advance(61 * time.Second) // 30s to :31:00 + 1s to :31:01
+
+	// Wait for scheduler to process and register next timer
+	time.Sleep(10 * time.Millisecond)
+	fakeClock.BlockUntil(1)
+
+	// Advance to second trigger time (10:31:02)
+	fakeClock.Advance(1 * time.Second)
+
+	// Give time for job execution
+	time.Sleep(10 * time.Millisecond)
+
+	// Verify both jobs ran
 	select {
-	case <-time.After(OneSecond * 2):
-		t.Error("expected job fires 2 times")
+	case <-time.After(100 * time.Millisecond):
+		t.Error("expected job to fire 2 times")
 	case <-wait(wg):
+		// Success - both jobs completed
 	}
 }
 
@@ -847,4 +900,196 @@ func TestTimeMovedBackwards(t *testing.T) {
 	// The actual time backwards handling is tested implicitly
 	// through the scheduler's run loop. A full integration test
 	// would require mocking the system clock.
+}
+
+// TestFakeClockSchedulerIntegration tests the scheduler with FakeClock
+// for deterministic, fast execution without real-time delays.
+func TestFakeClockSchedulerIntegration(t *testing.T) {
+	t.Run("every second schedule", func(t *testing.T) {
+		startTime := time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
+		fakeClock := NewFakeClock(startTime)
+
+		var count int
+		var mu sync.Mutex
+
+		cron := New(WithClock(fakeClock))
+		cron.Schedule(Every(time.Second), FuncJob(func() {
+			mu.Lock()
+			count++
+			mu.Unlock()
+		}))
+
+		cron.Start()
+		defer cron.Stop()
+
+		// Wait for timer registration
+		fakeClock.BlockUntil(1)
+
+		// Advance 5 seconds
+		for i := 0; i < 5; i++ {
+			fakeClock.Advance(time.Second)
+			time.Sleep(5 * time.Millisecond) // Let goroutines run
+			if i < 4 {
+				fakeClock.BlockUntil(1)
+			}
+		}
+
+		time.Sleep(10 * time.Millisecond)
+
+		mu.Lock()
+		if count != 5 {
+			t.Errorf("expected 5 job runs, got %d", count)
+		}
+		mu.Unlock()
+	})
+
+	t.Run("cron expression schedule", func(t *testing.T) {
+		// Start at 10:59:55 - job fires at top of every hour
+		startTime := time.Date(2024, 1, 15, 10, 59, 55, 0, time.UTC)
+		fakeClock := NewFakeClock(startTime)
+
+		var fired bool
+		var mu sync.Mutex
+
+		cron := New(WithClock(fakeClock))
+		cron.AddFunc("0 * * * *", func() { // Top of every hour
+			mu.Lock()
+			fired = true
+			mu.Unlock()
+		})
+
+		cron.Start()
+		defer cron.Stop()
+
+		fakeClock.BlockUntil(1)
+
+		// Advance to 11:00:00
+		fakeClock.Advance(5 * time.Second)
+		time.Sleep(10 * time.Millisecond)
+
+		mu.Lock()
+		if !fired {
+			t.Error("expected job to fire at top of hour")
+		}
+		mu.Unlock()
+	})
+
+	t.Run("multiple jobs different intervals", func(t *testing.T) {
+		startTime := time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
+		fakeClock := NewFakeClock(startTime)
+
+		var fastCount, slowCount int
+		var mu sync.Mutex
+
+		cron := New(WithClock(fakeClock))
+		cron.Schedule(Every(time.Second), FuncJob(func() {
+			mu.Lock()
+			fastCount++
+			mu.Unlock()
+		}))
+		cron.Schedule(Every(5*time.Second), FuncJob(func() {
+			mu.Lock()
+			slowCount++
+			mu.Unlock()
+		}))
+
+		cron.Start()
+		defer cron.Stop()
+
+		fakeClock.BlockUntil(1)
+
+		// Advance 10 seconds total
+		for i := 0; i < 10; i++ {
+			fakeClock.Advance(time.Second)
+			time.Sleep(5 * time.Millisecond)
+			if i < 9 {
+				fakeClock.BlockUntil(1)
+			}
+		}
+
+		time.Sleep(10 * time.Millisecond)
+
+		mu.Lock()
+		if fastCount != 10 {
+			t.Errorf("fast job: expected 10 runs, got %d", fastCount)
+		}
+		if slowCount != 2 {
+			t.Errorf("slow job: expected 2 runs, got %d", slowCount)
+		}
+		mu.Unlock()
+	})
+
+	t.Run("add job while running", func(t *testing.T) {
+		startTime := time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
+		fakeClock := NewFakeClock(startTime)
+
+		var count int
+		var mu sync.Mutex
+
+		cron := New(WithClock(fakeClock))
+		cron.Start()
+		defer cron.Stop()
+
+		// Add job after start
+		cron.Schedule(Every(time.Second), FuncJob(func() {
+			mu.Lock()
+			count++
+			mu.Unlock()
+		}))
+
+		// Wait for timer
+		fakeClock.BlockUntil(1)
+
+		// Advance and check
+		fakeClock.Advance(time.Second)
+		time.Sleep(10 * time.Millisecond)
+
+		mu.Lock()
+		if count != 1 {
+			t.Errorf("expected 1 run after adding job, got %d", count)
+		}
+		mu.Unlock()
+	})
+
+	t.Run("remove job while running", func(t *testing.T) {
+		startTime := time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
+		fakeClock := NewFakeClock(startTime)
+
+		var count int
+		var mu sync.Mutex
+
+		cron := New(WithClock(fakeClock))
+		id := cron.Schedule(Every(time.Second), FuncJob(func() {
+			mu.Lock()
+			count++
+			mu.Unlock()
+		}))
+
+		cron.Start()
+		defer cron.Stop()
+
+		fakeClock.BlockUntil(1)
+		fakeClock.Advance(time.Second)
+		time.Sleep(10 * time.Millisecond)
+
+		mu.Lock()
+		if count != 1 {
+			t.Errorf("expected 1 run before removal, got %d", count)
+		}
+		mu.Unlock()
+
+		// Remove the job
+		cron.Remove(id)
+		time.Sleep(10 * time.Millisecond)
+
+		// Advance more time - job should not run
+		fakeClock.Advance(5 * time.Second)
+		time.Sleep(10 * time.Millisecond)
+
+		mu.Lock()
+		if count != 1 {
+			t.Errorf("expected still 1 run after removal, got %d", count)
+		}
+		mu.Unlock()
+	})
 }

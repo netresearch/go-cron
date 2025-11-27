@@ -38,7 +38,7 @@ jobs:
 
       - name: Get version from tag
         id: version
-        run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        run: echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
 
       - name: Generate changelog
         id: changelog
@@ -51,7 +51,7 @@ jobs:
             COMMITS=$(git log --oneline --no-merges)
           else
             echo "Previous tag: $PREV_TAG"
-            COMMITS=$(git log --oneline --no-merges ${PREV_TAG}..HEAD)
+            COMMITS=$(git log --oneline --no-merges "${PREV_TAG}..HEAD")
           fi
 
           # Format commits into categories
@@ -65,26 +65,26 @@ jobs:
             echo "changelog<<EOF"
             if [ -n "$FEATURES" ]; then
               echo "### Features"
-              echo "$FEATURES" | sed 's/^[a-f0-9]* feat[:(]/- /' | sed 's/)$//'
+              echo "$FEATURES" | sed -E 's/^[a-f0-9]+ feat(\([^)]*\))?[:(]?\s*/- /'
               echo ""
             fi
             if [ -n "$FIXES" ]; then
               echo "### Bug Fixes"
-              echo "$FIXES" | sed 's/^[a-f0-9]* fix[:(]/- /' | sed 's/)$//'
+              echo "$FIXES" | sed -E 's/^[a-f0-9]+ fix(\([^)]*\))?[:(]?\s*/- /'
               echo ""
             fi
             if [ -n "$DOCS" ]; then
               echo "### Documentation"
-              echo "$DOCS" | sed 's/^[a-f0-9]* docs[:(]/- /' | sed 's/)$//'
+              echo "$DOCS" | sed -E 's/^[a-f0-9]+ docs(\([^)]*\))?[:(]?\s*/- /'
               echo ""
             fi
             if [ -n "$OTHER" ]; then
               echo "### Other Changes"
-              echo "$OTHER" | sed 's/^[a-f0-9]*/- /'
+              echo "$OTHER" | sed -E 's/^[a-f0-9]+\s+/- /'
               echo ""
             fi
             echo "EOF"
-          } >> $GITHUB_OUTPUT
+          } >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

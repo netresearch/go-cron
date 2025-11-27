@@ -19,7 +19,7 @@ test:
 # Run tests with race detection
 test-race:
 	@echo "==> Running tests with race detection..."
-	@go test -race -v ./...
+	@CGO_ENABLED=1 go test -race -v ./...
 
 # Run tests with coverage
 test-coverage:

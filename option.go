@@ -44,19 +44,23 @@ func WithLogger(logger Logger) Option {
 	}
 }
 
-// WithClock uses the provided clock function instead of time.Now.
+// WithClock uses the provided Clock implementation instead of the default RealClock.
 // This is useful for testing time-dependent behavior without waiting.
+//
+// The Clock interface provides both Now() for current time and NewTimer() for
+// creating timers, enabling fully deterministic testing of scheduled jobs.
 //
 // Example usage:
 //
-//	// For testing, use a fixed time
-//	fixedTime := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
-//	c := cron.New(cron.WithClock(func() time.Time { return fixedTime }))
+//	// For testing with FakeClock (recommended)
+//	fakeClock := cron.NewFakeClock(time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC))
+//	c := cron.New(cron.WithClock(fakeClock))
+//	// ... add jobs ...
+//	c.Start()
+//	fakeClock.Advance(time.Hour) // Advance time and trigger jobs deterministically
 //
-//	// Or advance time manually
-//	var currentTime atomic.Value
-//	currentTime.Store(time.Now())
-//	c := cron.New(cron.WithClock(func() time.Time { return currentTime.Load().(time.Time) }))
+//	// For backward compatibility with the old function-based Clock
+//	c := cron.New(cron.WithClock(cron.ClockFunc(time.Now)))
 func WithClock(clock Clock) Option {
 	return func(c *Cron) {
 		c.clock = clock
