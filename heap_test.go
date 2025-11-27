@@ -117,6 +117,40 @@ func TestHeapUpdate(t *testing.T) {
 	}
 }
 
+func TestHeapUpdateStaleEntry(t *testing.T) {
+	h := &entryHeap{}
+	heap.Init(h)
+
+	now := time.Now()
+	e1 := &Entry{ID: 1, Next: now.Add(1 * time.Hour), heapIndex: -1}
+	e2 := &Entry{ID: 2, Next: now.Add(2 * time.Hour), heapIndex: -1}
+
+	heap.Push(h, e1)
+	heap.Push(h, e2)
+
+	// Remove e1 from heap
+	heap.Remove(h, e1.heapIndex)
+
+	// e1 now has heapIndex = -1, e2 is still in heap
+	// Verify e1's heapIndex is -1 after removal
+	if e1.heapIndex != -1 {
+		t.Errorf("expected heapIndex -1 after removal, got %d", e1.heapIndex)
+	}
+
+	// Try to update e1 (stale entry) - should be a no-op, not corrupt heap
+	e1.Next = now.Add(30 * time.Minute)
+	e1.heapIndex = 0 // Simulate stale/corrupted heapIndex pointing to e2's position
+	h.Update(e1)
+
+	// Heap should still be valid with only e2
+	if h.Len() != 1 {
+		t.Errorf("expected 1 entry, got %d", h.Len())
+	}
+	if h.Peek().ID != 2 {
+		t.Errorf("expected ID 2 at top, got %d", h.Peek().ID)
+	}
+}
+
 func TestHeapRemove(t *testing.T) {
 	h := &entryHeap{}
 	heap.Init(h)
