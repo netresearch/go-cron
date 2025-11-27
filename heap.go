@@ -59,9 +59,9 @@ func (h entryHeap) Peek() *Entry {
 }
 
 // Update re-establishes heap ordering after an entry's Next time has changed.
-// This is O(log n).
+// This is O(log n). The entry must still be in the heap at its recorded heapIndex.
 func (h *entryHeap) Update(entry *Entry) {
-	if entry.heapIndex >= 0 && entry.heapIndex < len(*h) {
+	if entry.heapIndex >= 0 && entry.heapIndex < len(*h) && (*h)[entry.heapIndex] == entry {
 		heap.Fix(h, entry.heapIndex)
 	}
 }
