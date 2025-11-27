@@ -274,7 +274,10 @@ func (c *Cron) run() {
 
 				// Handle system time moving backwards (NTP correction, VM snapshot restore).
 				// If Prev is in the future relative to now, time moved backwards.
-				for _, e := range c.entries {
+				// Iterate over a copy since Update() reorders the heap.
+				entriesCopy := make([]*Entry, len(c.entries))
+				copy(entriesCopy, c.entries)
+				for _, e := range entriesCopy {
 					if !e.Prev.IsZero() && e.Prev.After(now) {
 						e.Next = e.Schedule.Next(now)
 						c.entries.Update(e)
