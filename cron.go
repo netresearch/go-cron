@@ -165,6 +165,9 @@ func (c *Cron) Schedule(schedule Schedule, cmd Job) EntryID {
 	c.runningMu.Lock()
 	defer c.runningMu.Unlock()
 	c.nextID++
+	if c.nextID == 0 {
+		c.nextID = 1 // Skip 0; Entry.Valid() uses 0 as invalid sentinel
+	}
 	entry := &Entry{
 		ID:         c.nextID,
 		Schedule:   schedule,
