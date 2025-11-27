@@ -22,3 +22,7 @@ _testmain.go
 *.exe
 .serena/
 claudedocs/
+
+# Test artifacts
+coverage.out
+*.coverprofile
