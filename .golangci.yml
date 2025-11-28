@@ -20,6 +20,10 @@ linters:
 
     # Style & maintainability
     - gocyclo         # Cyclomatic complexity
+    - gocognit        # Cognitive complexity (different from cyclomatic)
+    - funlen          # Function length limits
+    - nestif          # Nested if statement depth
+    - cyclop          # Package-level complexity analysis
     - ineffassign     # Ineffective assignments
     - unused          # Unused code detection
     - misspell        # Spelling mistakes
@@ -31,7 +35,16 @@ linters:
 
   settings:
     gocyclo:
-      min-complexity: 25  # DST handling in Next() requires inherent complexity
+      min-complexity: 20  # Tightened from 25; DST algorithm excluded below
+    gocognit:
+      min-complexity: 35  # Cognitive complexity (spec.go:Next is 44, excluded)
+    funlen:
+      lines: 80           # Max function length (excluding comments/blank lines)
+      statements: 50      # Max statements per function
+    nestif:
+      min-complexity: 4   # Max nested if depth
+    cyclop:
+      max-complexity: 15  # Package-level cyclomatic complexity
     misspell:
       locale: US
     staticcheck:
@@ -85,11 +98,37 @@ linters:
     rules:
       - linters:
           - gocyclo
+          - gocognit
+          - funlen     # Test functions are often long table-driven tests
+          - cyclop     # Test complexity is expected
+          - nestif     # Test conditionals are often complex
           - gocritic
           - prealloc   # Test setup often doesn't benefit from prealloc
           - gosec      # G115 int conversion in tests is safe
           - gci        # Test import order less critical
         path: _test\.go
+      # Exclude inherently complex algorithms from complexity checks
+      - linters:
+          - gocyclo
+          - gocognit
+          - cyclop
+          - funlen
+        path: spec\.go
+        source: "func.*Next"  # DST algorithm requires inherent complexity
+      - linters:
+          - gocyclo
+          - gocognit
+          - cyclop
+        path: cron\.go
+        source: "func.*run"   # Scheduler loop requires inherent complexity
+      - linters:
+          - gocyclo
+          - cyclop
+        path: parser\.go
+        source: "func.*(getRange|normalizeFields|Parse|validateTimezone)"  # Parsing logic requires branching
+      - linters:
+          - nestif
+        path: parser\.go  # Timezone parsing has legitimate nested conditionals
       - linters:
           - errcheck
         path: _test\.go
