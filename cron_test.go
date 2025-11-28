@@ -721,6 +721,39 @@ func TestStopAndWait(t *testing.T) {
 			t.Error("context not done even when cron Stop is completed")
 		}
 	})
+
+	t.Run("StopAndWait blocks until job completes", func(t *testing.T) {
+		cron := newWithSeconds()
+		var completed atomic.Bool
+		cron.AddFunc("* * * * * *", func() {
+			time.Sleep(500 * time.Millisecond)
+			completed.Store(true)
+		})
+		cron.Start()
+		time.Sleep(time.Second) // Wait for job to start running
+
+		// StopAndWait should block until job completes
+		cron.StopAndWait()
+
+		if !completed.Load() {
+			t.Error("StopAndWait returned before job completed")
+		}
+	})
+
+	t.Run("StopAndWait on non-running cron returns immediately", func(t *testing.T) {
+		cron := newWithSeconds()
+		done := make(chan struct{})
+		go func() {
+			cron.StopAndWait()
+			close(done)
+		}()
+		select {
+		case <-done:
+			// expected
+		case <-time.After(100 * time.Millisecond):
+			t.Error("StopAndWait blocked on non-running cron")
+		}
+	})
 }
 
 func TestMultiThreadedStartAndStop(t *testing.T) {

@@ -373,6 +373,17 @@ func (c *Cron) Stop() context.Context {
 	return ctx
 }
 
+// StopAndWait stops the cron scheduler and blocks until all running jobs complete.
+// This is a convenience method equivalent to:
+//
+//	ctx := c.Stop()
+//	<-ctx.Done()
+//
+// For timeout-based shutdown, use Stop() directly and select on the returned context.
+func (c *Cron) StopAndWait() {
+	<-c.Stop().Done()
+}
+
 // entrySnapshot returns a copy of the current cron entry list, sorted by next execution time.
 func (c *Cron) entrySnapshot() []Entry {
 	entries := make([]Entry, len(c.entries))
