@@ -192,6 +192,44 @@ Install wrappers for individual jobs by explicitly wrapping them:
 		cron.SkipIfStillRunning(logger),
 	).Then(job)
 
+# Timeout Wrapper Caveats
+
+The Timeout wrapper uses an "abandonment model" - when a job exceeds its timeout,
+the wrapper returns but the job's goroutine continues running in the background.
+This design has important implications:
+
+  - The job is NOT canceled; it runs to completion even after timeout
+  - Resources held by the job are not released until the job naturally completes
+  - Side effects (database writes, API calls) still occur after timeout
+  - Multiple abandoned goroutines can accumulate if jobs consistently timeout
+
+This is the only practical approach without context.Context support in the Job
+interface. For jobs that need true cancellation:
+
+  - Implement your own cancellation mechanism using channels or atomic flags
+  - Have your job check for cancellation signals at safe points
+  - Consider using shorter timeout values as a circuit breaker rather than for cancellation
+
+Example of a cancellable job pattern:
+
+	type CancellableJob struct {
+		cancel chan struct{}
+	}
+
+	func (j *CancellableJob) Run() {
+		for {
+			select {
+			case <-j.cancel:
+				return // Clean exit on cancellation
+			default:
+				// Do work in small chunks
+				if done := doWorkChunk(); done {
+					return
+				}
+			}
+		}
+	}
+
 # Thread safety
 
 Since the Cron service runs concurrently with the calling code, some amount of
