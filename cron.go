@@ -3,10 +3,16 @@ package cron
 import (
 	"container/heap"
 	"context"
+	"errors"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 )
+
+// ErrMaxEntriesReached is returned when adding an entry would exceed the configured
+// maximum number of entries (see WithMaxEntries).
+var ErrMaxEntriesReached = errors.New("cron: max entries limit reached")
 
 // maxIdleDuration is the sleep duration when no entries are scheduled.
 // Using a very long duration (~11.4 years) instead of blocking indefinitely
@@ -38,6 +44,8 @@ type Cron struct {
 	jobWaiter  sync.WaitGroup
 	clock      Clock
 	hooks      *ObservabilityHooks
+	maxEntries int   // 0 means unlimited
+	entryCount int64 // atomic counter for race-free limit checking
 }
 
 // ScheduleParser is an interface for schedule spec parsers that return a Schedule
@@ -159,19 +167,40 @@ func (c *Cron) AddFunc(spec string, cmd func()) (EntryID, error) {
 // AddJob adds a Job to the Cron to be run on the given schedule.
 // The spec is parsed using the time zone of this Cron instance as the default.
 // An opaque ID is returned that can be used to later remove it.
+//
+// Returns ErrMaxEntriesReached if the maximum entry limit has been reached.
 func (c *Cron) AddJob(spec string, cmd Job) (EntryID, error) {
 	schedule, err := c.parser.Parse(spec)
 	if err != nil {
 		return 0, err
 	}
-	return c.Schedule(schedule, cmd), nil
+	id := c.Schedule(schedule, cmd)
+	if id == 0 {
+		return 0, ErrMaxEntriesReached
+	}
+	return id, nil
 }
 
 // Schedule adds a Job to the Cron to be run on the given schedule.
 // The job is wrapped with the configured Chain.
+//
+// If a maximum entry limit is configured (via WithMaxEntries) and the limit
+// has been reached, Schedule returns 0 (an invalid EntryID) and logs a warning.
+// Use AddJob or AddFunc to get an error return when the limit is exceeded.
+//
+// Note: When the cron is running, the limit check is approximate due to
+// concurrent entry additions. The actual count may briefly exceed the limit
+// by the number of concurrent Schedule calls in flight.
 func (c *Cron) Schedule(schedule Schedule, cmd Job) EntryID {
 	c.runningMu.Lock()
 	defer c.runningMu.Unlock()
+
+	// Check entry limit using atomic counter for race-free checking
+	if c.maxEntries > 0 && int(atomic.LoadInt64(&c.entryCount)) >= c.maxEntries {
+		c.logger.Error(ErrMaxEntriesReached, "max entries reached", "limit", c.maxEntries)
+		return 0
+	}
+
 	c.nextID++
 	if c.nextID == 0 {
 		c.nextID = 1 // Skip 0; Entry.Valid() uses 0 as invalid sentinel
@@ -186,6 +215,7 @@ func (c *Cron) Schedule(schedule Schedule, cmd Job) EntryID {
 	if !c.running {
 		heap.Push(&c.entries, entry)
 		c.entryIndex[entry.ID] = entry
+		atomic.AddInt64(&c.entryCount, 1)
 	} else {
 		c.add <- entry
 	}
@@ -340,6 +370,7 @@ func (c *Cron) run() {
 				newEntry.Next = newEntry.Schedule.Next(now)
 				heap.Push(&c.entries, newEntry)
 				c.entryIndex[newEntry.ID] = newEntry
+				atomic.AddInt64(&c.entryCount, 1)
 				c.hooks.callOnSchedule(newEntry.ID, newEntry.Job, newEntry.Next)
 				c.logger.Info("added", "now", now, "entry", newEntry.ID, "next", newEntry.Next)
 
@@ -455,5 +486,6 @@ func (c *Cron) removeEntry(id EntryID) {
 	if entry, ok := c.entryIndex[id]; ok {
 		c.entries.RemoveAt(entry)
 		delete(c.entryIndex, id)
+		atomic.AddInt64(&c.entryCount, -1)
 	}
 }
