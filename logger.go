@@ -10,10 +10,10 @@ import (
 )
 
 // DefaultLogger is used by Cron if none is specified.
-var DefaultLogger Logger = PrintfLogger(log.New(os.Stdout, "cron: ", log.LstdFlags))
+var DefaultLogger = PrintfLogger(log.New(os.Stdout, "cron: ", log.LstdFlags))
 
 // DiscardLogger can be used by callers to discard all log messages.
-var DiscardLogger Logger = PrintfLogger(log.New(io.Discard, "", 0))
+var DiscardLogger = PrintfLogger(log.New(io.Discard, "", 0))
 
 // Logger is the interface used in this package for logging, so that any backend
 // can be plugged in. It is a subset of the github.com/go-logr/logr interface.
@@ -101,10 +101,12 @@ func NewSlogLogger(l *slog.Logger) *SlogLogger {
 	return &SlogLogger{logger: l}
 }
 
+// Info logs routine messages about cron's operation using slog.
 func (s *SlogLogger) Info(msg string, keysAndValues ...interface{}) {
 	s.logger.Info(msg, keysAndValues...)
 }
 
+// Error logs an error condition using slog.
 func (s *SlogLogger) Error(err error, msg string, keysAndValues ...interface{}) {
 	s.logger.Error(msg, append([]interface{}{"error", err}, keysAndValues...)...)
 }

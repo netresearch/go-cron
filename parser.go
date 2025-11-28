@@ -8,12 +8,13 @@ import (
 	"time"
 )
 
-// Configuration options for creating a parser. Most options specify which
-// fields should be included, while others enable features. If a field is not
-// included the parser will assume a default value. These options do not change
-// the order fields are parse in.
+// ParseOption represents configuration options for creating a parser.
+// Most options specify which fields should be included, while others enable features.
+// If a field is not included the parser will assume a default value.
+// These options do not change the order fields are parsed in.
 type ParseOption int
 
+// ParseOption constants define which fields are included in parsing.
 const (
 	Second         ParseOption = 1 << iota // Seconds field, default 0
 	SecondOptional                         // Optional seconds field, default 0
@@ -44,7 +45,7 @@ var defaults = []string{
 	"*",
 }
 
-// A custom Parser that can be configured.
+// Parser is a custom cron expression parser that can be configured.
 type Parser struct {
 	options ParseOption
 }
@@ -96,10 +97,6 @@ func NewParser(options ParseOption) Parser {
 // This limit prevents potential resource exhaustion from extremely long inputs.
 const MaxSpecLength = 1024
 
-// Parse returns a new crontab schedule representing the given spec.
-// It returns a descriptive error if the spec is not valid.
-// It accepts crontab specs and features configured by NewParser.
-
 // parseTimezone extracts and validates the timezone from a spec string.
 // Returns the location, remaining spec string, and any error.
 func parseTimezone(spec string) (*time.Location, string, error) {
@@ -132,6 +129,9 @@ func parseTimezone(spec string) (*time.Location, string, error) {
 	return loc, remaining, nil
 }
 
+// Parse returns a new crontab schedule representing the given spec.
+// It returns a descriptive error if the spec is not valid.
+// It accepts crontab specs and features configured by NewParser.
 func (p Parser) Parse(spec string) (Schedule, error) {
 	if len(spec) == 0 {
 		return nil, fmt.Errorf("empty spec string")
@@ -235,19 +235,19 @@ func normalizeFields(fields []string, options ParseOption) ([]string, error) {
 		return nil, err
 	}
 
-	max := countConfiguredFields(options)
-	min := max - optionals
+	maxFields := countConfiguredFields(options)
+	minFields := maxFields - optionals
 
 	// Validate number of fields
-	if count := len(fields); count < min || count > max {
-		if min == max {
-			return nil, fmt.Errorf("expected exactly %d fields, found %d: %s", min, count, fields)
+	if count := len(fields); count < minFields || count > maxFields {
+		if minFields == maxFields {
+			return nil, fmt.Errorf("expected exactly %d fields, found %d: %s", minFields, count, fields)
 		}
-		return nil, fmt.Errorf("expected %d to %d fields, found %d: %s", min, max, count, fields)
+		return nil, fmt.Errorf("expected %d to %d fields, found %d: %s", minFields, maxFields, count, fields)
 	}
 
 	// Populate the optional field if not provided
-	if min < max && len(fields) == min {
+	if minFields < maxFields && len(fields) == minFields {
 		switch {
 		case options&DowOptional > 0:
 			fields = append(fields, defaults[5])
@@ -452,17 +452,17 @@ func mustParseInt(expr string) (uint, error) {
 	return uint(num), nil
 }
 
-// getBits sets all bits in the range [min, max], modulo the given step size.
-func getBits(min, max, step uint) uint64 {
+// getBits sets all bits in the range [low, high], modulo the given step size.
+func getBits(low, high, step uint) uint64 {
 	var bits uint64
 
 	// If step is 1, use shifts.
 	if step == 1 {
-		return ^(math.MaxUint64 << (max + 1)) & (math.MaxUint64 << min)
+		return ^(math.MaxUint64 << (high + 1)) & (math.MaxUint64 << low)
 	}
 
 	// Else, use a simple loop.
-	for i := min; i <= max; i += step {
+	for i := low; i <= high; i += step {
 		bits |= 1 << i
 	}
 	return bits
