@@ -45,6 +45,9 @@ import cron "github.com/netresearch/go-cron"
 
 The API is 100% compatible with robfig/cron v3.
 
+> [!TIP]
+> See [docs/MIGRATION.md](docs/MIGRATION.md) for a comprehensive migration guide including behavioral differences, type changes, and troubleshooting.
+
 ## Quick Start
 
 ```go
