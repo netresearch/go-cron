@@ -91,3 +91,32 @@ func WithObservability(hooks ObservabilityHooks) Option {
 		c.hooks = &hooks
 	}
 }
+
+// WithMaxEntries limits the maximum number of entries that can be added to the Cron.
+// When the limit is reached:
+//   - AddFunc and AddJob return ErrMaxEntriesReached
+//   - Schedule returns 0 (invalid EntryID) and logs an error
+//
+// A limit of 0 (the default) means unlimited entries.
+//
+// This option provides protection against memory exhaustion from excessive
+// entry additions, which could occur from buggy code or untrusted input.
+//
+// Note: When the cron is running, the limit enforcement is approximate due to
+// concurrent entry additions. The actual count may briefly exceed the limit.
+//
+// Example usage:
+//
+//	c := cron.New(cron.WithMaxEntries(1000))
+//	for i := 0; i < 2000; i++ {
+//	    _, err := c.AddFunc("* * * * *", func() {})
+//	    if errors.Is(err, cron.ErrMaxEntriesReached) {
+//	        log.Println("Entry limit reached")
+//	        break
+//	    }
+//	}
+func WithMaxEntries(max int) Option {
+	return func(c *Cron) {
+		c.maxEntries = max
+	}
+}

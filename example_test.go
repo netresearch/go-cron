@@ -411,3 +411,32 @@ func ExampleNamedJob() {
 	fmt.Println("NamedJob provides names for observability hooks")
 	// Output: NamedJob provides names for observability hooks
 }
+
+// This example demonstrates using WithMaxEntries to limit the number of jobs.
+// This provides protection against memory exhaustion from excessive entry additions.
+func ExampleWithMaxEntries() {
+	c := cron.New(cron.WithMaxEntries(2))
+
+	// Add first job - succeeds
+	_, err := c.AddFunc("@hourly", func() { fmt.Println("Job 1") })
+	if err != nil {
+		fmt.Println("Job 1 failed:", err)
+	}
+
+	// Add second job - succeeds
+	_, err = c.AddFunc("@hourly", func() { fmt.Println("Job 2") })
+	if err != nil {
+		fmt.Println("Job 2 failed:", err)
+	}
+
+	// Add third job - fails (limit reached)
+	_, err = c.AddFunc("@hourly", func() { fmt.Println("Job 3") })
+	if err != nil {
+		fmt.Println("Job 3 failed:", err)
+	}
+
+	fmt.Printf("Total jobs: %d\n", len(c.Entries()))
+	// Output:
+	// Job 3 failed: cron: max entries limit reached
+	// Total jobs: 2
+}
