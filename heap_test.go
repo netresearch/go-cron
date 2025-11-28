@@ -281,3 +281,138 @@ func BenchmarkHeapUpdate(b *testing.B) {
 		h.Update(e)
 	}
 }
+
+func TestRemoveAt(t *testing.T) {
+	h := &entryHeap{}
+	heap.Init(h)
+
+	now := time.Now()
+	entries := []*Entry{
+		{ID: 1, Next: now.Add(1 * time.Hour), heapIndex: -1},
+		{ID: 2, Next: now.Add(2 * time.Hour), heapIndex: -1},
+		{ID: 3, Next: now.Add(3 * time.Hour), heapIndex: -1},
+	}
+
+	for _, e := range entries {
+		heap.Push(h, e)
+	}
+
+	// Remove middle entry using RemoveAt
+	if !h.RemoveAt(entries[1]) {
+		t.Error("expected RemoveAt to return true for existing entry")
+	}
+	if h.Len() != 2 {
+		t.Errorf("expected 2 entries after removal, got %d", h.Len())
+	}
+
+	// Try to remove entry that's no longer in heap (stale reference)
+	if h.RemoveAt(entries[1]) {
+		t.Error("expected RemoveAt to return false for already-removed entry")
+	}
+
+	// Verify remaining entries
+	e1 := heap.Pop(h).(*Entry)
+	e2 := heap.Pop(h).(*Entry)
+	if e1.ID != 1 || e2.ID != 3 {
+		t.Errorf("unexpected entries after removal: %d, %d", e1.ID, e2.ID)
+	}
+}
+
+func TestRemoveAtStaleIndex(t *testing.T) {
+	h := &entryHeap{}
+	heap.Init(h)
+
+	now := time.Now()
+	e1 := &Entry{ID: 1, Next: now.Add(1 * time.Hour), heapIndex: -1}
+	e2 := &Entry{ID: 2, Next: now.Add(2 * time.Hour), heapIndex: -1}
+
+	heap.Push(h, e1)
+	heap.Push(h, e2)
+
+	// Remove e1 via RemoveAt
+	h.RemoveAt(e1)
+
+	// Create a fake entry with a stale heapIndex pointing to e2's position
+	stale := &Entry{ID: 99, Next: now, heapIndex: 0}
+	if h.RemoveAt(stale) {
+		t.Error("expected RemoveAt to return false when entry pointer doesn't match")
+	}
+
+	// Heap should still have e2
+	if h.Len() != 1 {
+		t.Errorf("expected 1 entry, got %d", h.Len())
+	}
+	if h.Peek().ID != 2 {
+		t.Errorf("expected ID 2 at top, got %d", h.Peek().ID)
+	}
+}
+
+// BenchmarkRemoveByID benchmarks the old O(n) removal by ID scan.
+// Uses a pre-built heap and measures only the removal operation.
+func BenchmarkRemoveByID(b *testing.B) {
+	const size = 1000
+	now := time.Now()
+
+	// Pre-build heap once
+	h := &entryHeap{}
+	heap.Init(h)
+	for j := 0; j < size; j++ {
+		e := &Entry{
+			ID:        EntryID(j + 1),
+			Next:      now.Add(time.Duration(j) * time.Second),
+			heapIndex: -1,
+		}
+		heap.Push(h, e)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		// Remove and re-add to keep heap size constant
+		targetID := EntryID((i % size) + 1)
+		h.Remove(targetID)
+		e := &Entry{
+			ID:        targetID,
+			Next:      now.Add(time.Duration(size+i) * time.Second),
+			heapIndex: -1,
+		}
+		heap.Push(h, e)
+	}
+}
+
+// BenchmarkRemoveAtWithIndex benchmarks the new O(1) lookup + O(log n) removal.
+// Uses a pre-built heap and index, measuring only the removal operation.
+func BenchmarkRemoveAtWithIndex(b *testing.B) {
+	const size = 1000
+	now := time.Now()
+
+	// Pre-build heap and index once
+	h := &entryHeap{}
+	heap.Init(h)
+	index := make(map[EntryID]*Entry)
+	for j := 0; j < size; j++ {
+		e := &Entry{
+			ID:        EntryID(j + 1),
+			Next:      now.Add(time.Duration(j) * time.Second),
+			heapIndex: -1,
+		}
+		heap.Push(h, e)
+		index[e.ID] = e
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		// Remove and re-add to keep heap size constant
+		targetID := EntryID((i % size) + 1)
+		if entry, ok := index[targetID]; ok {
+			h.RemoveAt(entry)
+			delete(index, targetID)
+		}
+		e := &Entry{
+			ID:        targetID,
+			Next:      now.Add(time.Duration(size+i) * time.Second),
+			heapIndex: -1,
+		}
+		heap.Push(h, e)
+		index[e.ID] = e
+	}
+}

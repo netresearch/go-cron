@@ -69,6 +69,8 @@ func (h *entryHeap) Update(entry *Entry) {
 
 // Remove removes a specific entry from the heap by ID.
 // Returns true if the entry was found and removed.
+//
+// Deprecated: Use RemoveAt with an index map for O(1) lookup instead of O(n) scan.
 func (h *entryHeap) Remove(id EntryID) bool {
 	for i, entry := range *h {
 		if entry.ID == id {
@@ -77,4 +79,17 @@ func (h *entryHeap) Remove(id EntryID) bool {
 		}
 	}
 	return false
+}
+
+// RemoveAt removes the entry at the given heap index.
+// This is O(log n) when the index is known. The entry pointer is validated
+// to ensure the index hasn't become stale due to concurrent modifications.
+// Returns true if the entry was found and removed.
+func (h *entryHeap) RemoveAt(entry *Entry) bool {
+	idx := entry.heapIndex
+	if idx < 0 || idx >= len(*h) || (*h)[idx] != entry {
+		return false
+	}
+	heap.Remove(h, idx)
+	return true
 }
