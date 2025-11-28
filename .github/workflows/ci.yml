@@ -208,3 +208,44 @@ jobs:
         with:
           name: benchmark-results
           path: benchmark-results.txt
+
+  license-check:
+    name: license compliance
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install go-licenses
+        run: go install github.com/google/go-licenses@latest
+
+      - name: Check license compliance
+        run: |
+          echo "Checking license compliance..."
+          $(go env GOPATH)/bin/go-licenses check ./... 2>&1 | tee license-report.txt || true
+
+          # Fail on copyleft licenses that require source disclosure
+          if grep -iE "(GPL|AGPL|LGPL|SSPL|CDDL|EPL|MPL)" license-report.txt | grep -v "Apache\|MIT\|BSD\|ISC"; then
+            echo "::error::Copyleft license detected - review required"
+            exit 1
+          fi
+          echo "License check passed - no problematic licenses detected"
+
+      - name: Generate license report
+        run: |
+          $(go env GOPATH)/bin/go-licenses report ./... 2>/dev/null > license-report-full.txt || true
+          echo "=== License Summary ==="
+          cat license-report-full.txt
+
+      - name: Upload license report
+        uses: actions/upload-artifact@v4
+        with:
+          name: license-report
+          path: |
+            license-report.txt
+            license-report-full.txt

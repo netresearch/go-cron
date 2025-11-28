@@ -4,15 +4,34 @@ run:
 linters:
   default: none
   enable:
-    - gocyclo
-    - govet
-    - ineffassign
-    - misspell
-    - staticcheck
-    - unused
+    # Bugs & correctness
+    - govet           # Go vet checks
+    - staticcheck     # Comprehensive static analysis
+    - errcheck        # Unchecked errors
+    - errorlint       # Error wrapping issues
+    - bodyclose       # HTTP response body close
+    - noctx           # HTTP requests without context
+    - rowserrcheck    # SQL rows.Err() checks
+    - sqlclosecheck   # SQL rows/statements close
+
+    # Performance
+    - prealloc        # Slice preallocation suggestions
+    - unconvert       # Unnecessary type conversions
+
+    # Style & maintainability
+    - gocyclo         # Cyclomatic complexity
+    - ineffassign     # Ineffective assignments
+    - unused          # Unused code detection
+    - misspell        # Spelling mistakes
+    - revive          # Fast, configurable linter (replaces golint)
+    - gocritic        # Opinionated linter with many checks
+
+    # Security (complements gosec)
+    - gosec           # Security issues
+
   settings:
     gocyclo:
-      min-complexity: 25
+      min-complexity: 25  # DST handling in Next() requires inherent complexity
     misspell:
       locale: US
     staticcheck:
@@ -20,6 +39,42 @@ linters:
         - all
         - -S1000  # Allow single-case select for readability
         - -S1037  # Allow select with timeout channel for test patterns
+    revive:
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: dot-imports
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+        - name: exported
+        - name: increment-decrement
+        - name: var-naming
+        - name: var-declaration
+        - name: package-comments
+        - name: range
+        - name: receiver-naming
+        - name: time-naming
+        - name: unexported-return
+        - name: indent-error-flow
+        - name: errorf
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - style
+        - performance
+      disabled-checks:
+        - hugeParam  # Too strict for this codebase
+        - rangeValCopy  # Minor performance, reduces readability
+        - builtinShadow  # min/max vars predate Go 1.21 builtins, code is clear
+        - emptyStringTest  # len(s) == 0 is idiomatic in some contexts
+    errcheck:
+      check-type-assertions: true
+      check-blank: false  # Allow explicit _ = err for intentional ignores
+    gosec:
+      excludes:
+        - G104  # Audit errors not checked (too noisy for this codebase)
   exclusions:
     generated: lax
     presets:
@@ -30,7 +85,22 @@ linters:
     rules:
       - linters:
           - gocyclo
+          - gocritic
+          - prealloc   # Test setup often doesn't benefit from prealloc
+          - gosec      # G115 int conversion in tests is safe
+          - gci        # Test import order less critical
         path: _test\.go
+      - linters:
+          - errcheck
+        path: _test\.go
+        text: "Error return value"  # Test files often ignore errors intentionally
+      - linters:
+          - revive
+        text: "should omit type"  # Explicit types improve readability for public vars
+      - linters:
+          - revive
+        path: _test\.go
+        text: "time-naming"  # Test duration constants use descriptive names
     paths:
       - third_party$
       - builtin$
