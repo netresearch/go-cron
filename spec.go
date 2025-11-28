@@ -49,8 +49,16 @@ var (
 )
 
 const (
-	// Set the top bit if a star was included in the expression.
+	// starBit marks a field that was specified with a wildcard (*).
+	// Using bit 63 (MSB of uint64) ensures it cannot conflict with any valid
+	// schedule bit: seconds/minutes use bits 0-59, hours 0-23, days 1-31,
+	// months 1-12, weekdays 0-6. All are well below bit 63.
 	starBit = 1 << 63
+
+	// scheduleSearchYears is how many years into the future Next() will search
+	// before giving up and returning zero time. This prevents infinite loops
+	// for unsatisfiable schedules (e.g., Feb 30).
+	scheduleSearchYears = 5
 )
 
 // advanceMinute advances time until minute matches, returns new time and wrap flag.
@@ -138,8 +146,8 @@ func (s *SpecSchedule) Next(t time.Time) time.Time {
 	t, loc, origLocation := prepareTimeForSchedule(t, s.Location)
 	added := false // indicates whether a field has been incremented
 
-	// If no time is found within five years, return zero.
-	yearLimit := t.Year() + 5
+	// If no time is found within the search limit, return zero.
+	yearLimit := t.Year() + scheduleSearchYears
 
 WRAP:
 	if t.Year() > yearLimit {

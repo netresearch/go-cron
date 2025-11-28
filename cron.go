@@ -8,6 +8,12 @@ import (
 	"time"
 )
 
+// maxIdleDuration is the sleep duration when no entries are scheduled.
+// Using a very long duration (~11.4 years) instead of blocking indefinitely
+// allows the scheduler loop to still respond to add, remove, and stop operations.
+// This is a practical "infinity" that avoids timer overflow concerns.
+const maxIdleDuration = 100000 * time.Hour
+
 // Cron keeps track of any number of entries, invoking the associated func as
 // specified by the schedule. It may be started, stopped, and the entries may
 // be inspected while running.
@@ -279,7 +285,7 @@ func (c *Cron) run() {
 		if next == nil || next.Next.IsZero() {
 			// If there are no entries yet, just sleep - it still handles new entries
 			// and stop requests.
-			timer = c.clock.NewTimer(100000 * time.Hour)
+			timer = c.clock.NewTimer(maxIdleDuration)
 		} else {
 			timer = c.clock.NewTimer(next.Next.Sub(now))
 		}
