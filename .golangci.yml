@@ -35,9 +35,9 @@ linters:
 
   settings:
     gocyclo:
-      min-complexity: 20  # Tightened from 25; DST algorithm excluded below
+      min-complexity: 15  # Tightened: parser.go refactored to comply
     gocognit:
-      min-complexity: 35  # Cognitive complexity (spec.go:Next is 44, excluded)
+      min-complexity: 30  # Tightened: spec.go:Next excluded (inherent complexity)
     funlen:
       lines: 80           # Max function length (excluding comments/blank lines)
       statements: 50      # Max statements per function
@@ -121,14 +121,7 @@ linters:
           - cyclop
         path: cron\.go
         source: "func.*run"   # Scheduler loop requires inherent complexity
-      - linters:
-          - gocyclo
-          - cyclop
-        path: parser\.go
-        source: "func.*(getRange|normalizeFields|Parse|validateTimezone)"  # Parsing logic requires branching
-      - linters:
-          - nestif
-        path: parser\.go  # Timezone parsing has legitimate nested conditionals
+
       - linters:
           - errcheck
         path: _test\.go

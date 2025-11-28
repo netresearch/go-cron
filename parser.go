@@ -99,6 +99,39 @@ const MaxSpecLength = 1024
 // Parse returns a new crontab schedule representing the given spec.
 // It returns a descriptive error if the spec is not valid.
 // It accepts crontab specs and features configured by NewParser.
+
+// parseTimezone extracts and validates the timezone from a spec string.
+// Returns the location, remaining spec string, and any error.
+func parseTimezone(spec string) (*time.Location, string, error) {
+	if !strings.HasPrefix(spec, "TZ=") && !strings.HasPrefix(spec, "CRON_TZ=") {
+		return time.Local, spec, nil
+	}
+
+	i := strings.Index(spec, " ")
+	if i == -1 {
+		return nil, "", fmt.Errorf("missing fields after timezone in spec %q", spec)
+	}
+
+	eq := strings.Index(spec, "=")
+	tzName := spec[eq+1 : i]
+
+	if err := validateTimezone(tzName); err != nil {
+		return nil, "", fmt.Errorf("invalid timezone %q: %w", tzName, err)
+	}
+
+	loc, err := time.LoadLocation(tzName)
+	if err != nil {
+		return nil, "", fmt.Errorf("provided bad location %s: %w", tzName, err)
+	}
+
+	remaining := strings.TrimSpace(spec[i:])
+	if len(remaining) == 0 {
+		return nil, "", fmt.Errorf("missing fields after timezone in spec")
+	}
+
+	return loc, remaining, nil
+}
+
 func (p Parser) Parse(spec string) (Schedule, error) {
 	if len(spec) == 0 {
 		return nil, fmt.Errorf("empty spec string")
@@ -107,28 +140,9 @@ func (p Parser) Parse(spec string) (Schedule, error) {
 		return nil, fmt.Errorf("spec too long: %d > %d", len(spec), MaxSpecLength)
 	}
 
-	// Extract timezone if present
-	loc := time.Local
-	if strings.HasPrefix(spec, "TZ=") || strings.HasPrefix(spec, "CRON_TZ=") {
-		var err error
-		i := strings.Index(spec, " ")
-		eq := strings.Index(spec, "=")
-		// Fix for issue #554: Check if space exists after timezone
-		if i == -1 {
-			return nil, fmt.Errorf("missing fields after timezone in spec %q", spec)
-		}
-		tzName := spec[eq+1 : i]
-		if err = validateTimezone(tzName); err != nil {
-			return nil, fmt.Errorf("invalid timezone %q: %w", tzName, err)
-		}
-		if loc, err = time.LoadLocation(tzName); err != nil {
-			return nil, fmt.Errorf("provided bad location %s: %w", tzName, err)
-		}
-		spec = strings.TrimSpace(spec[i:])
-		// Fix for issue #555: Check if spec has content after timezone
-		if len(spec) == 0 {
-			return nil, fmt.Errorf("missing fields after timezone in spec")
-		}
+	loc, spec, err := parseTimezone(spec)
+	if err != nil {
+		return nil, err
 	}
 
 	// Handle named schedules (descriptors), if configured
@@ -143,7 +157,6 @@ func (p Parser) Parse(spec string) (Schedule, error) {
 	fields := strings.Fields(spec)
 
 	// Validate & fill in any omitted or optional fields
-	var err error
 	fields, err = normalizeFields(fields, p.options)
 	if err != nil {
 		return nil, err
@@ -186,8 +199,10 @@ func (p Parser) Parse(spec string) (Schedule, error) {
 //
 // As part of performing this function, it also validates that the provided
 // fields are compatible with the configured options.
-func normalizeFields(fields []string, options ParseOption) ([]string, error) {
-	// Validate optionals & add their field to options
+
+// processOptionalFlags validates and processes optional field flags.
+// Returns updated options with optional fields enabled, count of optionals, and any error.
+func processOptionalFlags(options ParseOption) (ParseOption, int, error) {
 	optionals := 0
 	if options&SecondOptional > 0 {
 		options |= Second
@@ -198,16 +213,29 @@ func normalizeFields(fields []string, options ParseOption) ([]string, error) {
 		optionals++
 	}
 	if optionals > 1 {
-		return nil, fmt.Errorf("multiple optionals may not be configured")
+		return 0, 0, fmt.Errorf("multiple optionals may not be configured")
 	}
+	return options, optionals, nil
+}
 
-	// Figure out how many fields we need
-	max := 0
+// countConfiguredFields returns the number of fields configured in options.
+func countConfiguredFields(options ParseOption) int {
+	count := 0
 	for _, place := range places {
 		if options&place > 0 {
-			max++
+			count++
 		}
 	}
+	return count
+}
+
+func normalizeFields(fields []string, options ParseOption) ([]string, error) {
+	options, optionals, err := processOptionalFlags(options)
+	if err != nil {
+		return nil, err
+	}
+
+	max := countConfiguredFields(options)
 	min := max - optionals
 
 	// Validate number of fields
@@ -222,7 +250,7 @@ func normalizeFields(fields []string, options ParseOption) ([]string, error) {
 	if min < max && len(fields) == min {
 		switch {
 		case options&DowOptional > 0:
-			fields = append(fields, defaults[5]) // TODO: improve access to default
+			fields = append(fields, defaults[5])
 		case options&SecondOptional > 0:
 			fields = append([]string{defaults[0]}, fields...)
 		default:
@@ -280,38 +308,64 @@ func getField(field string, r bounds) (uint64, error) {
 //	number | number "-" number [ "/" number ]
 //
 // or error parsing range.
-func getRange(expr string, r bounds) (uint64, error) {
-	var (
-		start, end, step uint
-		rangeAndStep     = strings.Split(expr, "/")
-		lowAndHigh       = strings.Split(rangeAndStep[0], "-")
-		singleDigit      = len(lowAndHigh) == 1
-		err              error
-	)
 
-	var extra uint64
+// parseRangeBounds parses the start/end bounds from a cron range expression.
+// Returns start, end values, extra bits (starBit if wildcard), and any error.
+func parseRangeBounds(lowAndHigh []string, r bounds) (start, end uint, extra uint64, err error) {
 	if lowAndHigh[0] == "*" || lowAndHigh[0] == "?" {
-		start = r.min
-		end = r.max
-		extra = starBit
-	} else {
-		start, err = parseIntOrName(lowAndHigh[0], r.names)
-		if err != nil {
-			return 0, err
-		}
-		switch len(lowAndHigh) {
-		case 1:
-			end = start
-		case 2:
-			end, err = parseIntOrName(lowAndHigh[1], r.names)
-			if err != nil {
-				return 0, err
-			}
-		default:
-			return 0, fmt.Errorf("too many hyphens: %s", expr)
-		}
+		return r.min, r.max, starBit, nil
 	}
 
+	start, err = parseIntOrName(lowAndHigh[0], r.names)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+
+	switch len(lowAndHigh) {
+	case 1:
+		return start, start, 0, nil
+	case 2:
+		end, err = parseIntOrName(lowAndHigh[1], r.names)
+		if err != nil {
+			return 0, 0, 0, err
+		}
+		return start, end, 0, nil
+	default:
+		return 0, 0, 0, fmt.Errorf("too many hyphens: %s", strings.Join(lowAndHigh, "-"))
+	}
+}
+
+// validateRangeParams validates the parsed range parameters.
+func validateRangeParams(start, end, step uint, r bounds, expr string) error {
+	if start < r.min {
+		return fmt.Errorf("beginning of range (%d) below minimum (%d): %s", start, r.min, expr)
+	}
+	if end > r.max {
+		return fmt.Errorf("end of range (%d) above maximum (%d): %s", end, r.max, expr)
+	}
+	if start > end {
+		return fmt.Errorf("beginning of range (%d) beyond end of range (%d): %s", start, end, expr)
+	}
+	if step == 0 {
+		return fmt.Errorf("step of range should be a positive number: %s", expr)
+	}
+	if step > 1 && step >= end-start+1 {
+		return fmt.Errorf("step (%d) must be less than range size (%d): %s", step, end-start+1, expr)
+	}
+	return nil
+}
+
+func getRange(expr string, r bounds) (uint64, error) {
+	rangeAndStep := strings.Split(expr, "/")
+	lowAndHigh := strings.Split(rangeAndStep[0], "-")
+	singleDigit := len(lowAndHigh) == 1
+
+	start, end, extra, err := parseRangeBounds(lowAndHigh, r)
+	if err != nil {
+		return 0, err
+	}
+
+	var step uint
 	switch len(rangeAndStep) {
 	case 1:
 		step = 1
@@ -320,7 +374,6 @@ func getRange(expr string, r bounds) (uint64, error) {
 		if err != nil {
 			return 0, err
 		}
-
 		// Special handling: "N/step" means "N-max/step".
 		if singleDigit {
 			end = r.max
@@ -332,23 +385,8 @@ func getRange(expr string, r bounds) (uint64, error) {
 		return 0, fmt.Errorf("too many slashes: %s", expr)
 	}
 
-	if start < r.min {
-		return 0, fmt.Errorf("beginning of range (%d) below minimum (%d): %s", start, r.min, expr)
-	}
-	if end > r.max {
-		return 0, fmt.Errorf("end of range (%d) above maximum (%d): %s", end, r.max, expr)
-	}
-	if start > end {
-		return 0, fmt.Errorf("beginning of range (%d) beyond end of range (%d): %s", start, end, expr)
-	}
-	if step == 0 {
-		return 0, fmt.Errorf("step of range should be a positive number: %s", expr)
-	}
-	if step > 1 {
-		rangeSize := end - start + 1
-		if step >= rangeSize {
-			return 0, fmt.Errorf("step (%d) must be less than range size (%d): %s", step, rangeSize, expr)
-		}
+	if err := validateRangeParams(start, end, step, r, expr); err != nil {
+		return 0, err
 	}
 
 	return getBits(start, end, step) | extra, nil
@@ -369,6 +407,23 @@ func parseIntOrName(expr string, names map[string]uint) (uint, error) {
 // validateTimezone checks if the timezone string is safe to pass to time.LoadLocation.
 // It enforces length limits and character restrictions to prevent DoS attacks via
 // crafted timezone strings.
+
+// isValidTimezoneChar returns true if r is a valid character in a timezone name.
+// Valid chars: letters, digits, slash, underscore, hyphen, plus, colon.
+func isValidTimezoneChar(r rune) bool {
+	// Valid chars: A-Z, a-z, 0-9, /, _, -, +, :
+	if r >= 'A' && r <= 'Z' {
+		return true
+	}
+	if r >= 'a' && r <= 'z' {
+		return true
+	}
+	if r >= '0' && r <= '9' {
+		return true
+	}
+	return r == '/' || r == '_' || r == '-' || r == '+' || r == ':'
+}
+
 func validateTimezone(tz string) error {
 	const maxTimezoneLen = 64 // IANA timezone names are well under this limit
 	if len(tz) == 0 {
@@ -377,13 +432,8 @@ func validateTimezone(tz string) error {
 	if len(tz) > maxTimezoneLen {
 		return fmt.Errorf("timezone string too long (max %d chars)", maxTimezoneLen)
 	}
-	// Valid timezone chars: letters, digits, slash, underscore, hyphen, plus, colon
-	// Examples: "America/New_York", "Etc/GMT+5", "UTC", "Europe/Isle_of_Man"
 	for i, r := range tz {
-		isValid := (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') ||
-			(r >= '0' && r <= '9') || r == '/' || r == '_' ||
-			r == '-' || r == '+' || r == ':'
-		if !isValid {
+		if !isValidTimezoneChar(r) {
 			return fmt.Errorf("invalid character %q at position %d in timezone", r, i)
 		}
 	}
@@ -424,63 +474,33 @@ func all(r bounds) uint64 {
 }
 
 // parseDescriptor returns a predefined schedule for the expression, or error if none matches.
+
+// newDescriptorSchedule creates a SpecSchedule for descriptor-based schedules.
+// Second and Minute are always set to first value (0). Hour, Dom, Month, Dow vary.
+func newDescriptorSchedule(hour, dom, month, dow uint64, loc *time.Location) *SpecSchedule {
+	return &SpecSchedule{
+		Second:   1 << seconds.min,
+		Minute:   1 << minutes.min,
+		Hour:     hour,
+		Dom:      dom,
+		Month:    month,
+		Dow:      dow,
+		Location: loc,
+	}
+}
+
 func parseDescriptor(descriptor string, loc *time.Location) (Schedule, error) {
 	switch descriptor {
 	case "@yearly", "@annually":
-		return &SpecSchedule{
-			Second:   1 << seconds.min,
-			Minute:   1 << minutes.min,
-			Hour:     1 << hours.min,
-			Dom:      1 << dom.min,
-			Month:    1 << months.min,
-			Dow:      all(dow),
-			Location: loc,
-		}, nil
-
+		return newDescriptorSchedule(1<<hours.min, 1<<dom.min, 1<<months.min, all(dow), loc), nil
 	case "@monthly":
-		return &SpecSchedule{
-			Second:   1 << seconds.min,
-			Minute:   1 << minutes.min,
-			Hour:     1 << hours.min,
-			Dom:      1 << dom.min,
-			Month:    all(months),
-			Dow:      all(dow),
-			Location: loc,
-		}, nil
-
+		return newDescriptorSchedule(1<<hours.min, 1<<dom.min, all(months), all(dow), loc), nil
 	case "@weekly":
-		return &SpecSchedule{
-			Second:   1 << seconds.min,
-			Minute:   1 << minutes.min,
-			Hour:     1 << hours.min,
-			Dom:      all(dom),
-			Month:    all(months),
-			Dow:      1 << dow.min,
-			Location: loc,
-		}, nil
-
+		return newDescriptorSchedule(1<<hours.min, all(dom), all(months), 1<<dow.min, loc), nil
 	case "@daily", "@midnight":
-		return &SpecSchedule{
-			Second:   1 << seconds.min,
-			Minute:   1 << minutes.min,
-			Hour:     1 << hours.min,
-			Dom:      all(dom),
-			Month:    all(months),
-			Dow:      all(dow),
-			Location: loc,
-		}, nil
-
+		return newDescriptorSchedule(1<<hours.min, all(dom), all(months), all(dow), loc), nil
 	case "@hourly":
-		return &SpecSchedule{
-			Second:   1 << seconds.min,
-			Minute:   1 << minutes.min,
-			Hour:     all(hours),
-			Dom:      all(dom),
-			Month:    all(months),
-			Dow:      all(dow),
-			Location: loc,
-		}, nil
-
+		return newDescriptorSchedule(all(hours), all(dom), all(months), all(dow), loc), nil
 	}
 
 	const every = "@every "
