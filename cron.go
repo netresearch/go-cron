@@ -136,6 +136,7 @@ func New(opts ...Option) *Cron {
 // FuncJob is a wrapper that turns a func() into a cron.Job
 type FuncJob func()
 
+// Run calls the wrapped function.
 func (f FuncJob) Run() { f() }
 
 // AddFunc adds a func to the Cron to be run on the given schedule.
@@ -243,6 +244,23 @@ func (c *Cron) Run() {
 
 // run the scheduler.. this is private just due to the need to synchronize
 // access to the 'running' state variable.
+
+// handleTimeBackwards reschedules entries when system time moves backwards.
+// This can happen due to NTP correction or VM snapshot restore.
+func (c *Cron) handleTimeBackwards(now time.Time) {
+	// Iterate over a copy since Update() reorders the heap.
+	entriesCopy := make([]*Entry, len(c.entries))
+	copy(entriesCopy, c.entries)
+	for _, e := range entriesCopy {
+		if !e.Prev.IsZero() && e.Prev.After(now) {
+			e.Next = e.Schedule.Next(now)
+			c.entries.Update(e)
+			c.logger.Info("reschedule", "reason", "time moved backwards",
+				"entry", e.ID, "prev", e.Prev, "now", now, "next", e.Next)
+		}
+	}
+}
+
 func (c *Cron) run() {
 	c.logger.Info("start")
 
@@ -273,18 +291,7 @@ func (c *Cron) run() {
 				c.logger.Info("wake", "now", now)
 
 				// Handle system time moving backwards (NTP correction, VM snapshot restore).
-				// If Prev is in the future relative to now, time moved backwards.
-				// Iterate over a copy since Update() reorders the heap.
-				entriesCopy := make([]*Entry, len(c.entries))
-				copy(entriesCopy, c.entries)
-				for _, e := range entriesCopy {
-					if !e.Prev.IsZero() && e.Prev.After(now) {
-						e.Next = e.Schedule.Next(now)
-						c.entries.Update(e)
-						c.logger.Info("reschedule", "reason", "time moved backwards",
-							"entry", e.ID, "prev", e.Prev, "now", now, "next", e.Next)
-					}
-				}
+				c.handleTimeBackwards(now)
 
 				// Run every entry whose next time was less than now.
 				// Keep popping from heap while entries are due.

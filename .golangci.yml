@@ -107,28 +107,11 @@ linters:
           - gosec      # G115 int conversion in tests is safe
           - gci        # Test import order less critical
         path: _test\.go
-      # Exclude inherently complex algorithms from complexity checks
-      - linters:
-          - gocyclo
-          - gocognit
-          - cyclop
-          - funlen
-        path: spec\.go
-        source: "func.*Next"  # DST algorithm requires inherent complexity
-      - linters:
-          - gocyclo
-          - gocognit
-          - cyclop
-        path: cron\.go
-        source: "func.*run"   # Scheduler loop requires inherent complexity
-
       - linters:
           - errcheck
         path: _test\.go
         text: "Error return value"  # Test files often ignore errors intentionally
-      - linters:
-          - revive
-        text: "should omit type"  # Explicit types improve readability for public vars
+
       - linters:
           - revive
         path: _test\.go

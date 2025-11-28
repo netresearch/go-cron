@@ -55,34 +55,93 @@ const (
 
 // Next returns the next time this schedule is activated, greater than the given
 // time.  If no time can be found to satisfy the schedule, return the zero time.
-func (s *SpecSchedule) Next(t time.Time) time.Time {
-	// General approach
-	//
-	// For Month, Day, Hour, Minute, Second:
-	// Check if the time value matches.  If yes, continue to the next field.
-	// If the field doesn't match the schedule, then increment the field until it matches.
-	// While incrementing the field, a wrap-around brings it back to the beginning
-	// of the field list (since it is necessary to re-verify previous field
-	// values)
 
-	// Convert the given time into the schedule's timezone, if one is specified.
-	// Save the original timezone so we can convert back after we find a time.
-	// Note that schedules without a time zone specified (time.Local) are treated
-	// as local to the time provided.
-	origLocation := t.Location()
-	loc := s.Location
+// normalizeDSTDay adjusts time when DST causes midnight to not exist.
+// For example, Sao Paulo DST transforms midnight on 11/3 into 1am.
+
+// prepareTimeForSchedule converts time to schedule timezone and prepares for matching.
+// Returns the prepared time, effective location, and original location for final conversion.
+
+// advanceMinute advances time until minute matches, returns new time and wrap flag.
+func advanceMinute(t time.Time, minuteBits uint64, added bool) (time.Time, bool, bool) {
+	for !fieldMatches(t.Minute(), minuteBits) {
+		if !added {
+			added = true
+			t = t.Truncate(time.Minute)
+		}
+		t = t.Add(1 * time.Minute)
+		if t.Minute() == 0 {
+			return t, added, true // wrap
+		}
+	}
+	return t, added, false
+}
+
+// advanceSecond advances time until second matches, returns new time and wrap flag.
+func advanceSecond(t time.Time, secondBits uint64, added bool) (time.Time, bool, bool) {
+	for !fieldMatches(t.Second(), secondBits) {
+		if !added {
+			added = true
+			t = t.Truncate(time.Second)
+		}
+		t = t.Add(1 * time.Second)
+		if t.Second() == 0 {
+			return t, added, true // wrap
+		}
+	}
+	return t, added, false
+}
+
+func prepareTimeForSchedule(t time.Time, schedLoc *time.Location) (prepared time.Time, loc, origLocation *time.Location) {
+	origLocation = t.Location()
+	loc = schedLoc
 	if loc == time.Local {
 		loc = t.Location()
 	}
-	if s.Location != time.Local {
-		t = t.In(s.Location)
+	if schedLoc != time.Local {
+		t = t.In(schedLoc)
 	}
-
 	// Start at the earliest possible time (the upcoming second).
-	t = t.Add(1*time.Second - time.Duration(t.Nanosecond())*time.Nanosecond)
+	prepared = t.Add(1*time.Second - time.Duration(t.Nanosecond())*time.Nanosecond)
+	return
+}
 
-	// This flag indicates whether a field has been incremented.
-	added := false
+func normalizeDSTDay(t time.Time) time.Time {
+	if t.Hour() == 0 {
+		return t
+	}
+	if t.Hour() > 12 {
+		return t.Add(time.Duration(24-t.Hour()) * time.Hour)
+	}
+	return t.Add(time.Duration(-t.Hour()) * time.Hour)
+}
+
+// checkHourDSTSkip handles ISC cron behavior for DST spring-forward.
+// If time was adjusted one hour forward due to DST, jobs that would have
+// run in the skipped interval will run immediately.
+func checkHourDSTSkip(prev, curr time.Time, hourBits uint64) bool {
+	if curr.Hour()-prev.Hour() != 2 {
+		return false
+	}
+	// #nosec G115 -- Hour()-1 bounded 1-22 in DST context
+	return 1<<uint(curr.Hour()-1)&hourBits > 0
+}
+
+// fieldMatches checks if a time component value matches the schedule bits.
+func fieldMatches(value int, bits uint64) bool {
+	// #nosec G115 -- time components are bounded and safe for uint
+	return 1<<uint(value)&bits != 0
+}
+
+// Next returns the next time this schedule is activated, greater than the given time.
+// If no time can be found to satisfy the schedule, returns the zero time.
+func (s *SpecSchedule) Next(t time.Time) time.Time {
+	// General approach: For each field (Month, Day, Hour, Minute, Second),
+	// check if it matches. If not, increment until it matches.
+	// Wrap-around resets to verify previous fields.
+
+	t, loc, origLocation := prepareTimeForSchedule(t, s.Location)
+	added := false // indicates whether a field has been incremented
 
 	// If no time is found within five years, return zero.
 	yearLimit := t.Year() + 5
@@ -94,8 +153,7 @@ WRAP:
 
 	// Find the first applicable month.
 	// If it's this month, then do nothing.
-	// #nosec G115 -- Month() returns 1-12, safe for uint
-	for 1<<uint(t.Month())&s.Month == 0 {
+	for !fieldMatches(int(t.Month()), s.Month) {
 		// If we have to add a month, reset the other parts to 0.
 		if !added {
 			added = true
@@ -121,37 +179,24 @@ WRAP:
 			t = time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, loc)
 		}
 		t = t.AddDate(0, 0, 1)
-		// Notice if the hour is no longer midnight due to DST.
-		// Add an hour if it's 23, subtract an hour if it's 1.
-		if t.Hour() != 0 {
-			if t.Hour() > 12 {
-				t = t.Add(time.Duration(24-t.Hour()) * time.Hour)
-			} else {
-				t = t.Add(time.Duration(-t.Hour()) * time.Hour)
-			}
-		}
+		// Handle DST causing midnight to not exist.
+		t = normalizeDSTDay(t)
 
 		if t.Day() == 1 {
 			goto WRAP
 		}
 	}
 
-	// #nosec G115 -- Hour() returns 0-23, safe for uint
-	for 1<<uint(t.Hour())&s.Hour == 0 {
+	for !fieldMatches(t.Hour(), s.Hour) {
 		if !added {
 			added = true
 			t = time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), 0, 0, 0, loc)
 		}
 		prev := t
 		t = t.Add(1 * time.Hour)
-		// ISC cron behavior: If time was adjusted one hour forward due to DST,
-		// jobs that would have run in the skipped interval will run immediately.
-		// Fix for PR #541: Don't skip crons when time jumps forward due to DST.
-		if t.Hour()-prev.Hour() == 2 {
-			// #nosec G115 -- Hour()-1 bounded 1-22 in DST context
-			if 1<<uint(t.Hour()-1)&s.Hour > 0 {
-				break
-			}
+		// ISC cron behavior for DST spring-forward.
+		if checkHourDSTSkip(prev, t, s.Hour) {
+			break
 		}
 
 		if t.Hour() == 0 {
@@ -159,30 +204,15 @@ WRAP:
 		}
 	}
 
-	// #nosec G115 -- Minute() returns 0-59, safe for uint
-	for 1<<uint(t.Minute())&s.Minute == 0 {
-		if !added {
-			added = true
-			t = t.Truncate(time.Minute)
-		}
-		t = t.Add(1 * time.Minute)
-
-		if t.Minute() == 0 {
-			goto WRAP
-		}
+	var wrap bool
+	t, added, wrap = advanceMinute(t, s.Minute, added)
+	if wrap {
+		goto WRAP
 	}
 
-	// #nosec G115 -- Second() returns 0-59, safe for uint
-	for 1<<uint(t.Second())&s.Second == 0 {
-		if !added {
-			added = true
-			t = t.Truncate(time.Second)
-		}
-		t = t.Add(1 * time.Second)
-
-		if t.Second() == 0 {
-			goto WRAP
-		}
+	t, _, wrap = advanceSecond(t, s.Second, added)
+	if wrap {
+		goto WRAP
 	}
 
 	return t.In(origLocation)
