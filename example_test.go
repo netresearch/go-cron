@@ -281,3 +281,73 @@ func ExampleVerbosePrintfLogger() {
 	defer c.Stop()
 	// Output:
 }
+
+// This example demonstrates the Timeout wrapper and its limitations.
+// Note: Timeout uses an "abandonment model" - the job continues running
+// in the background even after the timeout is reached.
+func ExampleTimeout() {
+	logger := cron.DefaultLogger
+
+	c := cron.New(cron.WithChain(
+		// Jobs that exceed 30 seconds will be "abandoned" (wrapper returns,
+		// but the goroutine keeps running until the job completes naturally)
+		cron.Timeout(logger, 30*time.Second),
+		// Recover panics from timed-out jobs
+		cron.Recover(logger),
+	))
+
+	c.AddFunc("@hourly", func() {
+		// This job may run longer than 30 seconds.
+		// If it does, the timeout wrapper will return early and log an error,
+		// but this goroutine continues until completion.
+		fmt.Println("Starting long job")
+		time.Sleep(45 * time.Second) // Exceeds timeout
+		fmt.Println("Job completed (even after timeout)")
+	})
+
+	c.Start()
+	defer c.Stop()
+	// Output:
+}
+
+// This example demonstrates a job pattern that supports true cancellation.
+// This is the recommended approach when jobs need to be stoppable.
+func ExampleTimeout_cancellable() {
+	// CancellableWorker demonstrates a job that can be cleanly canceled
+	type CancellableWorker struct {
+		cancel chan struct{}
+		done   chan struct{}
+	}
+
+	worker := &CancellableWorker{
+		cancel: make(chan struct{}),
+		done:   make(chan struct{}),
+	}
+
+	c := cron.New()
+
+	// Wrap the worker in a FuncJob
+	c.Schedule(cron.Every(time.Minute), cron.FuncJob(func() {
+		defer close(worker.done)
+		for i := 0; i < 100; i++ {
+			select {
+			case <-worker.cancel:
+				fmt.Println("Job canceled cleanly")
+				return
+			default:
+				// Do a small chunk of work
+				time.Sleep(100 * time.Millisecond)
+			}
+		}
+		fmt.Println("Job completed normally")
+	}))
+
+	c.Start()
+
+	// Later, to cancel the job:
+	// close(worker.cancel)
+	// <-worker.done  // Wait for clean shutdown
+
+	defer c.Stop()
+	// Output:
+}
