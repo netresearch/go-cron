@@ -37,6 +37,7 @@ type Cron struct {
 	nextID     EntryID
 	jobWaiter  sync.WaitGroup
 	clock      Clock
+	hooks      *ObservabilityHooks
 }
 
 // ScheduleParser is an interface for schedule spec parsers that return a Schedule
@@ -291,6 +292,7 @@ func (c *Cron) run() {
 	now := c.now()
 	for _, entry := range c.entries {
 		entry.Next = entry.Schedule.Next(now)
+		c.hooks.callOnSchedule(entry.ID, entry.Job, entry.Next)
 		c.logger.Info("schedule", "now", now, "entry", entry.ID, "next", entry.Next)
 	}
 	heap.Init(&c.entries)
@@ -323,9 +325,11 @@ func (c *Cron) run() {
 					if e.Next.After(now) || e.Next.IsZero() {
 						break
 					}
-					c.startJob(e.WrappedJob)
+					scheduledTime := e.Next
+					c.startJob(e.ID, e.Job, e.WrappedJob, scheduledTime)
 					e.Prev = e.Next
 					e.Next = e.Schedule.Next(now)
+					c.hooks.callOnSchedule(e.ID, e.Job, e.Next)
 					c.entries.Update(e) // Re-heapify after updating Next time
 					c.logger.Info("run", "now", now, "entry", e.ID, "next", e.Next)
 				}
@@ -336,6 +340,7 @@ func (c *Cron) run() {
 				newEntry.Next = newEntry.Schedule.Next(now)
 				heap.Push(&c.entries, newEntry)
 				c.entryIndex[newEntry.ID] = newEntry
+				c.hooks.callOnSchedule(newEntry.ID, newEntry.Job, newEntry.Next)
 				c.logger.Info("added", "now", now, "entry", newEntry.ID, "next", newEntry.Next)
 
 			case replyChan := <-c.snapshot:
@@ -359,12 +364,31 @@ func (c *Cron) run() {
 	}
 }
 
-// startJob runs the given job in a new goroutine.
-func (c *Cron) startJob(j Job) {
+// startJob runs the given job in a new goroutine with observability hooks.
+// The originalJob is used for name extraction, wrappedJob is the actual job to run.
+func (c *Cron) startJob(entryID EntryID, originalJob, wrappedJob Job, scheduledTime time.Time) {
 	c.jobWaiter.Add(1)
 	go func() {
 		defer c.jobWaiter.Done()
-		j.Run()
+
+		c.hooks.callOnJobStart(entryID, originalJob, scheduledTime)
+
+		start := c.clock.Now()
+		var recovered any
+		func() {
+			defer func() {
+				recovered = recover()
+			}()
+			wrappedJob.Run()
+		}()
+		duration := c.clock.Now().Sub(start)
+
+		c.hooks.callOnJobComplete(entryID, originalJob, duration, recovered)
+
+		// Re-panic if the job panicked and wasn't handled by a wrapper
+		if recovered != nil {
+			panic(recovered)
+		}
 	}()
 }
 
