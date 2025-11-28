@@ -32,8 +32,9 @@ func (h entryHeap) Swap(i, j int) {
 }
 
 // Push adds an entry to the heap.
+// The type assertion is safe as container/heap always passes *Entry.
 func (h *entryHeap) Push(x any) {
-	entry := x.(*Entry)
+	entry := x.(*Entry) //nolint:errcheck // heap.Interface contract guarantees type
 	entry.heapIndex = len(*h)
 	*h = append(*h, entry)
 }

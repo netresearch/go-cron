@@ -119,10 +119,10 @@ func (p Parser) Parse(spec string) (Schedule, error) {
 		}
 		tzName := spec[eq+1 : i]
 		if err = validateTimezone(tzName); err != nil {
-			return nil, fmt.Errorf("invalid timezone %q: %v", tzName, err)
+			return nil, fmt.Errorf("invalid timezone %q: %w", tzName, err)
 		}
 		if loc, err = time.LoadLocation(tzName); err != nil {
-			return nil, fmt.Errorf("provided bad location %s: %v", tzName, err)
+			return nil, fmt.Errorf("provided bad location %s: %w", tzName, err)
 		}
 		spec = strings.TrimSpace(spec[i:])
 		// Fix for issue #555: Check if spec has content after timezone
@@ -393,7 +393,7 @@ func validateTimezone(tz string) error {
 func mustParseInt(expr string) (uint, error) {
 	num, err := strconv.Atoi(expr)
 	if err != nil {
-		return 0, fmt.Errorf("failed to parse int from %s: %s", expr, err)
+		return 0, fmt.Errorf("failed to parse int from %s: %w", expr, err)
 	}
 	if num < 0 {
 		return 0, fmt.Errorf("negative number (%d) not allowed: %s", num, expr)
@@ -487,7 +487,7 @@ func parseDescriptor(descriptor string, loc *time.Location) (Schedule, error) {
 	if strings.HasPrefix(descriptor, every) {
 		duration, err := time.ParseDuration(descriptor[len(every):])
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse duration %s: %s", descriptor, err)
+			return nil, fmt.Errorf("failed to parse duration %s: %w", descriptor, err)
 		}
 		if duration < time.Second {
 			return nil, fmt.Errorf("@every duration must be at least 1 second: %s", descriptor)

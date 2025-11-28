@@ -1,0 +1,18 @@
+# CODEOWNERS for netresearch/go-cron
+#
+# This file defines the default reviewers for pull requests.
+# See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owners for everything in the repository
+* @netresearch/go-cron-maintainers
+
+# Core scheduling logic requires careful review
+cron.go @netresearch/go-cron-maintainers
+parser.go @netresearch/go-cron-maintainers
+spec.go @netresearch/go-cron-maintainers
+
+# CI/CD changes need maintainer approval
+.github/ @netresearch/go-cron-maintainers
+
+# Security-sensitive files
+.golangci.yml @netresearch/go-cron-maintainers

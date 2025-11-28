@@ -187,7 +187,7 @@ func (f *FakeClock) TimerCount() int {
 // Must be called with f.mu held.
 func (f *FakeClock) fireExpiredTimers() {
 	for len(f.timers) > 0 && !f.timers[0].deadline.After(f.now) {
-		t := heap.Pop(&f.timers).(*fakeTimer)
+		t := heap.Pop(&f.timers).(*fakeTimer) //nolint:errcheck // heap.Interface contract guarantees type
 		if !t.stopped {
 			select {
 			case t.ch <- f.now:
@@ -278,7 +278,7 @@ func (h timerHeap) Less(i, j int) bool { return h[i].deadline.Before(h[j].deadli
 func (h timerHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
 
 func (h *timerHeap) Push(x any) {
-	*h = append(*h, x.(*fakeTimer))
+	*h = append(*h, x.(*fakeTimer)) //nolint:errcheck // heap.Interface contract guarantees type
 }
 
 func (h *timerHeap) Pop() any {

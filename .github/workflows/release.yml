@@ -86,6 +86,20 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          format: cyclonedx-json
+          output-file: sbom.cyclonedx.json
+          artifact-name: sbom-cyclonedx
+
+      - name: Generate SPDX SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          format: spdx-json
+          output-file: sbom.spdx.json
+          artifact-name: sbom-spdx
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -95,9 +109,16 @@ jobs:
 
             ${{ steps.changelog.outputs.changelog }}
 
+            ## Supply Chain Security
+
+            This release includes Software Bill of Materials (SBOM) in both CycloneDX and SPDX formats for supply chain transparency and compliance.
+
             **Full Changelog**: https://github.com/${{ github.repository }}/compare/${{ steps.version.outputs.version }}...HEAD
           draft: false
           prerelease: ${{ contains(steps.version.outputs.version, '-') }}
           generate_release_notes: false
+          files: |
+            sbom.cyclonedx.json
+            sbom.spdx.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
