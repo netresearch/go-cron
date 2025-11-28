@@ -66,3 +66,28 @@ func WithClock(clock Clock) Option {
 		c.clock = clock
 	}
 }
+
+// WithObservability configures observability hooks for monitoring cron operations.
+// Hooks are called synchronously at various points during job execution lifecycle.
+//
+// All hook callbacks are optional; nil callbacks are safely ignored.
+//
+// Example with Prometheus metrics:
+//
+//	hooks := cron.ObservabilityHooks{
+//	    OnJobStart: func(id cron.EntryID, name string, scheduled time.Time) {
+//	        jobsStarted.WithLabelValues(name).Inc()
+//	    },
+//	    OnJobComplete: func(id cron.EntryID, name string, dur time.Duration, recovered any) {
+//	        jobDuration.WithLabelValues(name).Observe(dur.Seconds())
+//	        if recovered != nil {
+//	            jobPanics.WithLabelValues(name).Inc()
+//	        }
+//	    },
+//	}
+//	c := cron.New(cron.WithObservability(hooks))
+func WithObservability(hooks ObservabilityHooks) Option {
+	return func(c *Cron) {
+		c.hooks = &hooks
+	}
+}

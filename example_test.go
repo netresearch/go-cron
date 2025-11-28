@@ -351,3 +351,63 @@ func ExampleTimeout_cancellable() {
 	defer c.Stop()
 	// Output:
 }
+
+// This example demonstrates using observability hooks for metrics collection.
+// In production, you would integrate with Prometheus, StatsD, or similar systems.
+func ExampleWithObservability() {
+	var jobsStarted, jobsCompleted int
+
+	hooks := cron.ObservabilityHooks{
+		OnJobStart: func(id cron.EntryID, name string, scheduled time.Time) {
+			// In production: prometheus.Counter.Inc()
+			jobsStarted++
+		},
+		OnJobComplete: func(id cron.EntryID, name string, duration time.Duration, recovered any) {
+			// In production: prometheus.Histogram.Observe(duration.Seconds())
+			jobsCompleted++
+		},
+		OnSchedule: func(id cron.EntryID, name string, nextRun time.Time) {
+			// In production: prometheus.Gauge.Set(nextRun.Unix())
+		},
+	}
+
+	c := cron.New(cron.WithObservability(hooks))
+
+	c.AddFunc("@hourly", func() {
+		// Job logic here
+	})
+
+	c.Start()
+	c.Stop()
+
+	fmt.Println("Hooks configured successfully")
+	// Output: Hooks configured successfully
+}
+
+// This example demonstrates implementing NamedJob for better observability.
+// Named jobs have their name passed to observability hooks, which is useful
+// for metrics labeling (e.g., Prometheus labels).
+func ExampleNamedJob() {
+	// myJob implements both Job and NamedJob interfaces
+	type myJob struct {
+		name string
+	}
+
+	// Run implements cron.Job
+	run := func(j *myJob) {
+		fmt.Printf("Running %s\n", j.name)
+	}
+	_ = run
+
+	// Name implements cron.NamedJob
+	name := func(j *myJob) string {
+		return j.name
+	}
+	_ = name
+
+	// When used with observability hooks, the name is passed to callbacks:
+	// OnJobStart(id, "my-job-name", scheduledTime)
+	// OnJobComplete(id, "my-job-name", duration, recovered)
+	fmt.Println("NamedJob provides names for observability hooks")
+	// Output: NamedJob provides names for observability hooks
+}
