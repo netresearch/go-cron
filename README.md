@@ -139,8 +139,20 @@ nyc, _ := time.LoadLocation("America/New_York")
 c := cron.New(cron.WithLocation(nyc))
 ```
 
-> [!WARNING]
-> Jobs scheduled during DST "spring forward" transitions (when clocks skip ahead) will run immediately rather than being silently skipped.
+### Daylight Saving Time (DST) Handling
+
+This library implements ISC cron-compatible DST behavior:
+
+| Transition | Behavior |
+|------------|----------|
+| **Spring Forward** (hour skipped) | Jobs in skipped hour run immediately after transition |
+| **Fall Back** (hour repeats) | Jobs run once, during first occurrence |
+| **Midnight DST** (midnight doesn't exist) | Automatically normalized to valid time |
+
+> [!TIP]
+> For DST-sensitive applications, schedule jobs outside typical transition hours (1-3 AM) or use UTC.
+
+See [docs/DST_HANDLING.md](docs/DST_HANDLING.md) for comprehensive DST documentation including examples, testing strategies, and edge cases.
 
 ## Job Wrappers (Middleware)
 
