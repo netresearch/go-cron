@@ -53,15 +53,6 @@ const (
 	starBit = 1 << 63
 )
 
-// Next returns the next time this schedule is activated, greater than the given
-// time.  If no time can be found to satisfy the schedule, return the zero time.
-
-// normalizeDSTDay adjusts time when DST causes midnight to not exist.
-// For example, Sao Paulo DST transforms midnight on 11/3 into 1am.
-
-// prepareTimeForSchedule converts time to schedule timezone and prepares for matching.
-// Returns the prepared time, effective location, and original location for final conversion.
-
 // advanceMinute advances time until minute matches, returns new time and wrap flag.
 func advanceMinute(t time.Time, minuteBits uint64, added bool) (time.Time, bool, bool) {
 	for !fieldMatches(t.Minute(), minuteBits) {
@@ -92,6 +83,8 @@ func advanceSecond(t time.Time, secondBits uint64, added bool) (time.Time, bool,
 	return t, added, false
 }
 
+// prepareTimeForSchedule converts time to schedule timezone and prepares for matching.
+// Returns the prepared time, effective location, and original location for final conversion.
 func prepareTimeForSchedule(t time.Time, schedLoc *time.Location) (prepared time.Time, loc, origLocation *time.Location) {
 	origLocation = t.Location()
 	loc = schedLoc
@@ -106,6 +99,8 @@ func prepareTimeForSchedule(t time.Time, schedLoc *time.Location) (prepared time
 	return
 }
 
+// normalizeDSTDay adjusts time when DST causes midnight to not exist.
+// For example, Sao Paulo DST transforms midnight on 11/3 into 1am.
 func normalizeDSTDay(t time.Time) time.Time {
 	if t.Hour() == 0 {
 		return t
