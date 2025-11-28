@@ -20,21 +20,23 @@ const maxIdleDuration = 100000 * time.Hour
 //
 // Entries are stored in a min-heap ordered by next execution time, providing
 // O(log n) insertion/removal and O(1) access to the next entry to run.
+// An index map provides O(1) entry lookup by ID.
 type Cron struct {
-	entries   entryHeap
-	chain     Chain
-	stop      chan struct{}
-	add       chan *Entry
-	remove    chan EntryID
-	snapshot  chan chan []Entry
-	running   bool
-	logger    Logger
-	runningMu sync.Mutex
-	location  *time.Location
-	parser    ScheduleParser
-	nextID    EntryID
-	jobWaiter sync.WaitGroup
-	clock     Clock
+	entries    entryHeap
+	entryIndex map[EntryID]*Entry // O(1) lookup by ID
+	chain      Chain
+	stop       chan struct{}
+	add        chan *Entry
+	remove     chan EntryID
+	snapshot   chan chan []Entry
+	running    bool
+	logger     Logger
+	runningMu  sync.Mutex
+	location   *time.Location
+	parser     ScheduleParser
+	nextID     EntryID
+	jobWaiter  sync.WaitGroup
+	clock      Clock
 }
 
 // ScheduleParser is an interface for schedule spec parsers that return a Schedule
@@ -120,18 +122,19 @@ func (e Entry) Run() {
 // See "cron.With*" to modify the default behavior.
 func New(opts ...Option) *Cron {
 	c := &Cron{
-		entries:   nil,
-		chain:     NewChain(),
-		add:       make(chan *Entry),
-		stop:      make(chan struct{}),
-		snapshot:  make(chan chan []Entry),
-		remove:    make(chan EntryID),
-		running:   false,
-		runningMu: sync.Mutex{},
-		logger:    DefaultLogger,
-		location:  time.Local,
-		parser:    standardParser,
-		clock:     RealClock{},
+		entries:    nil,
+		entryIndex: make(map[EntryID]*Entry),
+		chain:      NewChain(),
+		add:        make(chan *Entry),
+		stop:       make(chan struct{}),
+		snapshot:   make(chan chan []Entry),
+		remove:     make(chan EntryID),
+		running:    false,
+		runningMu:  sync.Mutex{},
+		logger:     DefaultLogger,
+		location:   time.Local,
+		parser:     standardParser,
+		clock:      RealClock{},
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -181,6 +184,7 @@ func (c *Cron) Schedule(schedule Schedule, cmd Job) EntryID {
 	}
 	if !c.running {
 		heap.Push(&c.entries, entry)
+		c.entryIndex[entry.ID] = entry
 	} else {
 		c.add <- entry
 	}
@@ -205,11 +209,24 @@ func (c *Cron) Location() *time.Location {
 }
 
 // Entry returns a snapshot of the given entry, or nil if it couldn't be found.
+// This operation is O(1) when not running using the internal index map.
 func (c *Cron) Entry(id EntryID) Entry {
-	for _, entry := range c.Entries() {
-		if id == entry.ID {
-			return entry
+	c.runningMu.Lock()
+	if c.running {
+		c.runningMu.Unlock()
+		// When running, use snapshot from run goroutine (same as Entries())
+		for _, entry := range c.Entries() {
+			if id == entry.ID {
+				return entry
+			}
 		}
+		return Entry{}
+	}
+	// When not running, use direct map lookup (O(1))
+	entry, ok := c.entryIndex[id]
+	c.runningMu.Unlock()
+	if ok {
+		return *entry
 	}
 	return Entry{}
 }
@@ -318,6 +335,7 @@ func (c *Cron) run() {
 				now = c.now()
 				newEntry.Next = newEntry.Schedule.Next(now)
 				heap.Push(&c.entries, newEntry)
+				c.entryIndex[newEntry.ID] = newEntry
 				c.logger.Info("added", "now", now, "entry", newEntry.ID, "next", newEntry.Next)
 
 			case replyChan := <-c.snapshot:
@@ -410,5 +428,8 @@ func sortEntriesByTime(entries []Entry) {
 }
 
 func (c *Cron) removeEntry(id EntryID) {
-	c.entries.Remove(id)
+	if entry, ok := c.entryIndex[id]; ok {
+		c.entries.RemoveAt(entry)
+		delete(c.entryIndex, id)
+	}
 }
