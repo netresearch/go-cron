@@ -14,6 +14,9 @@ import (
 // maximum number of entries (see WithMaxEntries).
 var ErrMaxEntriesReached = errors.New("cron: max entries limit reached")
 
+// ErrDuplicateName is returned when adding an entry with a name that already exists.
+var ErrDuplicateName = errors.New("cron: duplicate entry name")
+
 // maxIdleDuration is the sleep duration when no entries are scheduled.
 // Using a very long duration (~11.4 years) instead of blocking indefinitely
 // allows the scheduler loop to still respond to add, remove, and stop operations.
@@ -30,6 +33,7 @@ const maxIdleDuration = 100000 * time.Hour
 type Cron struct {
 	entries    entryHeap
 	entryIndex map[EntryID]*Entry // O(1) lookup by ID
+	nameIndex  map[string]*Entry  // O(1) lookup by Name
 	chain      Chain
 	stop       chan struct{}
 	add        chan *Entry
@@ -74,6 +78,16 @@ type Entry struct {
 	// ID is the cron-assigned ID of this entry, which may be used to look up a
 	// snapshot or remove it.
 	ID EntryID
+
+	// Name is an optional human-readable identifier for this entry.
+	// If set, names must be unique within a Cron instance.
+	// Use WithName() when adding an entry to set this field.
+	Name string
+
+	// Tags is an optional set of labels for categorizing and filtering entries.
+	// Multiple entries can share the same tags.
+	// Use WithTags() when adding an entry to set this field.
+	Tags []string
 
 	// Schedule on which this job should be run.
 	Schedule Schedule
@@ -133,6 +147,7 @@ func New(opts ...Option) *Cron {
 	c := &Cron{
 		entries:    nil,
 		entryIndex: make(map[EntryID]*Entry),
+		nameIndex:  make(map[string]*Entry),
 		chain:      NewChain(),
 		add:        make(chan *Entry),
 		stop:       make(chan struct{}),
@@ -157,26 +172,69 @@ type FuncJob func()
 // Run calls the wrapped function.
 func (f FuncJob) Run() { f() }
 
+// JobOption configures an Entry when adding a job to Cron.
+type JobOption func(*Entry)
+
+// WithName sets a unique name for the job entry.
+// Names must be unique within a Cron instance; adding a job with a duplicate
+// name will return ErrDuplicateName.
+//
+// Named jobs can be retrieved with EntryByName() or removed with RemoveByName().
+//
+// Example:
+//
+//	c.AddFunc("@every 1h", cleanup, cron.WithName("hourly-cleanup"))
+func WithName(name string) JobOption {
+	return func(e *Entry) {
+		e.Name = name
+	}
+}
+
+// WithTags sets tags for categorizing the job entry.
+// Multiple entries can share the same tags, enabling group operations.
+//
+// Tagged jobs can be filtered with EntriesByTag() or removed with RemoveByTag().
+//
+// Example:
+//
+//	c.AddFunc("@every 1h", cleanup, cron.WithTags("maintenance", "hourly"))
+func WithTags(tags ...string) JobOption {
+	return func(e *Entry) {
+		e.Tags = tags
+	}
+}
+
 // AddFunc adds a func to the Cron to be run on the given schedule.
 // The spec is parsed using the time zone of this Cron instance as the default.
 // An opaque ID is returned that can be used to later remove it.
-func (c *Cron) AddFunc(spec string, cmd func()) (EntryID, error) {
-	return c.AddJob(spec, FuncJob(cmd))
+//
+// Optional JobOption arguments can be provided to set metadata like Name and Tags:
+//
+//	c.AddFunc("@every 1h", cleanup, cron.WithName("cleanup"), cron.WithTags("maintenance"))
+//
+// Returns ErrDuplicateName if a name is provided and already exists.
+func (c *Cron) AddFunc(spec string, cmd func(), opts ...JobOption) (EntryID, error) {
+	return c.AddJob(spec, FuncJob(cmd), opts...)
 }
 
 // AddJob adds a Job to the Cron to be run on the given schedule.
 // The spec is parsed using the time zone of this Cron instance as the default.
 // An opaque ID is returned that can be used to later remove it.
 //
+// Optional JobOption arguments can be provided to set metadata like Name and Tags:
+//
+//	c.AddJob("@every 1h", myJob, cron.WithName("my-job"), cron.WithTags("critical"))
+//
 // Returns ErrMaxEntriesReached if the maximum entry limit has been reached.
-func (c *Cron) AddJob(spec string, cmd Job) (EntryID, error) {
+// Returns ErrDuplicateName if a name is provided and already exists.
+func (c *Cron) AddJob(spec string, cmd Job, opts ...JobOption) (EntryID, error) {
 	schedule, err := c.parser.Parse(spec)
 	if err != nil {
 		return 0, err
 	}
-	id := c.Schedule(schedule, cmd)
-	if id == 0 {
-		return 0, ErrMaxEntriesReached
+	id, err := c.ScheduleJob(schedule, cmd, opts...)
+	if err != nil {
+		return 0, err
 	}
 	return id, nil
 }
@@ -191,14 +249,37 @@ func (c *Cron) AddJob(spec string, cmd Job) (EntryID, error) {
 // Note: When the cron is running, the limit check is approximate due to
 // concurrent entry additions. The actual count may briefly exceed the limit
 // by the number of concurrent Schedule calls in flight.
+//
+// Deprecated: Use ScheduleJob instead for error handling and metadata support.
 func (c *Cron) Schedule(schedule Schedule, cmd Job) EntryID {
+	id, err := c.ScheduleJob(schedule, cmd)
+	if err != nil {
+		c.logger.Error(err, "schedule failed")
+		return 0
+	}
+	return id
+}
+
+// ScheduleJob adds a Job to the Cron to be run on the given schedule.
+// The job is wrapped with the configured Chain.
+//
+// Optional JobOption arguments can be provided to set metadata like Name and Tags:
+//
+//	c.ScheduleJob(schedule, myJob, cron.WithName("my-job"), cron.WithTags("critical"))
+//
+// Returns ErrMaxEntriesReached if the maximum entry limit has been reached.
+// Returns ErrDuplicateName if a name is provided and already exists.
+//
+// Note: When the cron is running, the limit check is approximate due to
+// concurrent entry additions. The actual count may briefly exceed the limit
+// by the number of concurrent ScheduleJob calls in flight.
+func (c *Cron) ScheduleJob(schedule Schedule, cmd Job, opts ...JobOption) (EntryID, error) {
 	c.runningMu.Lock()
 	defer c.runningMu.Unlock()
 
 	// Check entry limit using atomic counter for race-free checking
 	if c.maxEntries > 0 && int(atomic.LoadInt64(&c.entryCount)) >= c.maxEntries {
-		c.logger.Error(ErrMaxEntriesReached, "max entries reached", "limit", c.maxEntries)
-		return 0
+		return 0, ErrMaxEntriesReached
 	}
 
 	c.nextID++
@@ -212,6 +293,22 @@ func (c *Cron) Schedule(schedule Schedule, cmd Job) EntryID {
 		Job:        cmd,
 		heapIndex:  -1,
 	}
+
+	// Apply job options
+	for _, opt := range opts {
+		opt(entry)
+	}
+
+	// Check for duplicate name
+	if entry.Name != "" {
+		if _, exists := c.nameIndex[entry.Name]; exists {
+			c.nextID-- // Revert ID allocation
+			return 0, ErrDuplicateName
+		}
+		// Reserve name immediately to prevent TOCTOU race when running
+		c.nameIndex[entry.Name] = entry
+	}
+
 	if !c.running {
 		heap.Push(&c.entries, entry)
 		c.entryIndex[entry.ID] = entry
@@ -219,7 +316,7 @@ func (c *Cron) Schedule(schedule Schedule, cmd Job) EntryID {
 	} else {
 		c.add <- entry
 	}
-	return entry.ID
+	return entry.ID, nil
 }
 
 // Entries returns a snapshot of the cron entries.
@@ -370,6 +467,8 @@ func (c *Cron) run() {
 				newEntry.Next = newEntry.Schedule.Next(now)
 				heap.Push(&c.entries, newEntry)
 				c.entryIndex[newEntry.ID] = newEntry
+				// Note: nameIndex already updated by ScheduleJob (while holding runningMu)
+				// to prevent TOCTOU race in duplicate name detection
 				atomic.AddInt64(&c.entryCount, 1)
 				c.hooks.callOnSchedule(newEntry.ID, newEntry.Job, newEntry.Next)
 				c.logger.Info("added", "now", now, "entry", newEntry.ID, "next", newEntry.Next)
@@ -483,9 +582,87 @@ func sortEntriesByTime(entries []Entry) {
 }
 
 func (c *Cron) removeEntry(id EntryID) {
-	if entry, ok := c.entryIndex[id]; ok {
-		c.entries.RemoveAt(entry)
-		delete(c.entryIndex, id)
-		atomic.AddInt64(&c.entryCount, -1)
+	entry, ok := c.entryIndex[id]
+	if !ok {
+		return
 	}
+
+	c.entries.RemoveAt(entry)
+	delete(c.entryIndex, id)
+
+	// Remove from nameIndex with proper synchronization.
+	// When not running, caller (Remove) already holds runningMu.
+	// When running, we must acquire it here to synchronize with ScheduleJob.
+	if entry.Name != "" {
+		if c.running {
+			c.runningMu.Lock()
+			delete(c.nameIndex, entry.Name)
+			c.runningMu.Unlock()
+		} else {
+			delete(c.nameIndex, entry.Name)
+		}
+	}
+	atomic.AddInt64(&c.entryCount, -1)
+}
+
+// EntryByName returns a snapshot of the entry with the given name,
+// or an invalid Entry (Entry.Valid() == false) if not found.
+//
+// This operation is O(1) when not running.
+// When running, it iterates through a snapshot of entries.
+func (c *Cron) EntryByName(name string) Entry {
+	c.runningMu.Lock()
+	if c.running {
+		c.runningMu.Unlock()
+		// When running, search through snapshot
+		for _, entry := range c.Entries() {
+			if entry.Name == name {
+				return entry
+			}
+		}
+		return Entry{}
+	}
+	// When not running, use direct map lookup (O(1))
+	entry, ok := c.nameIndex[name]
+	c.runningMu.Unlock()
+	if ok {
+		return *entry
+	}
+	return Entry{}
+}
+
+// EntriesByTag returns snapshots of all entries that have the given tag.
+// Returns an empty slice if no entries match.
+func (c *Cron) EntriesByTag(tag string) []Entry {
+	var result []Entry
+	for _, entry := range c.Entries() {
+		for _, t := range entry.Tags {
+			if t == tag {
+				result = append(result, entry)
+				break
+			}
+		}
+	}
+	return result
+}
+
+// RemoveByName removes the entry with the given name.
+// Returns true if an entry was removed, false if no entry had that name.
+func (c *Cron) RemoveByName(name string) bool {
+	entry := c.EntryByName(name)
+	if !entry.Valid() {
+		return false
+	}
+	c.Remove(entry.ID)
+	return true
+}
+
+// RemoveByTag removes all entries that have the given tag.
+// Returns the number of entries removed.
+func (c *Cron) RemoveByTag(tag string) int {
+	entries := c.EntriesByTag(tag)
+	for _, entry := range entries {
+		c.Remove(entry.ID)
+	}
+	return len(entries)
 }
