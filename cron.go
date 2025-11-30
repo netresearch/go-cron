@@ -48,8 +48,10 @@ type Cron struct {
 	jobWaiter  sync.WaitGroup
 	clock      Clock
 	hooks      *ObservabilityHooks
-	maxEntries int   // 0 means unlimited
-	entryCount int64 // atomic counter for race-free limit checking
+	maxEntries int                // 0 means unlimited
+	entryCount int64              // atomic counter for race-free limit checking
+	baseCtx    context.Context    // base context for all jobs
+	cancelCtx  context.CancelFunc // cancels baseCtx when Stop() is called
 }
 
 // ScheduleParser is an interface for schedule spec parsers that return a Schedule
@@ -60,6 +62,35 @@ type ScheduleParser interface {
 // Job is an interface for submitted cron jobs.
 type Job interface {
 	Run()
+}
+
+// JobWithContext is an optional interface for jobs that support context.Context.
+// If a job implements this interface, RunWithContext is called instead of Run,
+// allowing the job to:
+//   - Receive cancellation signals when Stop() is called
+//   - Respect deadlines and timeouts
+//   - Access request-scoped values (trace IDs, correlation IDs, etc.)
+//
+// Jobs that don't implement this interface will continue to work unchanged
+// via their Run() method.
+//
+// Example:
+//
+//	type MyJob struct{}
+//
+//	func (j *MyJob) Run() { j.RunWithContext(context.Background()) }
+//
+//	func (j *MyJob) RunWithContext(ctx context.Context) {
+//	    select {
+//	    case <-ctx.Done():
+//	        return // Job canceled
+//	    case <-time.After(time.Minute):
+//	        // Do work
+//	    }
+//	}
+type JobWithContext interface {
+	Job
+	RunWithContext(ctx context.Context)
 }
 
 // Schedule describes a job's duty cycle.
@@ -159,10 +190,13 @@ func New(opts ...Option) *Cron {
 		location:   time.Local,
 		parser:     standardParser,
 		clock:      RealClock{},
+		baseCtx:    context.Background(), // Default base context
 	}
 	for _, opt := range opts {
 		opt(c)
 	}
+	// Create cancellable context derived from baseCtx (which may have been set by WithContext)
+	c.baseCtx, c.cancelCtx = context.WithCancel(c.baseCtx)
 	return c
 }
 
@@ -171,6 +205,31 @@ type FuncJob func()
 
 // Run calls the wrapped function.
 func (f FuncJob) Run() { f() }
+
+// FuncJobWithContext is a wrapper that turns a func(context.Context) into a JobWithContext.
+// This enables context-aware jobs using simple functions.
+//
+// Example:
+//
+//	c.AddJob("@every 1m", cron.FuncJobWithContext(func(ctx context.Context) {
+//	    select {
+//	    case <-ctx.Done():
+//	        return // Canceled
+//	    default:
+//	        // Do work
+//	    }
+//	}))
+type FuncJobWithContext func(ctx context.Context)
+
+// Run implements Job interface by calling RunWithContext with context.Background().
+func (f FuncJobWithContext) Run() {
+	f.RunWithContext(context.Background())
+}
+
+// RunWithContext implements JobWithContext interface.
+func (f FuncJobWithContext) RunWithContext(ctx context.Context) {
+	f(ctx)
+}
 
 // JobOption configures an Entry when adding a job to Cron.
 type JobOption func(*Entry)
@@ -496,6 +555,9 @@ func (c *Cron) run() {
 
 // startJob runs the given job in a new goroutine with observability hooks.
 // The originalJob is used for name extraction, wrappedJob is the actual job to run.
+//
+// If wrappedJob implements JobWithContext, RunWithContext is called with the cron's
+// base context, allowing the job to receive cancellation signals when Stop() is called.
 func (c *Cron) startJob(entryID EntryID, originalJob, wrappedJob Job, scheduledTime time.Time) {
 	c.jobWaiter.Add(1)
 	go func() {
@@ -509,7 +571,12 @@ func (c *Cron) startJob(entryID EntryID, originalJob, wrappedJob Job, scheduledT
 			defer func() {
 				recovered = recover()
 			}()
-			wrappedJob.Run()
+			// Check if the job supports context and call appropriate method
+			if jc, ok := wrappedJob.(JobWithContext); ok {
+				jc.RunWithContext(c.baseCtx)
+			} else {
+				wrappedJob.Run()
+			}
 		}()
 		duration := c.clock.Now().Sub(start)
 
@@ -530,12 +597,20 @@ func (c *Cron) now() time.Time {
 
 // Stop stops the cron scheduler if it is running; otherwise it does nothing.
 // A context is returned so the caller can wait for running jobs to complete.
+//
+// When Stop is called, the base context is canceled, signaling all running jobs
+// that implement JobWithContext to shut down gracefully. Jobs should check
+// ctx.Done() and return promptly when canceled.
 func (c *Cron) Stop() context.Context {
 	c.runningMu.Lock()
 	defer c.runningMu.Unlock()
 	if c.running {
 		c.stop <- struct{}{}
 		c.running = false
+	}
+	// Cancel the base context to signal running jobs to stop
+	if c.cancelCtx != nil {
+		c.cancelCtx()
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {

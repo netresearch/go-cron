@@ -1,6 +1,7 @@
 package cron
 
 import (
+	"context"
 	"time"
 )
 
@@ -147,5 +148,38 @@ func WithMinEveryInterval(d time.Duration) Option {
 func WithMaxEntries(max int) Option {
 	return func(c *Cron) {
 		c.maxEntries = max
+	}
+}
+
+// WithContext sets the base context for all job executions.
+// When Stop() is called, this context is canceled, signaling all running
+// jobs that implement JobWithContext to shut down gracefully.
+//
+// If not specified, context.Background() is used as the base context.
+//
+// Use cases:
+//   - Propagate application-wide cancellation to cron jobs
+//   - Attach tracing context or correlation IDs to all jobs
+//   - Integrate with application lifecycle management
+//
+// Example:
+//
+//	// Create cron with application context
+//	ctx, cancel := context.WithCancel(context.Background())
+//	defer cancel()
+//	c := cron.New(cron.WithContext(ctx))
+//
+//	// Jobs implementing JobWithContext will receive this context
+//	c.AddJob("@every 1m", cron.FuncJobWithContext(func(ctx context.Context) {
+//	    select {
+//	    case <-ctx.Done():
+//	        return // Application shutting down
+//	    default:
+//	        // Do work
+//	    }
+//	}))
+func WithContext(ctx context.Context) Option {
+	return func(c *Cron) {
+		c.baseCtx = ctx
 	}
 }
