@@ -26,3 +26,4 @@ claudedocs/
 # Test artifacts
 coverage.out
 *.coverprofile
+zen_generated.code
