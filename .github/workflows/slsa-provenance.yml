@@ -7,13 +7,15 @@ on:
 permissions: read-all
 
 jobs:
-  provenance:
-    name: Generate SLSA Provenance
+  # First job: Prepare subjects for provenance
+  prepare:
+    name: Prepare Provenance Subjects
     runs-on: ubuntu-latest
     permissions:
-      actions: read
-      id-token: write
-      contents: write
+      contents: read
+    outputs:
+      subjects: ${{ steps.subjects.outputs.subjects }}
+      has_subjects: ${{ steps.subjects.outputs.has_subjects }}
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@0634a2670c59f64b4a01f0f96f84700a4088b9f0 # v2.12.0
@@ -24,11 +26,6 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
-
-      - name: Install Go
-        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
-        with:
-          go-version-file: go.mod
 
       - name: Download release assets
         env:
@@ -43,29 +40,57 @@ jobs:
         run: |
           cd release-assets
           # Generate SHA256 for all release assets
-          sha256sum * > ../provenance-subjects.txt 2>/dev/null || echo "No assets to hash"
-          cat ../provenance-subjects.txt || true
+          if ls * 1> /dev/null 2>&1; then
+            sha256sum * > ../provenance-subjects.txt
+            cat ../provenance-subjects.txt
 
-          # Create base64 encoded subjects for SLSA
-          if [ -s ../provenance-subjects.txt ]; then
-            SUBJECTS=$(cat ../provenance-subjects.txt | awk '{print "{\"name\":\""$2"\",\"digest\":{\"sha256\":\""$1"\"}}"}'  | jq -s -c '.')
-            echo "subjects=$SUBJECTS" >> "$GITHUB_OUTPUT"
+            # Create base64 encoded subjects for SLSA
+            SUBJECTS=$(cat ../provenance-subjects.txt | awk '{print "{\"name\":\""$2"\",\"digest\":{\"sha256\":\""$1"\"}}"}' | jq -s -c '.')
+            # Base64 encode for the reusable workflow
+            SUBJECTS_BASE64=$(echo "$SUBJECTS" | base64 -w0)
+            echo "subjects=$SUBJECTS_BASE64" >> "$GITHUB_OUTPUT"
             echo "has_subjects=true" >> "$GITHUB_OUTPUT"
           else
+            echo "No assets to hash"
             echo "has_subjects=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Generate SLSA Provenance
-        if: steps.subjects.outputs.has_subjects == 'true'
-        uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
+  # Second job: Generate SLSA provenance using reusable workflow
+  # Note: SLSA reusable workflows are pinned to version tags per project recommendation
+  # See: https://github.com/slsa-framework/slsa-github-generator#referencing-slsa-builders-and-generators
+  provenance:
+    name: Generate SLSA Provenance
+    needs: prepare
+    if: needs.prepare.outputs.has_subjects == 'true'
+    permissions:
+      actions: read
+      id-token: write
+      contents: write
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
+    with:
+      base64-subjects: ${{ needs.prepare.outputs.subjects }}
+      upload-assets: true
+
+  # Third job: Generate source attestation
+  source-attestation:
+    name: Generate Source Attestation
+    runs-on: ubuntu-latest
+    needs: prepare
+    permissions:
+      contents: write
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@0634a2670c59f64b4a01f0f96f84700a4088b9f0 # v2.12.0
         with:
-          base64-subjects: ${{ steps.subjects.outputs.subjects }}
-          upload-assets: true
+          egress-policy: audit
+
+      - name: Checkout code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Generate source provenance attestation
         run: |
           # Create source attestation
-          cat > source-provenance.json << EOF
+          cat > source-provenance.json << 'EOF'
           {
             "_type": "https://in-toto.io/Statement/v0.1",
             "predicateType": "https://slsa.dev/provenance/v0.2",
@@ -93,7 +118,6 @@ jobs:
               },
               "metadata": {
                 "buildInvocationID": "${{ github.run_id }}",
-                "buildStartedOn": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
                 "completeness": {
                   "parameters": true,
                   "environment": true,
