@@ -47,7 +47,8 @@ var defaults = []string{
 
 // Parser is a custom cron expression parser that can be configured.
 type Parser struct {
-	options ParseOption
+	options          ParseOption
+	minEveryInterval time.Duration
 }
 
 // NewParser creates a Parser with custom options.
@@ -90,7 +91,30 @@ func NewParser(options ParseOption) Parser {
 	if optionals > 1 {
 		panic("multiple optionals may not be configured")
 	}
-	return Parser{options}
+	return Parser{
+		options:          options,
+		minEveryInterval: time.Second, // default minimum interval for @every
+	}
+}
+
+// WithMinEveryInterval returns a new Parser with the specified minimum interval
+// for @every expressions. This allows overriding the default 1-second minimum.
+//
+// Use 0 or negative values to disable the minimum check entirely.
+// Use values larger than 1 second to enforce longer minimum intervals.
+//
+// Example:
+//
+//	// Allow sub-second intervals (for testing)
+//	p := NewParser(Minute | Hour | Dom | Month | Dow | Descriptor).
+//	    WithMinEveryInterval(100 * time.Millisecond)
+//
+//	// Enforce minimum 1-minute intervals (for rate limiting)
+//	p := NewParser(Minute | Hour | Dom | Month | Dow | Descriptor).
+//	    WithMinEveryInterval(time.Minute)
+func (p Parser) WithMinEveryInterval(d time.Duration) Parser {
+	p.minEveryInterval = d
+	return p
 }
 
 // MaxSpecLength is the maximum allowed length for a cron spec string.
@@ -150,7 +174,7 @@ func (p Parser) Parse(spec string) (Schedule, error) {
 		if p.options&Descriptor == 0 {
 			return nil, fmt.Errorf("parser does not accept descriptors: %v", spec)
 		}
-		return parseDescriptor(spec, loc)
+		return parseDescriptor(spec, loc, p.minEveryInterval)
 	}
 
 	// Split on whitespace.
@@ -274,6 +298,18 @@ func normalizeFields(fields []string, options ParseOption) ([]string, error) {
 var standardParser = NewParser(
 	Minute | Hour | Dom | Month | Dow | Descriptor,
 )
+
+// StandardParser returns a copy of the standard parser used by ParseStandard.
+// This can be used as a base for creating custom parsers with modified settings.
+//
+// Example:
+//
+//	// Create parser allowing sub-second @every intervals
+//	p := StandardParser().WithMinEveryInterval(0)
+//	c := cron.New(cron.WithParser(p))
+func StandardParser() Parser {
+	return standardParser
+}
 
 // ParseStandard returns a new crontab schedule representing the given
 // standardSpec (https://en.wikipedia.org/wiki/Cron). It requires 5 entries
@@ -489,7 +525,7 @@ func newDescriptorSchedule(hour, dom, month, dow uint64, loc *time.Location) *Sp
 	}
 }
 
-func parseDescriptor(descriptor string, loc *time.Location) (Schedule, error) {
+func parseDescriptor(descriptor string, loc *time.Location, minEveryInterval time.Duration) (Schedule, error) {
 	switch descriptor {
 	case "@yearly", "@annually":
 		return newDescriptorSchedule(1<<hours.min, 1<<dom.min, 1<<months.min, all(dow), loc), nil
@@ -509,10 +545,10 @@ func parseDescriptor(descriptor string, loc *time.Location) (Schedule, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse duration %s: %w", descriptor, err)
 		}
-		if duration < time.Second {
-			return nil, fmt.Errorf("@every duration must be at least 1 second: %s", descriptor)
+		if minEveryInterval > 0 && duration < minEveryInterval {
+			return nil, fmt.Errorf("@every duration must be at least %v: %s", minEveryInterval, descriptor)
 		}
-		return Every(duration), nil
+		return EveryWithMin(duration, minEveryInterval), nil
 	}
 
 	return nil, fmt.Errorf("unrecognized descriptor: %s", descriptor)

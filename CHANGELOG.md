@@ -10,6 +10,14 @@ features, bug fixes, and modernization improvements.
 
 ## [Unreleased]
 
+### Added
+- **WithMinEveryInterval option**: Configure minimum interval for `@every` expressions
+  - Allow sub-second intervals for testing: `WithMinEveryInterval(0)` or `WithMinEveryInterval(100*time.Millisecond)`
+  - Enforce longer minimums for rate limiting: `WithMinEveryInterval(time.Minute)`
+- **EveryWithMin function**: Create constant delay schedules with custom minimum interval
+- **Parser.WithMinEveryInterval**: Configure minimum interval on parser level
+- **StandardParser function**: Get a copy of the standard parser for customization
+
 ### Planned for v2
 - Context-aware Job interface with graceful shutdown support
 
@@ -72,7 +80,7 @@ This fork includes all features from robfig/cron v3 plus:
 | Scheduling algorithm | O(n) sort | O(log n) min-heap |
 | Custom time source | No | WithClock option |
 | Step range validation | No | Yes |
-| @every minimum duration | No | 1 second |
+| @every minimum duration | No | 1 second (configurable) |
 | Timezone validation | No | Yes |
 | Input length limits | No | Yes |
 | Timeout wrapper | No | Yes |

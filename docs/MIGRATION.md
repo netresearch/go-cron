@@ -135,7 +135,11 @@ c.AddFunc("@every 100ms", myFunc) // Allowed, but could overwhelm system
 **After (netresearch/go-cron):**
 ```go
 _, err := c.AddFunc("@every 100ms", myFunc)
-// err: "@every duration must be at least 1 second"
+// err: "@every duration must be at least 1s: @every 100ms"
+
+// To allow sub-second intervals (e.g., for testing):
+c := cron.New(cron.WithMinEveryInterval(0))
+c.AddFunc("@every 100ms", myFunc) // Now allowed
 ```
 
 #### Input Length Limits

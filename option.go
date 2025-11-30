@@ -92,6 +92,39 @@ func WithObservability(hooks ObservabilityHooks) Option {
 	}
 }
 
+// WithMinEveryInterval configures the minimum interval allowed for @every expressions.
+// This allows overriding the default 1-second minimum.
+//
+// Use cases:
+//   - Sub-second intervals for testing: WithMinEveryInterval(0) or WithMinEveryInterval(100*time.Millisecond)
+//   - Enforce longer minimums for rate limiting: WithMinEveryInterval(time.Minute)
+//
+// The interval affects:
+//   - Parsing of "@every <duration>" expressions
+//   - The EveryWithMin function when called via the parser
+//
+// Note: This option replaces the current parser. If you need custom parser options
+// along with a custom minimum interval, use WithParser with a manually configured parser:
+//
+//	p := cron.NewParser(cron.Second | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor).
+//	    WithMinEveryInterval(100 * time.Millisecond)
+//	c := cron.New(cron.WithParser(p))
+//
+// Example:
+//
+//	// Allow sub-second intervals (useful for testing)
+//	c := cron.New(cron.WithMinEveryInterval(0))
+//	c.AddFunc("@every 100ms", func() { ... })
+//
+//	// Enforce minimum 1-minute intervals
+//	c := cron.New(cron.WithMinEveryInterval(time.Minute))
+//	c.AddFunc("@every 30s", func() { ... }) // Error: must be at least 1 minute
+func WithMinEveryInterval(d time.Duration) Option {
+	return func(c *Cron) {
+		c.parser = StandardParser().WithMinEveryInterval(d)
+	}
+}
+
 // WithMaxEntries limits the maximum number of entries that can be added to the Cron.
 // When the limit is reached:
 //   - AddFunc and AddJob return ErrMaxEntriesReached

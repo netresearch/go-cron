@@ -52,3 +52,111 @@ func TestConstantDelayNext(t *testing.T) {
 		}
 	}
 }
+
+func TestEveryWithMin(t *testing.T) {
+	tests := []struct {
+		name        string
+		duration    time.Duration
+		minInterval time.Duration
+		wantDelay   time.Duration
+	}{
+		{
+			name:        "duration above minimum - no change",
+			duration:    5 * time.Second,
+			minInterval: time.Second,
+			wantDelay:   5 * time.Second,
+		},
+		{
+			name:        "duration below minimum - rounds up",
+			duration:    500 * time.Millisecond,
+			minInterval: time.Second,
+			wantDelay:   time.Second,
+		},
+		{
+			name:        "zero minimum allows sub-second",
+			duration:    100 * time.Millisecond,
+			minInterval: 0,
+			wantDelay:   100 * time.Millisecond,
+		},
+		{
+			name:        "negative minimum allows sub-second",
+			duration:    100 * time.Millisecond,
+			minInterval: -time.Second,
+			wantDelay:   100 * time.Millisecond,
+		},
+		{
+			name:        "larger minimum enforced",
+			duration:    30 * time.Second,
+			minInterval: time.Minute,
+			wantDelay:   time.Minute,
+		},
+		{
+			name:        "duration equals minimum - no change",
+			duration:    time.Minute,
+			minInterval: time.Minute,
+			wantDelay:   time.Minute,
+		},
+		{
+			name:        "sub-second truncated when minimum >= 1s",
+			duration:    5*time.Second + 500*time.Millisecond,
+			minInterval: time.Second,
+			wantDelay:   5 * time.Second,
+		},
+		{
+			name:        "sub-second preserved when minimum allows",
+			duration:    500 * time.Millisecond,
+			minInterval: 100 * time.Millisecond,
+			wantDelay:   500 * time.Millisecond,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sched := EveryWithMin(tt.duration, tt.minInterval)
+			if sched.Delay != tt.wantDelay {
+				t.Errorf("EveryWithMin(%v, %v).Delay = %v, want %v",
+					tt.duration, tt.minInterval, sched.Delay, tt.wantDelay)
+			}
+		})
+	}
+}
+
+func TestEveryWithMin_Next(t *testing.T) {
+	// Test that sub-second intervals actually schedule correctly
+	sched := EveryWithMin(100*time.Millisecond, 0)
+
+	baseTime := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	next := sched.Next(baseTime)
+
+	expected := baseTime.Add(100 * time.Millisecond)
+	if !next.Equal(expected) {
+		t.Errorf("Next(%v) = %v, want %v", baseTime, next, expected)
+	}
+
+	// Verify subsequent calls continue the pattern
+	next2 := sched.Next(next)
+	expected2 := next.Add(100 * time.Millisecond)
+	if !next2.Equal(expected2) {
+		t.Errorf("Next(%v) = %v, want %v", next, next2, expected2)
+	}
+}
+
+func TestEveryBackwardCompatibility(t *testing.T) {
+	// Ensure Every() still works exactly as before (rounds to 1 second)
+	tests := []struct {
+		duration  time.Duration
+		wantDelay time.Duration
+	}{
+		{500 * time.Millisecond, time.Second},      // Rounds up
+		{time.Second, time.Second},                 // No change
+		{5 * time.Second, 5 * time.Second},         // No change
+		{5*time.Second + 500*time.Millisecond, 5 * time.Second}, // Truncates sub-second
+	}
+
+	for _, tt := range tests {
+		sched := Every(tt.duration)
+		if sched.Delay != tt.wantDelay {
+			t.Errorf("Every(%v).Delay = %v, want %v", tt.duration, sched.Delay, tt.wantDelay)
+		}
+	}
+}
