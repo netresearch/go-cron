@@ -758,6 +758,110 @@ func TestStopAndWait(t *testing.T) {
 	})
 }
 
+func TestStopWithTimeout(t *testing.T) {
+	t.Run("job completes within timeout returns true", func(t *testing.T) {
+		cron := newWithSeconds()
+		var jobDone atomic.Bool
+		cron.AddFunc("* * * * * *", func() {
+			// Job takes 200ms
+			time.Sleep(200 * time.Millisecond)
+			jobDone.Store(true)
+		})
+		cron.Start()
+		time.Sleep(time.Second) // Wait for job to start
+
+		// StopWithTimeout with 1s should succeed
+		result := cron.StopWithTimeout(time.Second)
+
+		if !result {
+			t.Error("StopWithTimeout returned false, expected true")
+		}
+		if !jobDone.Load() {
+			t.Error("Job did not complete")
+		}
+	})
+
+	t.Run("job exceeds timeout returns false", func(t *testing.T) {
+		cron := newWithSeconds()
+		var jobStarted atomic.Bool
+		cron.AddFunc("* * * * * *", func() {
+			jobStarted.Store(true)
+			// Job takes much longer than timeout
+			time.Sleep(2 * time.Second)
+		})
+		cron.Start()
+		time.Sleep(time.Second) // Wait for job to start
+
+		// StopWithTimeout with 100ms should timeout
+		result := cron.StopWithTimeout(100 * time.Millisecond)
+
+		if result {
+			t.Error("StopWithTimeout returned true, expected false (timeout)")
+		}
+		if !jobStarted.Load() {
+			t.Error("Job did not start")
+		}
+	})
+
+	t.Run("zero timeout waits indefinitely", func(t *testing.T) {
+		cron := newWithSeconds()
+		var jobDone atomic.Bool
+		cron.AddFunc("* * * * * *", func() {
+			time.Sleep(100 * time.Millisecond)
+			jobDone.Store(true)
+		})
+		cron.Start()
+		time.Sleep(time.Second) // Wait for job to start
+
+		// Zero timeout should wait indefinitely (equivalent to StopAndWait)
+		result := cron.StopWithTimeout(0)
+
+		if !result {
+			t.Error("StopWithTimeout(0) returned false, expected true")
+		}
+		if !jobDone.Load() {
+			t.Error("Job did not complete")
+		}
+	})
+
+	t.Run("negative timeout waits indefinitely", func(t *testing.T) {
+		cron := newWithSeconds()
+		var jobDone atomic.Bool
+		cron.AddFunc("* * * * * *", func() {
+			time.Sleep(100 * time.Millisecond)
+			jobDone.Store(true)
+		})
+		cron.Start()
+		time.Sleep(time.Second) // Let job start
+
+		// Negative timeout should wait indefinitely
+		result := cron.StopWithTimeout(-time.Second)
+
+		if !result {
+			t.Error("StopWithTimeout(-1s) returned false, expected true")
+		}
+		if !jobDone.Load() {
+			t.Error("Job did not complete")
+		}
+	})
+
+	t.Run("no running jobs returns true immediately", func(t *testing.T) {
+		cron := newWithSeconds()
+		cron.Start()
+
+		start := time.Now()
+		result := cron.StopWithTimeout(5 * time.Second)
+		elapsed := time.Since(start)
+
+		if !result {
+			t.Error("StopWithTimeout returned false with no running jobs")
+		}
+		if elapsed > 100*time.Millisecond {
+			t.Errorf("StopWithTimeout took too long: %v", elapsed)
+		}
+	})
+}
+
 func TestMultiThreadedStartAndStop(t *testing.T) {
 	cron := New()
 	go cron.Run()

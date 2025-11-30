@@ -626,9 +626,46 @@ func (c *Cron) Stop() context.Context {
 //	ctx := c.Stop()
 //	<-ctx.Done()
 //
-// For timeout-based shutdown, use Stop() directly and select on the returned context.
+// For timeout-based shutdown, use StopWithTimeout() or use Stop() directly:
+//
+//	ctx := c.Stop()
+//	select {
+//	case <-ctx.Done():
+//	    // All jobs completed
+//	case <-time.After(5 * time.Second):
+//	    // Timeout - some jobs may still be running
+//	}
 func (c *Cron) StopAndWait() {
 	<-c.Stop().Done()
+}
+
+// StopWithTimeout stops the cron scheduler and waits for running jobs to complete
+// with a timeout. Returns true if all jobs completed within the timeout,
+// false if the timeout was reached and some jobs may still be running.
+//
+// When the timeout is reached, jobs that implement JobWithContext should already
+// have received context cancellation and should be in the process of shutting down.
+// Jobs that don't check their context may continue running in the background.
+//
+// A timeout of zero or negative waits indefinitely (equivalent to StopAndWait).
+//
+// Example:
+//
+//	if !c.StopWithTimeout(30 * time.Second) {
+//	    log.Println("Warning: some jobs did not complete within 30s")
+//	}
+func (c *Cron) StopWithTimeout(timeout time.Duration) bool {
+	ctx := c.Stop()
+	if timeout <= 0 {
+		<-ctx.Done()
+		return true
+	}
+	select {
+	case <-ctx.Done():
+		return true
+	case <-time.After(timeout):
+		return false
+	}
 }
 
 // entrySnapshot returns a copy of the current cron entry list, sorted by next execution time.
