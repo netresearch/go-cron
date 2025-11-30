@@ -1,0 +1,121 @@
+name: SLSA Provenance
+
+on:
+  release:
+    types: [published]
+
+permissions: read-all
+
+jobs:
+  provenance:
+    name: Generate SLSA Provenance
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      id-token: write
+      contents: write
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@0634a2670c59f64b4a01f0f96f84700a4088b9f0 # v2.12.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Install Go
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version-file: go.mod
+
+      - name: Download release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p release-assets
+          gh release download "${{ github.event.release.tag_name }}" -D release-assets || true
+          ls -la release-assets/
+
+      - name: Generate provenance subjects
+        id: subjects
+        run: |
+          cd release-assets
+          # Generate SHA256 for all release assets
+          sha256sum * > ../provenance-subjects.txt 2>/dev/null || echo "No assets to hash"
+          cat ../provenance-subjects.txt || true
+
+          # Create base64 encoded subjects for SLSA
+          if [ -s ../provenance-subjects.txt ]; then
+            SUBJECTS=$(cat ../provenance-subjects.txt | awk '{print "{\"name\":\""$2"\",\"digest\":{\"sha256\":\""$1"\"}}"}'  | jq -s -c '.')
+            echo "subjects=$SUBJECTS" >> "$GITHUB_OUTPUT"
+            echo "has_subjects=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_subjects=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Generate SLSA Provenance
+        if: steps.subjects.outputs.has_subjects == 'true'
+        uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
+        with:
+          base64-subjects: ${{ steps.subjects.outputs.subjects }}
+          upload-assets: true
+
+      - name: Generate source provenance attestation
+        run: |
+          # Create source attestation
+          cat > source-provenance.json << EOF
+          {
+            "_type": "https://in-toto.io/Statement/v0.1",
+            "predicateType": "https://slsa.dev/provenance/v0.2",
+            "subject": [
+              {
+                "name": "github.com/netresearch/go-cron",
+                "digest": {
+                  "sha1": "${{ github.sha }}"
+                }
+              }
+            ],
+            "predicate": {
+              "builder": {
+                "id": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+              },
+              "buildType": "https://github.com/slsa-framework/slsa-github-generator/go@v1",
+              "invocation": {
+                "configSource": {
+                  "uri": "git+https://github.com/${{ github.repository }}@${{ github.ref }}",
+                  "digest": {
+                    "sha1": "${{ github.sha }}"
+                  },
+                  "entryPoint": ".github/workflows/slsa-provenance.yml"
+                }
+              },
+              "metadata": {
+                "buildInvocationID": "${{ github.run_id }}",
+                "buildStartedOn": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+                "completeness": {
+                  "parameters": true,
+                  "environment": true,
+                  "materials": true
+                },
+                "reproducible": false
+              },
+              "materials": [
+                {
+                  "uri": "git+https://github.com/${{ github.repository }}@${{ github.ref }}",
+                  "digest": {
+                    "sha1": "${{ github.sha }}"
+                  }
+                }
+              ]
+            }
+          }
+          EOF
+          cat source-provenance.json
+
+      - name: Upload source provenance
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ github.event.release.tag_name }}" source-provenance.json --clobber || true

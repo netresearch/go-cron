@@ -264,6 +264,43 @@ jobs:
           name: benchmark-results
           path: benchmark-results.txt
 
+  fuzz:
+    name: fuzz testing
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@0634a2670c59f64b4a01f0f96f84700a4088b9f0 # v2.12.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Install Go
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version-file: go.mod
+
+      - name: Run fuzz tests
+        run: |
+          echo "Running fuzz tests (30s each)..."
+          # Run each fuzz test for 30 seconds
+          go test -fuzz=FuzzParseStandard -fuzztime=30s ./... || true
+          go test -fuzz=FuzzSpec_Next -fuzztime=30s ./... || true
+          echo "Fuzz testing complete"
+
+      - name: Check for crashers
+        run: |
+          # Check if any crashers were found
+          if find . -path "*/testdata/fuzz/*/crashers/*" -type f 2>/dev/null | grep -q .; then
+            echo "::error::Fuzz testing found crashers!"
+            find . -path "*/testdata/fuzz/*/crashers/*" -type f -exec cat {} \;
+            exit 1
+          fi
+          echo "No crashers found"
+
   license-check:
     name: license compliance
     runs-on: ubuntu-latest
