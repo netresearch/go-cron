@@ -3,6 +3,10 @@
 
 .PHONY: all build test test-race test-coverage lint lint-fix fmt clean help
 
+# Build flags for reproducible, optimized binaries
+LDFLAGS := -s -w
+BUILDFLAGS := -trimpath -ldflags "$(LDFLAGS)"
+
 # Default target
 all: lint test build
 
@@ -10,6 +14,11 @@ all: lint test build
 build:
 	@echo "==> Building..."
 	@go build -v ./...
+
+# Build with optimization flags (for release verification)
+build-release:
+	@echo "==> Building with release flags..."
+	@CGO_ENABLED=0 go build $(BUILDFLAGS) -v ./...
 
 # Run tests
 test:
@@ -28,6 +37,17 @@ test-coverage:
 	@go tool cover -func=coverage.out | tail -n 1
 	@echo ""
 	@echo "To view coverage in browser: go tool cover -html=coverage.out"
+
+# Run fuzz tests (short duration for local dev)
+test-fuzz:
+	@echo "==> Running fuzz tests (30s each)..."
+	@go test -fuzz=FuzzParseStandard -fuzztime=30s ./...
+	@go test -fuzz=FuzzSpec_Next -fuzztime=30s ./...
+
+# Run benchmarks
+benchmark:
+	@echo "==> Running benchmarks..."
+	@go test -bench=. -benchmem -run=^$$ -count=3 ./...
 
 # Run linter
 lint:
@@ -56,6 +76,16 @@ security:
 	@echo "==> Running security checks..."
 	@go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
+# Run gosec security scanner
+gosec:
+	@echo "==> Running gosec..."
+	@go run github.com/securego/gosec/v2/cmd/gosec@latest ./...
+
+# Run gitleaks secret scanner
+gitleaks:
+	@echo "==> Running gitleaks..."
+	@gitleaks detect --source . --no-banner --redact
+
 # Clean build artifacts
 clean:
 	@echo "==> Cleaning..."
@@ -63,27 +93,37 @@ clean:
 	@go clean ./...
 
 # Verify everything before commit
-verify: tidy lint test-race
+verify: tidy lint test-race security
 	@echo "==> All checks passed!"
 
 # CI target (matches GitHub Actions)
-ci: tidy lint test-coverage security
+ci: tidy lint test-coverage security gosec
 	@echo "==> CI checks passed!"
+
+# Full security audit
+audit: security gosec gitleaks
+	@echo "==> Security audit complete!"
 
 # Help
 help:
 	@echo "Available targets:"
 	@echo "  all           - Run lint, test, build (default)"
 	@echo "  build         - Build the package"
+	@echo "  build-release - Build with optimization flags (-trimpath, -ldflags)"
 	@echo "  test          - Run tests"
 	@echo "  test-race     - Run tests with race detection"
 	@echo "  test-coverage - Run tests with coverage report"
+	@echo "  test-fuzz     - Run fuzz tests (30s each)"
+	@echo "  benchmark     - Run benchmarks"
 	@echo "  lint          - Run golangci-lint"
 	@echo "  lint-fix      - Run golangci-lint with auto-fix"
 	@echo "  fmt           - Format code with gofmt and goimports"
 	@echo "  tidy          - Tidy and verify go modules"
 	@echo "  security      - Run govulncheck"
+	@echo "  gosec         - Run gosec security scanner"
+	@echo "  gitleaks      - Run gitleaks secret scanner"
 	@echo "  clean         - Clean build artifacts"
 	@echo "  verify        - Run all checks before commit"
 	@echo "  ci            - Run CI checks"
+	@echo "  audit         - Run full security audit"
 	@echo "  help          - Show this help"

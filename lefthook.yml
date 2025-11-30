@@ -24,6 +24,15 @@ pre-commit:
     - name: build
       run: go build ./...
 
+    - name: gitleaks
+      run: |
+        if command -v gitleaks &> /dev/null; then
+          gitleaks protect --staged --no-banner --redact
+        else
+          echo "Warning: gitleaks not installed, skipping secret scan"
+          echo "Install: brew install gitleaks (macOS) or go install github.com/gitleaks/gitleaks/v8@latest"
+        fi
+
 pre-push:
   parallel: true
   jobs:
@@ -32,6 +41,9 @@ pre-push:
 
     - name: lint-full
       run: golangci-lint run ./...
+
+    - name: vulncheck
+      run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
 commit-msg:
   jobs:
