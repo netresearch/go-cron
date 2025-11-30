@@ -2,6 +2,7 @@ package cron
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"log"
 	"strings"
@@ -1495,5 +1496,317 @@ func TestEntriesIncludesMetadata(t *testing.T) {
 	}
 	if len(entries[0].Tags) != 2 {
 		t.Errorf("expected tags in Entries() result, got %v", entries[0].Tags)
+	}
+}
+
+// ============================================================================
+// Context Support Tests
+// ============================================================================
+
+// contextAwareJob is a test job that implements JobWithContext
+type contextAwareJob struct {
+	started      chan struct{}
+	completed    chan struct{}
+	canceled     chan struct{}
+	receivedCtx  context.Context
+	ctxWasCalled bool
+	runWasCalled bool
+	mu           sync.Mutex
+}
+
+func newContextAwareJob() *contextAwareJob {
+	return &contextAwareJob{
+		started:   make(chan struct{}),
+		completed: make(chan struct{}),
+		canceled:  make(chan struct{}),
+	}
+}
+
+func (j *contextAwareJob) Run() {
+	j.mu.Lock()
+	j.runWasCalled = true
+	j.mu.Unlock()
+	j.RunWithContext(context.Background())
+}
+
+func (j *contextAwareJob) RunWithContext(ctx context.Context) {
+	j.mu.Lock()
+	j.ctxWasCalled = true
+	j.receivedCtx = ctx
+	j.mu.Unlock()
+
+	close(j.started)
+
+	select {
+	case <-ctx.Done():
+		close(j.canceled)
+	case <-time.After(5 * time.Second):
+		// Timeout - job wasn't canceled
+	}
+	close(j.completed)
+}
+
+func TestJobWithContext_ReceivesContext(t *testing.T) {
+	fc := NewFakeClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
+	c := New(WithClock(fc))
+
+	job := newContextAwareJob()
+	c.AddJob("@every 1s", job)
+	c.Start()
+
+	// Wait for timer to be set
+	fc.BlockUntil(1)
+	// Advance time to trigger the job
+	fc.Advance(time.Second)
+
+	// Wait for job to start
+	select {
+	case <-job.started:
+		// Good
+	case <-time.After(time.Second):
+		t.Fatal("job didn't start")
+	}
+
+	// Verify RunWithContext was called (not just Run)
+	job.mu.Lock()
+	ctxWasCalled := job.ctxWasCalled
+	job.mu.Unlock()
+
+	if !ctxWasCalled {
+		t.Error("RunWithContext was not called")
+	}
+
+	// Stop and wait for job completion
+	c.Stop()
+	<-job.completed
+}
+
+func TestJobWithContext_CanceledOnStop(t *testing.T) {
+	fc := NewFakeClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
+	c := New(WithClock(fc))
+
+	job := newContextAwareJob()
+	c.AddJob("@every 1s", job)
+	c.Start()
+
+	// Wait for timer and trigger job
+	fc.BlockUntil(1)
+	fc.Advance(time.Second)
+
+	// Wait for job to start
+	select {
+	case <-job.started:
+		// Good
+	case <-time.After(time.Second):
+		t.Fatal("job didn't start")
+	}
+
+	// Stop the cron - should cancel the context
+	c.Stop()
+
+	// Verify the context was canceled
+	select {
+	case <-job.canceled:
+		// Good - context was canceled
+	case <-time.After(time.Second):
+		t.Error("context was not canceled when Stop() was called")
+	}
+}
+
+func TestFuncJobWithContext(t *testing.T) {
+	fc := NewFakeClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
+	c := New(WithClock(fc))
+
+	var receivedCtx context.Context
+	started := make(chan struct{})
+	completed := make(chan struct{})
+
+	c.AddJob("@every 1s", FuncJobWithContext(func(ctx context.Context) {
+		receivedCtx = ctx
+		close(started)
+		<-ctx.Done()
+		close(completed)
+	}))
+
+	c.Start()
+
+	fc.BlockUntil(1)
+	fc.Advance(time.Second)
+
+	<-started
+
+	if receivedCtx == nil {
+		t.Error("FuncJobWithContext did not receive a context")
+	}
+
+	c.Stop()
+	<-completed
+}
+
+func TestWithContext_PropagatesContext(t *testing.T) {
+	fc := NewFakeClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
+
+	// Create a context with a value
+	type ctxKey string
+	baseCtx := context.WithValue(context.Background(), ctxKey("testKey"), "testValue")
+
+	c := New(WithClock(fc), WithContext(baseCtx))
+
+	var receivedValue interface{}
+	started := make(chan struct{})
+
+	c.AddJob("@every 1s", FuncJobWithContext(func(ctx context.Context) {
+		receivedValue = ctx.Value(ctxKey("testKey"))
+		close(started)
+	}))
+
+	c.Start()
+	defer c.Stop()
+
+	fc.BlockUntil(1)
+	fc.Advance(time.Second)
+
+	<-started
+
+	if receivedValue != "testValue" {
+		t.Errorf("context value not propagated: got %v, want %q", receivedValue, "testValue")
+	}
+}
+
+func TestRegularJob_StillWorks(t *testing.T) {
+	// Ensure regular jobs without context still work
+	fc := NewFakeClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
+	c := New(WithClock(fc))
+
+	executed := make(chan struct{})
+
+	c.AddFunc("@every 1s", func() {
+		close(executed)
+	})
+
+	c.Start()
+	defer c.Stop()
+
+	fc.BlockUntil(1)
+	fc.Advance(time.Second)
+
+	select {
+	case <-executed:
+		// Good
+	case <-time.After(time.Second):
+		t.Error("regular FuncJob did not execute")
+	}
+}
+
+func TestTimeoutWithContext_JobCompletesBeforeTimeout(t *testing.T) {
+	fc := NewFakeClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
+	c := New(
+		WithClock(fc),
+		WithChain(TimeoutWithContext(DefaultLogger, 5*time.Minute)),
+	)
+
+	executed := make(chan struct{})
+
+	c.AddJob("@every 1s", FuncJobWithContext(func(ctx context.Context) {
+		// Job completes immediately
+		close(executed)
+	}))
+
+	c.Start()
+	defer c.Stop()
+
+	fc.BlockUntil(1)
+	fc.Advance(time.Second)
+
+	select {
+	case <-executed:
+		// Good
+	case <-time.After(time.Second):
+		t.Error("job did not execute")
+	}
+}
+
+func TestTimeoutWithContext_ContextCanceledOnTimeout(t *testing.T) {
+	fc := NewFakeClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
+	c := New(
+		WithClock(fc),
+		WithChain(TimeoutWithContext(DefaultLogger, 50*time.Millisecond)),
+	)
+
+	var canceled atomic.Bool
+	var jobStarted atomic.Bool
+
+	c.AddJob("@every 1s", FuncJobWithContext(func(ctx context.Context) {
+		jobStarted.Store(true)
+		select {
+		case <-ctx.Done():
+			canceled.Store(true)
+		case <-time.After(5 * time.Second):
+			// Timeout not received
+		}
+	}))
+
+	c.Start()
+	defer c.Stop()
+
+	// Wait for timer to be registered
+	fc.BlockUntil(1)
+
+	// Advance time to trigger the job
+	fc.Advance(time.Second)
+
+	// Wait for job to start
+	deadline := time.Now().Add(2 * time.Second)
+	for !jobStarted.Load() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if !jobStarted.Load() {
+		t.Fatal("job did not start")
+	}
+
+	// Wait for real time to allow context timeout (50ms) to fire
+	time.Sleep(100 * time.Millisecond)
+
+	if !canceled.Load() {
+		t.Error("job context was not canceled by timeout")
+	}
+}
+
+func TestTimeoutWithContext_ZeroTimeoutDisabled(t *testing.T) {
+	fc := NewFakeClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
+	c := New(
+		WithClock(fc),
+		WithChain(TimeoutWithContext(DefaultLogger, 0)), // Zero timeout = disabled
+	)
+
+	executed := make(chan struct{})
+
+	c.AddJob("@every 1s", FuncJobWithContext(func(ctx context.Context) {
+		close(executed)
+	}))
+
+	c.Start()
+	defer c.Stop()
+
+	fc.BlockUntil(1)
+	fc.Advance(time.Second)
+
+	select {
+	case <-executed:
+		// Good - job executed without timeout
+	case <-time.After(time.Second):
+		t.Error("job did not execute with zero timeout")
+	}
+}
+
+func TestTimeoutWithContext_PreservesJobWithContextInterface(t *testing.T) {
+	// Verify that TimeoutWithContext returns a JobWithContext
+	wrapper := TimeoutWithContext(DefaultLogger, time.Minute)
+	job := FuncJobWithContext(func(ctx context.Context) {})
+	wrapped := wrapper(job)
+
+	if _, ok := wrapped.(JobWithContext); !ok {
+		t.Error("TimeoutWithContext should return a JobWithContext")
 	}
 }

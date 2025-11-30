@@ -1,6 +1,7 @@
 package cron
 
 import (
+	"context"
 	"fmt"
 	"runtime"
 	"sync"
@@ -140,5 +141,99 @@ func Timeout(logger Logger, timeout time.Duration) JobWrapper {
 				logger.Error(fmt.Errorf("job exceeded timeout of %v; goroutine still running in background", timeout), "timeout", "duration", timeout)
 			}
 		})
+	}
+}
+
+// TimeoutWithContext wraps a job with a timeout that supports true cancellation.
+// Unlike Timeout, this wrapper passes a context with deadline to jobs that implement
+// JobWithContext, allowing them to check for cancellation and clean up gracefully.
+//
+// When the timeout expires:
+//   - Jobs implementing JobWithContext receive a canceled context and can stop gracefully
+//   - Jobs implementing only Job continue running (same as Timeout wrapper)
+//
+// A timeout of zero or negative disables the timeout and returns the job unchanged.
+//
+// Example:
+//
+//	c := cron.New(cron.WithChain(
+//	    cron.TimeoutWithContext(cron.DefaultLogger, 5*time.Minute),
+//	))
+//
+//	c.AddJob("@every 1h", cron.FuncJobWithContext(func(ctx context.Context) {
+//	    // This job will receive the timeout context
+//	    select {
+//	    case <-ctx.Done():
+//	        // Timeout or shutdown - clean up and return
+//	        return
+//	    case <-doWork():
+//	        // Work completed
+//	    }
+//	}))
+func TimeoutWithContext(logger Logger, timeout time.Duration) JobWrapper {
+	return func(j Job) Job {
+		if timeout <= 0 {
+			return j
+		}
+		return &timeoutContextJob{
+			inner:   j,
+			timeout: timeout,
+			logger:  logger,
+		}
+	}
+}
+
+// timeoutContextJob implements JobWithContext for the TimeoutWithContext wrapper.
+type timeoutContextJob struct {
+	inner   Job
+	timeout time.Duration
+	logger  Logger
+}
+
+// Run implements Job interface by calling RunWithContext with context.Background().
+func (t *timeoutContextJob) Run() {
+	t.RunWithContext(context.Background())
+}
+
+// RunWithContext implements JobWithContext interface with true timeout cancellation.
+func (t *timeoutContextJob) RunWithContext(ctx context.Context) {
+	// Create timeout context derived from the incoming context
+	ctx, cancel := context.WithTimeout(ctx, t.timeout)
+	defer cancel()
+
+	done := make(chan struct{})
+	var panicVal interface{}
+
+	go func() {
+		defer close(done)
+		defer func() {
+			if r := recover(); r != nil {
+				panicVal = r
+			}
+		}()
+		// Pass context to inner job if it supports it
+		if jc, ok := t.inner.(JobWithContext); ok {
+			jc.RunWithContext(ctx)
+		} else {
+			t.inner.Run()
+		}
+	}()
+
+	select {
+	case <-done:
+		// Job completed - propagate any panic
+		if panicVal != nil {
+			panic(panicVal)
+		}
+	case <-ctx.Done():
+		if ctx.Err() == context.DeadlineExceeded {
+			t.logger.Error(fmt.Errorf("job exceeded timeout of %v", t.timeout), "timeout", "duration", t.timeout)
+		}
+		// Context canceled - job may still be running if it doesn't check context
+		// Wait for completion to avoid goroutine leaks if job respects context
+		<-done
+		if panicVal != nil {
+			panic(panicVal)
+		}
 	}
 }
