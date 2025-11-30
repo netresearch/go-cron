@@ -2,6 +2,7 @@ package cron
 
 import (
 	"bytes"
+	"errors"
 	"log"
 	"strings"
 	"sync"
@@ -24,7 +25,7 @@ func (sw *syncWriter) Write(data []byte) (n int, err error) {
 	sw.m.Lock()
 	n, err = sw.wr.Write(data)
 	sw.m.Unlock()
-	return
+	return n, err
 }
 
 func (sw *syncWriter) String() string {
@@ -1125,4 +1126,374 @@ func TestFakeClockSchedulerIntegration(t *testing.T) {
 		}
 		mu.Unlock()
 	})
+}
+
+// Tests for job metadata (Name and Tags)
+
+func TestWithName(t *testing.T) {
+	c := New()
+	defer c.Stop()
+
+	id, err := c.AddFunc("@every 1s", func() {}, WithName("my-job"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	entry := c.Entry(id)
+	if entry.Name != "my-job" {
+		t.Errorf("expected name 'my-job', got %q", entry.Name)
+	}
+}
+
+func TestWithTags(t *testing.T) {
+	c := New()
+	defer c.Stop()
+
+	id, err := c.AddFunc("@every 1s", func() {}, WithTags("maintenance", "hourly"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	entry := c.Entry(id)
+	if len(entry.Tags) != 2 {
+		t.Fatalf("expected 2 tags, got %d", len(entry.Tags))
+	}
+	if entry.Tags[0] != "maintenance" || entry.Tags[1] != "hourly" {
+		t.Errorf("unexpected tags: %v", entry.Tags)
+	}
+}
+
+func TestWithNameAndTags(t *testing.T) {
+	c := New()
+	defer c.Stop()
+
+	id, err := c.AddFunc("@every 1s", func() {},
+		WithName("cleanup"),
+		WithTags("maintenance", "daily"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	entry := c.Entry(id)
+	if entry.Name != "cleanup" {
+		t.Errorf("expected name 'cleanup', got %q", entry.Name)
+	}
+	if len(entry.Tags) != 2 {
+		t.Fatalf("expected 2 tags, got %d", len(entry.Tags))
+	}
+}
+
+func TestDuplicateName(t *testing.T) {
+	c := New()
+	defer c.Stop()
+
+	_, err := c.AddFunc("@every 1s", func() {}, WithName("my-job"))
+	if err != nil {
+		t.Fatalf("unexpected error on first add: %v", err)
+	}
+
+	_, err = c.AddFunc("@every 2s", func() {}, WithName("my-job"))
+	if !errors.Is(err, ErrDuplicateName) {
+		t.Errorf("expected ErrDuplicateName, got %v", err)
+	}
+}
+
+func TestDuplicateNameWhileRunning(t *testing.T) {
+	c := New()
+	c.Start()
+	defer c.Stop()
+
+	_, err := c.AddFunc("@every 1s", func() {}, WithName("my-job"))
+	if err != nil {
+		t.Fatalf("unexpected error on first add: %v", err)
+	}
+
+	// Small delay to ensure first job is added
+	time.Sleep(10 * time.Millisecond)
+
+	_, err = c.AddFunc("@every 2s", func() {}, WithName("my-job"))
+	if !errors.Is(err, ErrDuplicateName) {
+		t.Errorf("expected ErrDuplicateName, got %v", err)
+	}
+}
+
+func TestEntryByName(t *testing.T) {
+	c := New()
+	defer c.Stop()
+
+	_, err := c.AddFunc("@every 1s", func() {}, WithName("my-job"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	entry := c.EntryByName("my-job")
+	if !entry.Valid() {
+		t.Error("expected valid entry")
+	}
+	if entry.Name != "my-job" {
+		t.Errorf("expected name 'my-job', got %q", entry.Name)
+	}
+
+	// Test non-existent name
+	entry = c.EntryByName("non-existent")
+	if entry.Valid() {
+		t.Error("expected invalid entry for non-existent name")
+	}
+}
+
+func TestEntryByNameWhileRunning(t *testing.T) {
+	c := New()
+	c.Start()
+	defer c.Stop()
+
+	_, err := c.AddFunc("@every 1s", func() {}, WithName("my-job"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Small delay to ensure job is added
+	time.Sleep(10 * time.Millisecond)
+
+	entry := c.EntryByName("my-job")
+	if !entry.Valid() {
+		t.Error("expected valid entry")
+	}
+	if entry.Name != "my-job" {
+		t.Errorf("expected name 'my-job', got %q", entry.Name)
+	}
+}
+
+func TestEntriesByTag(t *testing.T) {
+	c := New()
+	defer c.Stop()
+
+	c.AddFunc("@every 1s", func() {}, WithName("job1"), WithTags("maintenance"))
+	c.AddFunc("@every 2s", func() {}, WithName("job2"), WithTags("maintenance", "critical"))
+	c.AddFunc("@every 3s", func() {}, WithName("job3"), WithTags("cleanup"))
+
+	// Find by maintenance tag
+	entries := c.EntriesByTag("maintenance")
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries with 'maintenance' tag, got %d", len(entries))
+	}
+
+	// Find by critical tag
+	entries = c.EntriesByTag("critical")
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry with 'critical' tag, got %d", len(entries))
+	}
+
+	// Find by cleanup tag
+	entries = c.EntriesByTag("cleanup")
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry with 'cleanup' tag, got %d", len(entries))
+	}
+
+	// Find by non-existent tag
+	entries = c.EntriesByTag("non-existent")
+	if len(entries) != 0 {
+		t.Errorf("expected 0 entries with 'non-existent' tag, got %d", len(entries))
+	}
+}
+
+func TestRemoveByName(t *testing.T) {
+	c := New()
+	defer c.Stop()
+
+	c.AddFunc("@every 1s", func() {}, WithName("my-job"))
+
+	// Verify exists
+	entry := c.EntryByName("my-job")
+	if !entry.Valid() {
+		t.Fatal("expected job to exist before removal")
+	}
+
+	// Remove it
+	removed := c.RemoveByName("my-job")
+	if !removed {
+		t.Error("expected RemoveByName to return true")
+	}
+
+	// Verify removed
+	entry = c.EntryByName("my-job")
+	if entry.Valid() {
+		t.Error("expected job to be removed")
+	}
+
+	// Try removing again
+	removed = c.RemoveByName("my-job")
+	if removed {
+		t.Error("expected RemoveByName to return false for non-existent job")
+	}
+}
+
+func TestRemoveByNameWhileRunning(t *testing.T) {
+	c := New()
+	c.Start()
+	defer c.Stop()
+
+	c.AddFunc("@every 1s", func() {}, WithName("my-job"))
+	time.Sleep(10 * time.Millisecond)
+
+	removed := c.RemoveByName("my-job")
+	if !removed {
+		t.Error("expected RemoveByName to return true")
+	}
+
+	time.Sleep(10 * time.Millisecond)
+
+	entry := c.EntryByName("my-job")
+	if entry.Valid() {
+		t.Error("expected job to be removed")
+	}
+}
+
+func TestRemoveByTag(t *testing.T) {
+	c := New()
+	defer c.Stop()
+
+	c.AddFunc("@every 1s", func() {}, WithName("job1"), WithTags("maintenance"))
+	c.AddFunc("@every 2s", func() {}, WithName("job2"), WithTags("maintenance", "critical"))
+	c.AddFunc("@every 3s", func() {}, WithName("job3"), WithTags("cleanup"))
+
+	// Verify initial count
+	if len(c.Entries()) != 3 {
+		t.Fatalf("expected 3 entries, got %d", len(c.Entries()))
+	}
+
+	// Remove by maintenance tag
+	count := c.RemoveByTag("maintenance")
+	if count != 2 {
+		t.Errorf("expected 2 entries removed, got %d", count)
+	}
+
+	// Verify remaining
+	if len(c.Entries()) != 1 {
+		t.Errorf("expected 1 entry remaining, got %d", len(c.Entries()))
+	}
+
+	// Remaining entry should be job3
+	entry := c.EntryByName("job3")
+	if !entry.Valid() {
+		t.Error("expected job3 to still exist")
+	}
+}
+
+func TestRemoveByTagWhileRunning(t *testing.T) {
+	c := New()
+	c.Start()
+	defer c.Stop()
+
+	c.AddFunc("@every 1s", func() {}, WithTags("batch"))
+	c.AddFunc("@every 2s", func() {}, WithTags("batch"))
+	c.AddFunc("@every 3s", func() {}, WithTags("other"))
+
+	time.Sleep(10 * time.Millisecond)
+
+	count := c.RemoveByTag("batch")
+	if count != 2 {
+		t.Errorf("expected 2 entries removed, got %d", count)
+	}
+
+	time.Sleep(10 * time.Millisecond)
+
+	if len(c.Entries()) != 1 {
+		t.Errorf("expected 1 entry remaining, got %d", len(c.Entries()))
+	}
+}
+
+func TestNameReuseAfterRemoval(t *testing.T) {
+	c := New()
+	defer c.Stop()
+
+	// Add named job
+	_, err := c.AddFunc("@every 1s", func() {}, WithName("my-job"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Remove it
+	c.RemoveByName("my-job")
+
+	// Should be able to add with same name again
+	_, err = c.AddFunc("@every 2s", func() {}, WithName("my-job"))
+	if err != nil {
+		t.Errorf("expected to reuse name after removal, got error: %v", err)
+	}
+}
+
+func TestScheduleJobWithOptions(t *testing.T) {
+	c := New()
+	defer c.Stop()
+
+	schedule := Every(time.Second)
+	id, err := c.ScheduleJob(schedule, FuncJob(func() {}),
+		WithName("scheduled-job"),
+		WithTags("test"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	entry := c.Entry(id)
+	if entry.Name != "scheduled-job" {
+		t.Errorf("expected name 'scheduled-job', got %q", entry.Name)
+	}
+	if len(entry.Tags) != 1 || entry.Tags[0] != "test" {
+		t.Errorf("unexpected tags: %v", entry.Tags)
+	}
+}
+
+func TestAddJobWithOptions(t *testing.T) {
+	c := New()
+	defer c.Stop()
+
+	id, err := c.AddJob("@every 1s", FuncJob(func() {}),
+		WithName("added-job"),
+		WithTags("api", "critical"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	entry := c.Entry(id)
+	if entry.Name != "added-job" {
+		t.Errorf("expected name 'added-job', got %q", entry.Name)
+	}
+	if len(entry.Tags) != 2 {
+		t.Errorf("expected 2 tags, got %d", len(entry.Tags))
+	}
+}
+
+func TestEmptyNameAllowed(t *testing.T) {
+	c := New()
+	defer c.Stop()
+
+	// Multiple jobs without names should be allowed
+	_, err := c.AddFunc("@every 1s", func() {})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	_, err = c.AddFunc("@every 2s", func() {})
+	if err != nil {
+		t.Errorf("expected no error for second unnamed job, got: %v", err)
+	}
+}
+
+func TestEntriesIncludesMetadata(t *testing.T) {
+	c := New()
+	defer c.Stop()
+
+	c.AddFunc("@every 1s", func() {}, WithName("job1"), WithTags("tag1", "tag2"))
+
+	entries := c.Entries()
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+
+	if entries[0].Name != "job1" {
+		t.Errorf("expected name in Entries() result, got %q", entries[0].Name)
+	}
+	if len(entries[0].Tags) != 2 {
+		t.Errorf("expected tags in Entries() result, got %v", entries[0].Tags)
+	}
 }
