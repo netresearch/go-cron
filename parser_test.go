@@ -138,10 +138,10 @@ func TestParseScheduleErrors(t *testing.T) {
 		{"* * * *", "expected 5 to 6 fields"},
 		{"", "empty spec string"},
 		// @every minimum duration validation (must be >= 1 second)
-		{"@every 500ms", "@every duration must be at least 1 second"},
-		{"@every 100ms", "@every duration must be at least 1 second"},
-		{"@every 999ms", "@every duration must be at least 1 second"},
-		{"@every 1ns", "@every duration must be at least 1 second"},
+		{"@every 500ms", "@every duration must be at least 1s"},
+		{"@every 100ms", "@every duration must be at least 1s"},
+		{"@every 999ms", "@every duration must be at least 1s"},
+		{"@every 1ns", "@every duration must be at least 1s"},
 	}
 	for _, c := range tests {
 		actual, err := secondParser.Parse(c.expr)

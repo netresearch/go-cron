@@ -95,3 +95,161 @@ func TestWithClockDefaultRealClock(t *testing.T) {
 		t.Errorf("now() should return current time, got %v (expected between %v and %v)", now, before, after)
 	}
 }
+
+func TestWithMinEveryInterval(t *testing.T) {
+	tests := []struct {
+		name        string
+		minInterval time.Duration
+		spec        string
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name:        "default 1s minimum - valid",
+			minInterval: time.Second,
+			spec:        "@every 1s",
+			wantErr:     false,
+		},
+		{
+			name:        "default 1s minimum - invalid",
+			minInterval: time.Second,
+			spec:        "@every 500ms",
+			wantErr:     true,
+			errContains: "at least 1s",
+		},
+		{
+			name:        "sub-second allowed with 0 minimum",
+			minInterval: 0,
+			spec:        "@every 100ms",
+			wantErr:     false,
+		},
+		{
+			name:        "sub-second allowed with explicit minimum",
+			minInterval: 100 * time.Millisecond,
+			spec:        "@every 100ms",
+			wantErr:     false,
+		},
+		{
+			name:        "sub-second below explicit minimum",
+			minInterval: 100 * time.Millisecond,
+			spec:        "@every 50ms",
+			wantErr:     true,
+			errContains: "at least 100ms",
+		},
+		{
+			name:        "larger minimum enforced",
+			minInterval: time.Minute,
+			spec:        "@every 30s",
+			wantErr:     true,
+			errContains: "at least 1m",
+		},
+		{
+			name:        "larger minimum - valid",
+			minInterval: time.Minute,
+			spec:        "@every 2m",
+			wantErr:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := New(WithMinEveryInterval(tt.minInterval))
+			_, err := c.AddFunc(tt.spec, func() {})
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("expected error containing %q, got nil", tt.errContains)
+				} else if !strings.Contains(err.Error(), tt.errContains) {
+					t.Errorf("expected error containing %q, got %q", tt.errContains, err.Error())
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestWithMinEveryInterval_SubSecondExecution(t *testing.T) {
+	// Test that sub-second intervals actually work when allowed
+	clock := NewFakeClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
+	c := New(
+		WithMinEveryInterval(0),
+		WithClock(clock),
+	)
+
+	count := 0
+	_, err := c.AddFunc("@every 100ms", func() {
+		count++
+	})
+	if err != nil {
+		t.Fatalf("failed to add sub-second job: %v", err)
+	}
+
+	c.Start()
+	defer c.Stop()
+
+	// Advance time by 350ms - should trigger ~3 executions
+	for i := 0; i < 35; i++ {
+		clock.Advance(10 * time.Millisecond)
+		time.Sleep(1 * time.Millisecond) // Let scheduler process
+	}
+
+	if count < 3 {
+		t.Errorf("expected at least 3 executions, got %d", count)
+	}
+}
+
+func TestParserWithMinEveryInterval(t *testing.T) {
+	// Test Parser.WithMinEveryInterval directly
+	p := NewParser(Minute | Hour | Dom | Month | Dow | Descriptor).
+		WithMinEveryInterval(0)
+
+	// Should allow sub-second
+	sched, err := p.Parse("@every 100ms")
+	if err != nil {
+		t.Errorf("expected sub-second to be allowed, got error: %v", err)
+	}
+	if sched == nil {
+		t.Error("expected non-nil schedule")
+	}
+
+	// Test with larger minimum
+	p = NewParser(Minute | Hour | Dom | Month | Dow | Descriptor).
+		WithMinEveryInterval(time.Minute)
+
+	_, err = p.Parse("@every 30s")
+	if err == nil {
+		t.Error("expected error for duration below minimum")
+	}
+}
+
+func TestStandardParser(t *testing.T) {
+	// Test that StandardParser returns a usable copy
+	p := StandardParser()
+
+	// Should work with default 1s minimum
+	_, err := p.Parse("@every 1s")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	// Should fail for sub-second
+	_, err = p.Parse("@every 500ms")
+	if err == nil {
+		t.Error("expected error for sub-second interval")
+	}
+
+	// Should be modifiable without affecting global standardParser
+	p2 := StandardParser().WithMinEveryInterval(0)
+	_, err = p2.Parse("@every 100ms")
+	if err != nil {
+		t.Errorf("modified parser should allow sub-second: %v", err)
+	}
+
+	// Original standardParser should still enforce 1s
+	_, err = ParseStandard("@every 500ms")
+	if err == nil {
+		t.Error("standardParser should still enforce 1s minimum")
+	}
+}
