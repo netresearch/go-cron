@@ -16,7 +16,10 @@ import (
 //
 // Parameters:
 //   - logger: For logging retry attempts
-//   - maxRetries: Maximum retry attempts (0 = unlimited retries)
+//   - maxRetries: Maximum retry attempts:
+//   - 0 = no retries (execute once, fail immediately on panic) - SAFE DEFAULT
+//   - >0 = retry up to N times (N+1 total attempts)
+//   - -1 = unlimited retries (use with caution - can cause resource exhaustion)
 //   - initialDelay: First retry delay
 //   - maxDelay: Maximum delay cap (prevents exponential explosion)
 //   - multiplier: Delay multiplier per retry (typically 2.0)
@@ -66,9 +69,13 @@ func runWithRecovery(j Job) (panicValue any) {
 func RetryWithBackoff(logger Logger, maxRetries int, initialDelay, maxDelay time.Duration, multiplier float64) JobWrapper {
 	return func(j Job) Job {
 		return FuncJob(func() {
+			// maxRetries semantics:
+			//   0  = no retries (1 execution total) - safe default
+			//   >0 = retry up to N times (N+1 total attempts)
+			//   -1 = unlimited retries (explicit opt-in)
 			maxAttempts := maxRetries + 1 // maxRetries=3 means 4 total attempts (1 initial + 3 retries)
-			if maxRetries == 0 {
-				maxAttempts = 0 // unlimited
+			if maxRetries < 0 {
+				maxAttempts = 0 // unlimited (loop condition becomes: 0 == 0 || attempt <= 0 → always true)
 			}
 
 			var lastPanic any

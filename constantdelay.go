@@ -43,7 +43,7 @@ func EveryWithMin(duration, minInterval time.Duration) ConstantDelaySchedule {
 
 	// Truncate sub-second precision unless sub-second intervals are allowed
 	if minInterval >= time.Second || minInterval <= 0 && duration >= time.Second {
-		duration = duration - time.Duration(duration.Nanoseconds())%time.Second
+		duration -= time.Duration(duration.Nanoseconds()) % time.Second
 	}
 
 	return ConstantDelaySchedule{

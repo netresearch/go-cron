@@ -52,15 +52,11 @@ func WithLogger(logger Logger) Option {
 //
 // Example usage:
 //
-//	// For testing with FakeClock (recommended)
 //	fakeClock := cron.NewFakeClock(time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC))
 //	c := cron.New(cron.WithClock(fakeClock))
 //	// ... add jobs ...
 //	c.Start()
 //	fakeClock.Advance(time.Hour) // Advance time and trigger jobs deterministically
-//
-//	// For backward compatibility with the old function-based Clock
-//	c := cron.New(cron.WithClock(cron.ClockFunc(time.Now)))
 func WithClock(clock Clock) Option {
 	return func(c *Cron) {
 		c.clock = clock

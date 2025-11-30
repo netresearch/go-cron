@@ -325,24 +325,6 @@ func TestFakeClockTimerCount(t *testing.T) {
 	}
 }
 
-func TestClockFuncAdapter(t *testing.T) {
-	fixedTime := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
-	clock := ClockFunc(func() time.Time { return fixedTime })
-
-	if !clock.Now().Equal(fixedTime) {
-		t.Errorf("ClockFunc Now() = %v, want %v", clock.Now(), fixedTime)
-	}
-
-	// ClockFunc should create real timers
-	timer := clock.NewTimer(10 * time.Millisecond)
-	select {
-	case <-timer.C():
-		// Timer fired
-	case <-time.After(100 * time.Millisecond):
-		t.Error("ClockFunc timer should work like real timer")
-	}
-}
-
 func TestFakeClockConcurrency(t *testing.T) {
 	start := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
 	clock := NewFakeClock(start)

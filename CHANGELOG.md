@@ -10,28 +10,33 @@ features, bug fixes, and modernization improvements.
 
 ## [Unreleased]
 
+### Planned for v2
+- Context-aware Job interface with graceful shutdown support
+
+## [1.0.0] - Unreleased
+
+### Breaking Changes
+- **RetryWithBackoff semantics**: `maxRetries=0` now means "no retries" (execute once, fail on panic).
+  Previously `0` meant unlimited retries, which was a DoS risk.
+  - **Migration**: Use `maxRetries=-1` for unlimited retries (explicit opt-in)
+  - **Rationale**: Zero-value safety - forgotten configs now fail-fast instead of retrying forever
+
 ### Added
+- **Min-heap scheduling**: O(log n) insertion/removal, O(1) next job lookup (upstream PR #423)
+- **WithClock option**: Inject custom time source for deterministic testing
 - **WithMinEveryInterval option**: Configure minimum interval for `@every` expressions
   - Allow sub-second intervals for testing: `WithMinEveryInterval(0)` or `WithMinEveryInterval(100*time.Millisecond)`
   - Enforce longer minimums for rate limiting: `WithMinEveryInterval(time.Minute)`
 - **EveryWithMin function**: Create constant delay schedules with custom minimum interval
 - **Parser.WithMinEveryInterval**: Configure minimum interval on parser level
 - **StandardParser function**: Get a copy of the standard parser for customization
-
-### Planned for v2
-- Context-aware Job interface with graceful shutdown support
-
-## [1.0.0] - Unreleased
-
-### Added
-- **Min-heap scheduling**: O(log n) insertion/removal, O(1) next job lookup (upstream PR #423)
-- **WithClock option**: Inject custom time source for deterministic testing
 - **Benchmark suite**: Comprehensive benchmark tests for parser, scheduler, and job operations
 - **CI benchmarks**: CI job to run benchmarks and upload results as artifacts
 - **Input validation**: Maximum spec length limit (1024 chars) to prevent DoS
 - **Timeout JobWrapper**: `chain.Timeout(duration)` for job execution time limits
 - **slog adapter**: `SlogLogger` for structured logging with Go 1.21+ slog
 - **Multi-platform CI**: Windows, macOS, and Linux testing
+- **ExampleTimeout_withContext**: Demonstrates idiomatic context-based cancellation pattern
 
 ### Fixed
 - **Panic on NewParser with no fields**: Returns error instead of panicking
@@ -40,9 +45,11 @@ features, bug fixes, and modernization improvements.
 - **EntryID uint64**: Changed from `int` to `uint64` for larger job capacity
 - **slices package**: Uses Go 1.21+ `slices.SortFunc` and `slices.DeleteFunc`
 - **Linting**: Uses golangci-lint v2.6.1 with modern rule set
+- **Timeout wrapper logging**: Enhanced message clarifies "goroutine still running in background"
 
 ### Security
 - **Timezone validation**: Character and length restrictions for timezone strings to prevent DoS
+- **RetryWithBackoff DoS prevention**: Zero-value is now safe default (no retries vs unlimited)
 
 ## [0.5.0] - 2025-11-25
 

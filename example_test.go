@@ -1,6 +1,7 @@
 package cron_test
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"time"
@@ -310,8 +311,8 @@ func ExampleTimeout() {
 	// Output:
 }
 
-// This example demonstrates a job pattern that supports true cancellation.
-// This is the recommended approach when jobs need to be stoppable.
+// This example demonstrates a job pattern that supports true cancellation
+// using channels. This approach works well for simple cancellation needs.
 func ExampleTimeout_cancellable() {
 	// CancellableWorker demonstrates a job that can be cleanly canceled
 	type CancellableWorker struct {
@@ -347,6 +348,59 @@ func ExampleTimeout_cancellable() {
 	// Later, to cancel the job:
 	// close(worker.cancel)
 	// <-worker.done  // Wait for clean shutdown
+
+	defer c.Stop()
+	// Output:
+}
+
+// This example demonstrates the recommended pattern for cancellable jobs
+// using context.Context. This is the idiomatic Go approach for jobs that
+// need to respect cancellation signals, especially when calling external
+// services or performing long-running operations.
+func ExampleTimeout_withContext() {
+	// ContextAwareJob wraps job execution with context-based cancellation.
+	// This pattern is recommended when jobs make external calls (HTTP, DB, etc.)
+	// that accept context for cancellation.
+	type ContextAwareJob struct {
+		ctx    context.Context
+		cancel context.CancelFunc
+	}
+
+	// Create a job with its own cancellation context
+	ctx, cancel := context.WithCancel(context.Background())
+	job := &ContextAwareJob{ctx: ctx, cancel: cancel}
+
+	c := cron.New()
+
+	c.Schedule(cron.Every(time.Minute), cron.FuncJob(func() {
+		// Create a timeout context for this execution
+		execCtx, execCancel := context.WithTimeout(job.ctx, 30*time.Second)
+		defer execCancel()
+
+		// Use NewTimer instead of time.After to avoid timer leak on early return
+		workTimer := time.NewTimer(10 * time.Second)
+		defer workTimer.Stop()
+
+		// Simulate work that respects context cancellation
+		select {
+		case <-execCtx.Done():
+			if execCtx.Err() == context.DeadlineExceeded {
+				fmt.Println("Job timed out")
+			} else {
+				fmt.Println("Job canceled")
+			}
+			return
+		case <-workTimer.C:
+			// Simulated work completed
+			fmt.Println("Job completed successfully")
+		}
+	}))
+
+	c.Start()
+
+	// To gracefully shutdown:
+	// job.cancel()  // Signal cancellation to all running jobs
+	// c.Stop()      // Stop scheduling new jobs
 
 	defer c.Stop()
 	// Output:
@@ -410,6 +464,159 @@ func ExampleNamedJob() {
 	// OnJobComplete(id, "my-job-name", duration, recovered)
 	fmt.Println("NamedJob provides names for observability hooks")
 	// Output: NamedJob provides names for observability hooks
+}
+
+// This example demonstrates using EveryWithMin to create schedules with custom
+// minimum intervals. This is useful for testing (sub-second) or rate limiting.
+func ExampleEveryWithMin() {
+	c := cron.New()
+
+	// Allow sub-second intervals (useful for testing)
+	// The second parameter (0) disables the minimum interval check
+	schedule := cron.EveryWithMin(100*time.Millisecond, 0)
+	c.Schedule(schedule, cron.FuncJob(func() {
+		fmt.Println("Running every 100ms")
+	}))
+
+	// Enforce minimum 1-minute intervals (useful for rate limiting)
+	// If duration < minInterval, it's rounded up to minInterval
+	rateLimited := cron.EveryWithMin(30*time.Second, time.Minute)
+	c.Schedule(rateLimited, cron.FuncJob(func() {
+		fmt.Println("Running every minute (30s was rounded up)")
+	}))
+
+	c.Start()
+	defer c.Stop()
+	// Output:
+}
+
+// This example demonstrates using WithMinEveryInterval to configure
+// the minimum interval for @every expressions at the cron level.
+func ExampleWithMinEveryInterval() {
+	// Allow sub-second @every intervals (useful for testing)
+	c := cron.New(cron.WithMinEveryInterval(0))
+
+	_, err := c.AddFunc("@every 100ms", func() {
+		fmt.Println("Running every 100ms")
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// With default settings, sub-second would fail:
+	// c := cron.New() // default minimum is 1 second
+	// _, err := c.AddFunc("@every 100ms", ...) // returns error
+
+	c.Start()
+	defer c.Stop()
+	// Output:
+}
+
+// This example demonstrates using WithMinEveryInterval to enforce
+// longer minimum intervals for rate limiting purposes.
+func ExampleWithMinEveryInterval_rateLimit() {
+	// Enforce minimum 1-minute intervals
+	c := cron.New(cron.WithMinEveryInterval(time.Minute))
+
+	// This will fail because 30s < 1m minimum
+	_, err := c.AddFunc("@every 30s", func() {
+		fmt.Println("This won't be added")
+	})
+	if err != nil {
+		fmt.Println("Error:", err)
+	}
+
+	// This will succeed because 2m >= 1m minimum
+	_, err = c.AddFunc("@every 2m", func() {
+		fmt.Println("Running every 2 minutes")
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	c.Start()
+	defer c.Stop()
+	// Output: Error: @every duration must be at least 1m0s: "@every 30s"
+}
+
+// This example demonstrates RetryWithBackoff for jobs that may fail transiently.
+// The wrapper catches panics and retries with exponential backoff.
+func ExampleRetryWithBackoff() {
+	logger := cron.DefaultLogger
+
+	c := cron.New(cron.WithChain(
+		// Outermost: catches final re-panic after retries exhausted
+		cron.Recover(logger),
+		// Retry up to 3 times with exponential backoff
+		// Initial delay: 1s, max delay: 30s, multiplier: 2.0
+		cron.RetryWithBackoff(logger, 3, time.Second, 30*time.Second, 2.0),
+	))
+
+	attempts := 0
+	c.AddFunc("@hourly", func() {
+		attempts++
+		// Simulate transient failure that succeeds on 3rd attempt
+		if attempts < 3 {
+			panic(fmt.Sprintf("attempt %d failed", attempts))
+		}
+		fmt.Printf("Succeeded on attempt %d\n", attempts)
+	})
+
+	c.Start()
+	defer c.Stop()
+	// Output:
+}
+
+// This example demonstrates RetryWithBackoff with maxRetries=0 (no retries).
+// This is the safe default - jobs execute once and fail immediately on panic.
+func ExampleRetryWithBackoff_noRetries() {
+	logger := cron.DefaultLogger
+
+	c := cron.New(cron.WithChain(
+		cron.Recover(logger),
+		// maxRetries=0 means no retries - execute once, fail immediately
+		cron.RetryWithBackoff(logger, 0, time.Second, 30*time.Second, 2.0),
+	))
+
+	c.AddFunc("@hourly", func() {
+		// This will execute once, panic, and not retry
+		panic("immediate failure")
+	})
+
+	c.Start()
+	defer c.Stop()
+	// Output:
+}
+
+// This example demonstrates CircuitBreaker to prevent cascading failures.
+// After consecutive failures, the circuit opens and skips execution until cooldown.
+func ExampleCircuitBreaker() {
+	logger := cron.DefaultLogger
+
+	c := cron.New(cron.WithChain(
+		// Outermost: catches re-panic from circuit breaker
+		cron.Recover(logger),
+		// Open circuit after 3 consecutive failures, cooldown for 5 minutes
+		cron.CircuitBreaker(logger, 3, 5*time.Minute),
+	))
+
+	c.AddFunc("@every 1m", func() {
+		// Simulate a job calling an external service
+		if err := callExternalAPI(); err != nil {
+			panic(err) // After 3 failures, circuit opens for 5 minutes
+		}
+		fmt.Println("API call succeeded")
+	})
+
+	c.Start()
+	defer c.Stop()
+	// Output:
+}
+
+// callExternalAPI is a mock function for the CircuitBreaker example
+func callExternalAPI() error {
+	// In real code, this would call an external service
+	return nil
 }
 
 // This example demonstrates using WithMaxEntries to limit the number of jobs.

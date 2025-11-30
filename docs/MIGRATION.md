@@ -157,6 +157,35 @@ _, err := c.AddFunc(veryLongString, myFunc)
 // err: "spec exceeds maximum length of 1024 characters"
 ```
 
+#### RetryWithBackoff Semantics (v1.0)
+
+**Before (v0.x):**
+```go
+// maxRetries=0 meant unlimited retries (DoS risk)
+c := cron.New(cron.WithChain(
+    cron.RetryWithBackoff(logger, 0, time.Second, time.Minute, 2.0),
+))
+// A failing job would retry forever
+```
+
+**After (v1.0+):**
+```go
+// maxRetries=0 now means no retries (safe default)
+c := cron.New(cron.WithChain(
+    cron.RetryWithBackoff(logger, 0, time.Second, time.Minute, 2.0),
+))
+// A failing job fails immediately after first attempt
+
+// For unlimited retries, use -1 (explicit opt-in)
+c := cron.New(cron.WithChain(
+    cron.RetryWithBackoff(logger, -1, time.Second, time.Minute, 2.0),
+))
+// Now retries forever (with backoff)
+```
+
+**Impact:** If you relied on zero-value configs (`maxRetries=0`) for unlimited retries, update to `-1`.
+This is a security improvement: zero-value is now fail-safe instead of a potential DoS vector.
+
 ## Type Changes
 
 ### EntryID: int → uint64
@@ -253,6 +282,7 @@ c := cron.New(cron.WithLogger(
 - [ ] Update `entry.Job.Run()` calls to `entry.Run()` if chain behavior is expected
 - [ ] Review cron expressions for step validation (`*/60` style patterns)
 - [ ] Update any code storing `EntryID` as `int` to use `cron.EntryID`
+- [ ] Audit `RetryWithBackoff` usage: change `maxRetries=0` to `-1` if unlimited retries are intended
 - [ ] Test DST transitions if your application runs DST-sensitive schedules
 - [ ] Run existing tests to verify compatibility
 

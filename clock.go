@@ -59,27 +59,6 @@ func (r *realTimer) Reset(d time.Duration) bool {
 	return r.timer.Reset(d)
 }
 
-// ClockFunc wraps a simple time function to implement the Clock interface.
-// This provides backward compatibility with the old Clock type definition.
-// Note: Timers created by this clock still use real time.
-//
-// Deprecated: Use RealClock or FakeClock directly for full functionality.
-func ClockFunc(fn func() time.Time) Clock {
-	return &clockFuncAdapter{fn: fn}
-}
-
-type clockFuncAdapter struct {
-	fn func() time.Time
-}
-
-func (c *clockFuncAdapter) Now() time.Time {
-	return c.fn()
-}
-
-func (c *clockFuncAdapter) NewTimer(d time.Duration) Timer {
-	return &realTimer{timer: time.NewTimer(d)}
-}
-
 // FakeClock provides a controllable clock for testing.
 // It allows advancing time manually and fires timers deterministically.
 type FakeClock struct {
@@ -110,10 +89,11 @@ func (f *FakeClock) NewTimer(d time.Duration) Timer {
 	defer f.mu.Unlock()
 
 	t := &fakeTimer{
-		clock:    f,
-		deadline: f.now.Add(d),
-		ch:       make(chan time.Time, 1),
-		stopped:  false,
+		clock:     f,
+		deadline:  f.now.Add(d),
+		ch:        make(chan time.Time, 1),
+		stopped:   false,
+		heapIndex: -1, // -1 means not in heap; immediate timers (d<=0) never enter heap
 	}
 
 	if d <= 0 {
@@ -210,24 +190,19 @@ func (f *FakeClock) notifyWaiters() {
 	f.waiters = nil
 }
 
-// removeTimer removes a timer from the heap.
+// removeTimer removes a timer from the heap using O(log n) indexed removal.
 // Must be called with f.mu held.
 func (f *FakeClock) removeTimer(t *fakeTimer) bool {
-	for i, timer := range f.timers {
-		if timer == t {
-			heap.Remove(&f.timers, i)
-			return true
-		}
-	}
-	return false
+	return f.timers.RemoveTimer(t)
 }
 
 // fakeTimer implements Timer for use with FakeClock.
 type fakeTimer struct {
-	clock    *FakeClock
-	deadline time.Time
-	ch       chan time.Time
-	stopped  bool
+	clock     *FakeClock
+	deadline  time.Time
+	ch        chan time.Time
+	stopped   bool
+	heapIndex int // position in timerHeap, -1 if not in heap
 }
 
 func (t *fakeTimer) C() <-chan time.Time {
@@ -275,17 +250,40 @@ type timerHeap []*fakeTimer
 
 func (h timerHeap) Len() int           { return len(h) }
 func (h timerHeap) Less(i, j int) bool { return h[i].deadline.Before(h[j].deadline) }
-func (h timerHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
 
-func (h *timerHeap) Push(x any) {
-	*h = append(*h, x.(*fakeTimer)) //nolint:errcheck // heap.Interface contract guarantees type
+// Swap swaps elements i and j and updates their heap indices.
+func (h timerHeap) Swap(i, j int) {
+	h[i], h[j] = h[j], h[i]
+	h[i].heapIndex = i
+	h[j].heapIndex = j
 }
 
+// Push adds a timer to the heap and sets its heap index.
+func (h *timerHeap) Push(x any) {
+	t := x.(*fakeTimer) //nolint:errcheck // heap.Interface contract guarantees type
+	t.heapIndex = len(*h)
+	*h = append(*h, t)
+}
+
+// Pop removes and returns the last element, marking it as no longer in the heap.
 func (h *timerHeap) Pop() any {
 	old := *h
 	n := len(old)
-	x := old[n-1]
-	old[n-1] = nil // avoid memory leak
+	t := old[n-1]
+	old[n-1] = nil   // avoid memory leak
+	t.heapIndex = -1 // mark as removed
 	*h = old[0 : n-1]
-	return x
+	return t
+}
+
+// RemoveTimer removes a timer from the heap using its stored heapIndex.
+// Returns true if the timer was found and removed.
+// This is O(log n) compared to O(n) linear search.
+func (h *timerHeap) RemoveTimer(t *fakeTimer) bool {
+	idx := t.heapIndex
+	if idx < 0 || idx >= len(*h) || (*h)[idx] != t {
+		return false
+	}
+	heap.Remove(h, idx)
+	return true
 }

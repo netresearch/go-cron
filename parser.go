@@ -142,12 +142,12 @@ func parseTimezone(spec string) (*time.Location, string, error) {
 
 	loc, err := time.LoadLocation(tzName)
 	if err != nil {
-		return nil, "", fmt.Errorf("provided bad location %s: %w", tzName, err)
+		return nil, "", fmt.Errorf("unknown time zone %q: %w", tzName, err)
 	}
 
 	remaining := strings.TrimSpace(spec[i:])
 	if len(remaining) == 0 {
-		return nil, "", fmt.Errorf("missing fields after timezone in spec")
+		return nil, "", fmt.Errorf("missing fields after timezone %q", tzName)
 	}
 
 	return loc, remaining, nil
@@ -172,7 +172,7 @@ func (p Parser) Parse(spec string) (Schedule, error) {
 	// Handle named schedules (descriptors), if configured
 	if strings.HasPrefix(spec, "@") {
 		if p.options&Descriptor == 0 {
-			return nil, fmt.Errorf("parser does not accept descriptors: %v", spec)
+			return nil, fmt.Errorf("parser does not accept descriptors: %q", spec)
 		}
 		return parseDescriptor(spec, loc, p.minEveryInterval)
 	}
@@ -367,26 +367,26 @@ func parseRangeBounds(lowAndHigh []string, r bounds) (start, end uint, extra uin
 		}
 		return start, end, 0, nil
 	default:
-		return 0, 0, 0, fmt.Errorf("too many hyphens: %s", strings.Join(lowAndHigh, "-"))
+		return 0, 0, 0, fmt.Errorf("too many hyphens: %q", strings.Join(lowAndHigh, "-"))
 	}
 }
 
 // validateRangeParams validates the parsed range parameters.
 func validateRangeParams(start, end, step uint, r bounds, expr string) error {
 	if start < r.min {
-		return fmt.Errorf("beginning of range (%d) below minimum (%d): %s", start, r.min, expr)
+		return fmt.Errorf("beginning of range (%d) below minimum (%d): %q", start, r.min, expr)
 	}
 	if end > r.max {
-		return fmt.Errorf("end of range (%d) above maximum (%d): %s", end, r.max, expr)
+		return fmt.Errorf("end of range (%d) above maximum (%d): %q", end, r.max, expr)
 	}
 	if start > end {
-		return fmt.Errorf("beginning of range (%d) beyond end of range (%d): %s", start, end, expr)
+		return fmt.Errorf("beginning of range (%d) beyond end of range (%d): %q", start, end, expr)
 	}
 	if step == 0 {
-		return fmt.Errorf("step of range should be a positive number: %s", expr)
+		return fmt.Errorf("step of range must be a positive number: %q", expr)
 	}
 	if step > 1 && step >= end-start+1 {
-		return fmt.Errorf("step (%d) must be less than range size (%d): %s", step, end-start+1, expr)
+		return fmt.Errorf("step (%d) must be less than range size (%d): %q", step, end-start+1, expr)
 	}
 	return nil
 }
@@ -418,7 +418,7 @@ func getRange(expr string, r bounds) (uint64, error) {
 			extra = 0
 		}
 	default:
-		return 0, fmt.Errorf("too many slashes: %s", expr)
+		return 0, fmt.Errorf("too many slashes: %q", expr)
 	}
 
 	if err := validateRangeParams(start, end, step, r, expr); err != nil {
@@ -479,10 +479,10 @@ func validateTimezone(tz string) error {
 func mustParseInt(expr string) (uint, error) {
 	num, err := strconv.Atoi(expr)
 	if err != nil {
-		return 0, fmt.Errorf("failed to parse int from %s: %w", expr, err)
+		return 0, fmt.Errorf("failed to parse int from %q: %w", expr, err)
 	}
 	if num < 0 {
-		return 0, fmt.Errorf("negative number (%d) not allowed: %s", num, expr)
+		return 0, fmt.Errorf("negative number (%d) not allowed: %q", num, expr)
 	}
 
 	return uint(num), nil
@@ -543,13 +543,13 @@ func parseDescriptor(descriptor string, loc *time.Location, minEveryInterval tim
 	if strings.HasPrefix(descriptor, every) {
 		duration, err := time.ParseDuration(descriptor[len(every):])
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse duration %s: %w", descriptor, err)
+			return nil, fmt.Errorf("failed to parse duration %q: %w", descriptor, err)
 		}
 		if minEveryInterval > 0 && duration < minEveryInterval {
-			return nil, fmt.Errorf("@every duration must be at least %v: %s", minEveryInterval, descriptor)
+			return nil, fmt.Errorf("@every duration must be at least %v: %q", minEveryInterval, descriptor)
 		}
 		return EveryWithMin(duration, minEveryInterval), nil
 	}
 
-	return nil, fmt.Errorf("unrecognized descriptor: %s", descriptor)
+	return nil, fmt.Errorf("unrecognized descriptor: %q", descriptor)
 }

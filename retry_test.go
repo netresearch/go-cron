@@ -162,7 +162,8 @@ func TestRetryWithBackoff_MaxDelayRespected(t *testing.T) {
 func TestRetryWithBackoff_UnlimitedRetries(t *testing.T) {
 	var attempts int32
 
-	wrapped := RetryWithBackoff(DiscardLogger, 0, 1*time.Millisecond, 5*time.Millisecond, 2.0)(
+	// maxRetries=-1 means unlimited retries (explicit opt-in)
+	wrapped := RetryWithBackoff(DiscardLogger, -1, 1*time.Millisecond, 5*time.Millisecond, 2.0)(
 		FuncJob(func() {
 			count := atomic.AddInt32(&attempts, 1)
 			if count < 20 {
@@ -175,6 +176,31 @@ func TestRetryWithBackoff_UnlimitedRetries(t *testing.T) {
 
 	if got := atomic.LoadInt32(&attempts); got != 20 {
 		t.Errorf("expected 20 attempts, got %d", got)
+	}
+}
+
+func TestRetryWithBackoff_NoRetries(t *testing.T) {
+	var attempts int32
+
+	// maxRetries=0 means no retries (safe default) - execute once and fail
+	wrapped := RetryWithBackoff(DiscardLogger, 0, 1*time.Millisecond, 5*time.Millisecond, 2.0)(
+		FuncJob(func() {
+			atomic.AddInt32(&attempts, 1)
+			panic("fail immediately")
+		}),
+	)
+
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected panic to propagate with maxRetries=0")
+		}
+	}()
+
+	wrapped.Run()
+
+	// Should have executed exactly once (no retries)
+	if got := atomic.LoadInt32(&attempts); got != 1 {
+		t.Errorf("expected 1 attempt with maxRetries=0, got %d", got)
 	}
 }
 

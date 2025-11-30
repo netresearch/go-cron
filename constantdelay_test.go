@@ -147,9 +147,9 @@ func TestEveryBackwardCompatibility(t *testing.T) {
 		duration  time.Duration
 		wantDelay time.Duration
 	}{
-		{500 * time.Millisecond, time.Second},      // Rounds up
-		{time.Second, time.Second},                 // No change
-		{5 * time.Second, 5 * time.Second},         // No change
+		{500 * time.Millisecond, time.Second},                   // Rounds up
+		{time.Second, time.Second},                              // No change
+		{5 * time.Second, 5 * time.Second},                      // No change
 		{5*time.Second + 500*time.Millisecond, 5 * time.Second}, // Truncates sub-second
 	}
 

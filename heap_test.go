@@ -151,7 +151,7 @@ func TestHeapUpdateStaleEntry(t *testing.T) {
 	}
 }
 
-func TestHeapRemove(t *testing.T) {
+func TestHeapRemoveAt(t *testing.T) {
 	h := &entryHeap{}
 	heap.Init(h)
 
@@ -166,17 +166,23 @@ func TestHeapRemove(t *testing.T) {
 		heap.Push(h, e)
 	}
 
-	// Remove middle entry
-	if !h.Remove(2) {
-		t.Error("expected Remove to return true for existing entry")
+	// Remove middle entry using RemoveAt
+	if !h.RemoveAt(entries[1]) {
+		t.Error("expected RemoveAt to return true for existing entry")
 	}
 	if h.Len() != 2 {
 		t.Errorf("expected 2 entries after removal, got %d", h.Len())
 	}
 
-	// Try to remove non-existent entry
-	if h.Remove(99) {
-		t.Error("expected Remove to return false for non-existent entry")
+	// Try to remove already-removed entry (stale pointer)
+	if h.RemoveAt(entries[1]) {
+		t.Error("expected RemoveAt to return false for already-removed entry")
+	}
+
+	// Try to remove entry with invalid heapIndex
+	fakeEntry := &Entry{ID: 99, heapIndex: -1}
+	if h.RemoveAt(fakeEntry) {
+		t.Error("expected RemoveAt to return false for entry with invalid heapIndex")
 	}
 
 	// Verify remaining entries
@@ -344,38 +350,6 @@ func TestRemoveAtStaleIndex(t *testing.T) {
 	}
 	if h.Peek().ID != 2 {
 		t.Errorf("expected ID 2 at top, got %d", h.Peek().ID)
-	}
-}
-
-// BenchmarkRemoveByID benchmarks the old O(n) removal by ID scan.
-// Uses a pre-built heap and measures only the removal operation.
-func BenchmarkRemoveByID(b *testing.B) {
-	const size = 1000
-	now := time.Now()
-
-	// Pre-build heap once
-	h := &entryHeap{}
-	heap.Init(h)
-	for j := 0; j < size; j++ {
-		e := &Entry{
-			ID:        EntryID(j + 1),
-			Next:      now.Add(time.Duration(j) * time.Second),
-			heapIndex: -1,
-		}
-		heap.Push(h, e)
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		// Remove and re-add to keep heap size constant
-		targetID := EntryID((i % size) + 1)
-		h.Remove(targetID)
-		e := &Entry{
-			ID:        targetID,
-			Next:      now.Add(time.Duration(size+i) * time.Second),
-			heapIndex: -1,
-		}
-		heap.Push(h, e)
 	}
 }
 

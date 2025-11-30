@@ -1,3 +1,8 @@
+<GENERATED-CODE>
+1. Update existing file chain.go to enhance the timeout log message for clarity regarding background execution.
+2. Create new file example_chain_test.go to demonstrate the preferred pattern: a Job that handles its own cancellation via Context.
+
+<UPDATED_EXISTING_FILE: chain.go>
 package cron
 
 import (
@@ -137,8 +142,77 @@ func Timeout(logger Logger, timeout time.Duration) JobWrapper {
 					panic(panicVal)
 				}
 			case <-timer.C:
-				logger.Error(fmt.Errorf("job exceeded timeout of %v; goroutine still running in background", timeout), "timeout", "duration", timeout)
+				// Log explicit warning about abandonment
+				logger.Error(fmt.Errorf("job exceeded timeout of %v; continuing in background", timeout), "timeout", "duration", timeout)
 			}
 		})
 	}
 }
+</UPDATED_EXISTING_FILE>
+
+<NEWFILE: example_chain_test.go>
+package cron_test
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/robfig/cron/v3"
+)
+
+// OneOfTheGoodOnes demonstrates how to implement a Job that handles
+// cancellation properly using context.Context.
+//
+// Unlike the Timeout wrapper, which abandons running jobs in the background,
+// this pattern allows the job to clean up resources and exit cleanly when
+// a timeout or cancellation signal is received.
+type OneOfTheGoodOnes struct{}
+
+func (j OneOfTheGoodOnes) Run() {
+	// 1. Create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+
+	// 2. Pass the context to your long-running logic
+	j.doWork(ctx)
+}
+
+func (j OneOfTheGoodOnes) doWork(ctx context.Context) {
+	select {
+	case <-time.After(2 * time.Second):
+		fmt.Println("Work completed (unexpected)")
+	case <-ctx.Done():
+		// 3. Handle cancellation cleanly
+		fmt.Println("Work cancelled:", ctx.Err())
+	}
+}
+
+func ExampleTimeout_cancellable() {
+	// This example shows how a properly implemented job handles its own timeout.
+	// The job itself enforces the 1-second limit defined in its Run method.
+	
+	job := OneOfTheGoodOnes{}
+	job.Run()
+
+	// Output:
+	// Work cancelled: context deadline exceeded
+}
+
+// ExampleTimeout_wrapper shows the behavior of the wrapper approach.
+// Note that while the wrapper returns after 1ms, the job finishes printing
+// later because it was abandoned, not cancelled.
+func ExampleTimeout_wrapper() {
+	c := cron.New()
+	
+	// Create a job that takes 100ms
+	slowJob := cron.FuncJob(func() {
+		time.Sleep(100 * time.Millisecond)
+	})
+
+	// Wrap it with a 1ms timeout
+	// This will log an error: "job exceeded timeout...; continuing in background"
+	c.AddJob("@every 1s", cron.NewChain(cron.Timeout(cron.DefaultLogger, 1*time.Millisecond)).Then(slowJob))
+}
+</NEWFILE>
+</GENERATED-CODE>

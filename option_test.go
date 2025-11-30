@@ -43,7 +43,7 @@ func TestWithVerboseLogger(t *testing.T) {
 
 func TestWithClock(t *testing.T) {
 	fixedTime := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
-	c := New(WithClock(ClockFunc(func() time.Time { return fixedTime })))
+	c := New(WithClock(NewFakeClock(fixedTime)))
 	if c.clock == nil {
 		t.Error("expected clock to be set")
 	}
@@ -60,7 +60,7 @@ func TestWithClockAndLocation(t *testing.T) {
 	loc, _ := time.LoadLocation("America/New_York")
 
 	c := New(
-		WithClock(ClockFunc(func() time.Time { return fixedTime })),
+		WithClock(NewFakeClock(fixedTime)),
 		WithLocation(loc),
 	)
 

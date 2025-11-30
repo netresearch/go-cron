@@ -40,7 +40,7 @@ func TestRange(t *testing.T) {
 		{"1", 3, 5, zero, "below minimum"},
 		{"6", 3, 5, zero, "above maximum"},
 		{"5-3", 3, 5, zero, "beyond end of range"},
-		{"*/0", 0, 0, zero, "should be a positive number"},
+		{"*/0", 0, 0, zero, "must be a positive number"},
 
 		// Step validation: step must be less than range size
 		{"0-5/10", 0, 59, zero, "step (10) must be less than range size (6)"},
@@ -555,7 +555,7 @@ func TestTimezoneValidation(t *testing.T) {
 
 		// Invalid: special characters
 		{"null byte", "TZ=UTC\x00evil * * * * *", "invalid character"},
-		{"space in name", "TZ=America/New York * * * * *", "bad location"}, // space splits, leaving "America/New"
+		{"space in name", "TZ=America/New York * * * * *", "unknown time zone"}, // space splits, leaving "America/New"
 		{"newline", "TZ=UTC\nevil * * * * *", "invalid character"},
 		{"semicolon", "TZ=UTC;evil * * * * *", "invalid character"},
 		{"backtick", "TZ=UTC`evil * * * * *", "invalid character"},
