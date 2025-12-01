@@ -52,6 +52,11 @@ type Cron struct {
 	entryCount int64              // atomic counter for race-free limit checking
 	baseCtx    context.Context    // base context for all jobs
 	cancelCtx  context.CancelFunc // cancels baseCtx when Stop() is called
+
+	// indexDeletions tracks removals from index maps since last compaction.
+	// Go maps don't release memory when entries are deleted, so we periodically
+	// rebuild maps to reclaim memory in high-churn scenarios.
+	indexDeletions int
 }
 
 // ScheduleParser is an interface for schedule spec parsers that return a Schedule
@@ -715,6 +720,55 @@ func (c *Cron) removeEntry(id EntryID) {
 		}
 	}
 	atomic.AddInt64(&c.entryCount, -1)
+
+	// Track deletions and compact maps when threshold is met.
+	// Go maps don't release memory on delete, so we rebuild periodically.
+	c.indexDeletions++
+	c.maybeCompactIndexes()
+}
+
+// indexCompactionThreshold is the minimum number of deletions before considering compaction.
+// This avoids compacting maps for low-churn use cases.
+const indexCompactionThreshold = 1000
+
+// maybeCompactIndexes rebuilds index maps if deletion count exceeds threshold
+// and is proportional to current map size. This reclaims memory from Go's
+// map implementation which doesn't shrink on delete.
+//
+// Caller must NOT hold runningMu (this function may acquire it internally).
+func (c *Cron) maybeCompactIndexes() {
+	// Only compact if we've deleted enough entries AND the deletion count
+	// is significant relative to remaining entries. This avoids rebuilding
+	// huge maps for small numbers of deletions.
+	if c.indexDeletions < indexCompactionThreshold {
+		return
+	}
+	currentSize := len(c.entryIndex)
+	if currentSize > 0 && c.indexDeletions <= currentSize {
+		return
+	}
+
+	// Rebuild entryIndex
+	newEntryIndex := make(map[EntryID]*Entry, currentSize)
+	for k, v := range c.entryIndex {
+		newEntryIndex[k] = v
+	}
+	c.entryIndex = newEntryIndex
+
+	// Rebuild nameIndex with proper synchronization
+	if c.running {
+		c.runningMu.Lock()
+	}
+	newNameIndex := make(map[string]*Entry, len(c.nameIndex))
+	for k, v := range c.nameIndex {
+		newNameIndex[k] = v
+	}
+	c.nameIndex = newNameIndex
+	if c.running {
+		c.runningMu.Unlock()
+	}
+
+	c.indexDeletions = 0
 }
 
 // EntryByName returns a snapshot of the entry with the given name,

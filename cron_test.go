@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"strings"
 	"sync"
@@ -1524,6 +1525,62 @@ func TestNameReuseAfterRemoval(t *testing.T) {
 	_, err = c.AddFunc("@every 2s", func() {}, WithName("my-job"))
 	if err != nil {
 		t.Errorf("expected to reuse name after removal, got error: %v", err)
+	}
+}
+
+func TestIndexCompaction(t *testing.T) {
+	c := New()
+	defer c.Stop()
+
+	// Add more than indexCompactionThreshold entries with some buffer
+	// We need: deletions >= threshold AND deletions > currentSize
+	totalEntries := indexCompactionThreshold + 100
+	ids := make([]EntryID, totalEntries)
+	for i := range ids {
+		id, err := c.AddFunc("@every 1s", func() {}, WithName(fmt.Sprintf("job-%d", i)))
+		if err != nil {
+			t.Fatalf("failed to add job %d: %v", i, err)
+		}
+		ids[i] = id
+	}
+
+	// Verify all entries are present
+	if len(c.Entries()) != totalEntries {
+		t.Fatalf("expected %d entries, got %d", totalEntries, len(c.Entries()))
+	}
+
+	// Remove entries to trigger compaction.
+	// Compaction triggers when: deletions >= 1000 AND deletions > currentSize
+	// After 1000 deletions, currentSize = 100, so 1000 > 100 triggers compaction.
+	// Then we delete 90 more, so indexDeletions ends at 90.
+	for i := 0; i < indexCompactionThreshold+90; i++ {
+		c.Remove(ids[i])
+	}
+
+	// Verify remaining entries are still accessible after compaction
+	remaining := c.Entries()
+	if len(remaining) != 10 {
+		t.Errorf("expected 10 remaining entries, got %d", len(remaining))
+	}
+
+	// Verify name lookup still works (proves maps were rebuilt correctly)
+	entry := c.EntryByName(fmt.Sprintf("job-%d", indexCompactionThreshold+95))
+	if !entry.Valid() {
+		t.Error("expected to find entry by name after compaction")
+	}
+
+	// Verify entry lookup by ID still works
+	entry = c.Entry(ids[totalEntries-1])
+	if !entry.Valid() {
+		t.Error("expected to find entry by ID after compaction")
+	}
+
+	// Compaction should have occurred (at the 1000th deletion) and then
+	// 90 more deletions happened. So indexDeletions should be 90.
+	// This proves compaction reset the counter.
+	expectedDeletions := 90
+	if c.indexDeletions != expectedDeletions {
+		t.Errorf("expected indexDeletions to be %d after compaction, got %d", expectedDeletions, c.indexDeletions)
 	}
 }
 
