@@ -643,10 +643,11 @@ func TestParserWithMaxSearchYears(t *testing.T) {
 	}
 
 	// Verify MaxSearchYears is set on SpecSchedule
+	// Zero is passed through (fallback happens in Next())
+	// This is intentional to allow differentiation between "not set" and "explicitly set to default"
 	specSched := sched.(*SpecSchedule)
 	if specSched.MaxSearchYears != 0 {
-		// Zero is passed through (fallback happens in Next())
-		// This is intentional to allow differentiation between "not set" and "explicitly set to default"
+		t.Errorf("Expected MaxSearchYears to be 0 (passed through), got %d", specSched.MaxSearchYears)
 	}
 
 	// Test with a valid schedule to verify it still works
