@@ -41,6 +41,37 @@ func TestChain(t *testing.T) {
 	}
 }
 
+// testLogCapture is a Logger that captures calls to Info and Error.
+type testLogCapture struct {
+	infoCalls  []string
+	errorCalls []string
+	mu         sync.Mutex
+}
+
+func (l *testLogCapture) Info(msg string, keysAndValues ...interface{}) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.infoCalls = append(l.infoCalls, msg)
+}
+
+func (l *testLogCapture) Error(err error, msg string, keysAndValues ...interface{}) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.errorCalls = append(l.errorCalls, msg)
+}
+
+func (l *testLogCapture) InfoCount() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return len(l.infoCalls)
+}
+
+func (l *testLogCapture) ErrorCount() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return len(l.errorCalls)
+}
+
 func TestChainRecover(t *testing.T) {
 	panickingJob := FuncJob(func() {
 		panic("panickingJob panics")
@@ -66,6 +97,58 @@ func TestChainRecover(t *testing.T) {
 		NewChain(Recover(PrintfLogger(log.New(io.Discard, "", 0)))).
 			Then(panickingJob).
 			Run()
+	})
+}
+
+func TestChainRecoverWithLogLevel(t *testing.T) {
+	panickingJob := FuncJob(func() {
+		panic("test panic")
+	})
+
+	t.Run("default logs at Error level", func(t *testing.T) {
+		logger := &testLogCapture{}
+		NewChain(Recover(logger)).Then(panickingJob).Run()
+
+		if logger.ErrorCount() != 1 {
+			t.Errorf("expected 1 Error call, got %d", logger.ErrorCount())
+		}
+		if logger.InfoCount() != 0 {
+			t.Errorf("expected 0 Info calls, got %d", logger.InfoCount())
+		}
+	})
+
+	t.Run("explicit LogLevelError logs at Error level", func(t *testing.T) {
+		logger := &testLogCapture{}
+		NewChain(Recover(logger, WithLogLevel(LogLevelError))).Then(panickingJob).Run()
+
+		if logger.ErrorCount() != 1 {
+			t.Errorf("expected 1 Error call, got %d", logger.ErrorCount())
+		}
+		if logger.InfoCount() != 0 {
+			t.Errorf("expected 0 Info calls, got %d", logger.InfoCount())
+		}
+	})
+
+	t.Run("LogLevelInfo logs at Info level", func(t *testing.T) {
+		logger := &testLogCapture{}
+		NewChain(Recover(logger, WithLogLevel(LogLevelInfo))).Then(panickingJob).Run()
+
+		if logger.InfoCount() != 1 {
+			t.Errorf("expected 1 Info call, got %d", logger.InfoCount())
+		}
+		if logger.ErrorCount() != 0 {
+			t.Errorf("expected 0 Error calls, got %d", logger.ErrorCount())
+		}
+	})
+
+	t.Run("backward compatible - no options works same as before", func(t *testing.T) {
+		logger := &testLogCapture{}
+		// This is the original call pattern - should still work
+		NewChain(Recover(logger)).Then(panickingJob).Run()
+
+		if logger.ErrorCount() != 1 {
+			t.Errorf("expected backward compatible behavior (Error), got %d Error calls", logger.ErrorCount())
+		}
 	})
 }
 
