@@ -281,7 +281,9 @@ c := cron.New(cron.WithLogger(
 - [ ] Review timezone handling for empty/invalid timezone cases
 - [ ] Update `entry.Job.Run()` calls to `entry.Run()` if chain behavior is expected
 - [ ] Review cron expressions for step validation (`*/60` style patterns)
-- [ ] Update any code storing `EntryID` as `int` to use `cron.EntryID`
+- [ ] Update all code storing `EntryID` to use the new `cron.EntryID` type (changed from `int` to `uint64`)
+- [ ] Audit and update any type assertions or conversions involving `EntryID` to prevent runtime panics
+- [ ] Verify database columns storing `EntryID` are migrated to a type compatible with `uint64`
 - [ ] Audit `RetryWithBackoff` usage: change `maxRetries=0` to `-1` if unlimited retries are intended
 - [ ] Test DST transitions if your application runs DST-sensitive schedules
 - [ ] Run existing tests to verify compatibility
