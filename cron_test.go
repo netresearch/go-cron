@@ -681,30 +681,54 @@ func TestStopAndWait(t *testing.T) {
 
 	t.Run("repeated calls to stop, waiting for completion and after", func(t *testing.T) {
 		cron := newWithSeconds()
+
+		// Use channels to synchronize instead of relying on timing
+		jobStarted := make(chan struct{})
+		jobCanFinish := make(chan struct{})
+		jobDone := make(chan struct{})
+
 		cron.AddFunc("* * * * * *", func() {})
-		cron.AddFunc("* * * * * *", func() { time.Sleep(2 * time.Second) })
+		cron.AddFunc("* * * * * *", func() {
+			close(jobStarted) // Signal that slow job has started
+			<-jobCanFinish    // Wait until test allows job to finish
+			close(jobDone)
+		})
 		cron.Start()
 		cron.AddFunc("* * * * * *", func() {})
-		time.Sleep(time.Second)
+
+		// Wait for slow job to actually start
+		select {
+		case <-jobStarted:
+			// Job started, proceed
+		case <-time.After(5 * time.Second):
+			t.Fatal("timeout waiting for job to start")
+		}
+
 		ctx := cron.Stop()
 		ctx2 := cron.Stop()
 
-		// Verify that it is not done for at least 1500ms
+		// Verify contexts are NOT done while job is still running
 		select {
 		case <-ctx.Done():
-			t.Error("context was done too quickly immediately")
+			t.Error("context was done while job still running")
 		case <-ctx2.Done():
-			t.Error("context2 was done too quickly immediately")
-		case <-time.After(1500 * time.Millisecond):
-			// expected, because the job sleeping for 2 seconds is still running
+			t.Error("context2 was done while job still running")
+		default:
+			// expected - contexts should not be done yet
 		}
 
-		// Verify that it IS done in the next 1s (giving 500ms buffer)
+		// Allow the job to finish
+		close(jobCanFinish)
+
+		// Wait for job to complete
+		<-jobDone
+
+		// Verify that ctx IS done after job completes
 		select {
 		case <-ctx.Done():
 			// expected
 		case <-time.After(time.Second):
-			t.Error("context not done after job should have completed")
+			t.Error("context not done after job completed")
 		}
 
 		// Verify that ctx2 is also done.
