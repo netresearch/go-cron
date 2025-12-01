@@ -13,7 +13,7 @@ features, bug fixes, and modernization improvements.
 ### Planned for v2
 - Context-aware Job interface with graceful shutdown support
 
-## [1.0.0] - Unreleased
+## [1.0.0] - 2025-12-01
 
 ### Breaking Changes
 - **RetryWithBackoff semantics**: `maxRetries=0` now means "no retries" (execute once, fail on panic).
@@ -23,7 +23,10 @@ features, bug fixes, and modernization improvements.
 
 ### Added
 - **Min-heap scheduling**: O(log n) insertion/removal, O(1) next job lookup (upstream PR #423)
+- **Index map compaction**: Automatic cleanup of index maps after frequent entry removals
 - **WithClock option**: Inject custom time source for deterministic testing
+- **WithMaxSearchYears option**: Configure how many years schedule matching searches before giving up
+- **WithLogLevel option for Recover**: Configure log level (Error/Info) for recovered panics
 - **WithMinEveryInterval option**: Configure minimum interval for `@every` expressions
   - Allow sub-second intervals for testing: `WithMinEveryInterval(0)` or `WithMinEveryInterval(100*time.Millisecond)`
   - Enforce longer minimums for rate limiting: `WithMinEveryInterval(time.Minute)`
