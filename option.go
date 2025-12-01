@@ -122,6 +122,34 @@ func WithMinEveryInterval(d time.Duration) Option {
 	}
 }
 
+// WithMaxSearchYears configures the maximum years into the future that schedule
+// matching will search before giving up. This prevents infinite loops for
+// unsatisfiable schedules (e.g., Feb 30).
+//
+// The default is 5 years. Values <= 0 will use the default.
+//
+// Use cases:
+//   - Shorter limits for faster failure detection: WithMaxSearchYears(1)
+//   - Longer limits for rare schedules: WithMaxSearchYears(10)
+//
+// Note: This option replaces the current parser. If you need custom parser options
+// along with a custom max search years, use WithParser with a manually configured parser:
+//
+//	p := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor).
+//	    WithMaxSearchYears(10)
+//	c := cron.New(cron.WithParser(p))
+//
+// Example:
+//
+//	// Allow searching up to 10 years for rare schedules
+//	c := cron.New(cron.WithMaxSearchYears(10))
+//	c.AddFunc("0 0 13 * 5", func() { ... }) // Friday the 13th
+func WithMaxSearchYears(years int) Option {
+	return func(c *Cron) {
+		c.parser = StandardParser().WithMaxSearchYears(years)
+	}
+}
+
 // WithMaxEntries limits the maximum number of entries that can be added to the Cron.
 // When the limit is reached:
 //   - AddFunc and AddJob return ErrMaxEntriesReached

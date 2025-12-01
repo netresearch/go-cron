@@ -9,6 +9,11 @@ type SpecSchedule struct {
 
 	// Override location for this schedule.
 	Location *time.Location
+
+	// MaxSearchYears limits how many years into the future Next() will search
+	// before giving up and returning zero time. This prevents infinite loops
+	// for unsatisfiable schedules (e.g., Feb 30). Zero means use the default (5 years).
+	MaxSearchYears int
 }
 
 // bounds provides a range of acceptable values (plus a map of name to value).
@@ -55,10 +60,11 @@ const (
 	// months 1-12, weekdays 0-6. All are well below bit 63.
 	starBit = 1 << 63
 
-	// scheduleSearchYears is how many years into the future Next() will search
-	// before giving up and returning zero time. This prevents infinite loops
-	// for unsatisfiable schedules (e.g., Feb 30).
-	scheduleSearchYears = 5
+	// defaultSearchYears is the default limit for how many years into the future
+	// Next() will search before giving up. This prevents infinite loops for
+	// unsatisfiable schedules (e.g., Feb 30). Users can override this via
+	// Parser.WithMaxSearchYears() or the WithMaxSearchYears() cron option.
+	defaultSearchYears = 5
 )
 
 // advanceMinute advances time until minute matches, returns new time and wrap flag.
@@ -147,7 +153,12 @@ func (s *SpecSchedule) Next(t time.Time) time.Time {
 	added := false // indicates whether a field has been incremented
 
 	// If no time is found within the search limit, return zero.
-	yearLimit := t.Year() + scheduleSearchYears
+	// Use configured MaxSearchYears if set, otherwise use default.
+	searchYears := s.MaxSearchYears
+	if searchYears <= 0 {
+		searchYears = defaultSearchYears
+	}
+	yearLimit := t.Year() + searchYears
 
 WRAP:
 	if t.Year() > yearLimit {

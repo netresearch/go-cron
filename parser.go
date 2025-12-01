@@ -49,6 +49,7 @@ var defaults = []string{
 type Parser struct {
 	options          ParseOption
 	minEveryInterval time.Duration
+	maxSearchYears   int
 }
 
 // NewParser creates a Parser with custom options.
@@ -117,6 +118,31 @@ func (p Parser) WithMinEveryInterval(d time.Duration) Parser {
 	return p
 }
 
+// WithMaxSearchYears returns a new Parser with the specified maximum search years
+// for finding the next schedule time. This limits how far into the future the
+// Next() method will search before giving up and returning zero time.
+//
+// The default is 5 years. Values <= 0 will use the default.
+//
+// Use cases:
+//   - Shorter limits for faster failure detection on invalid schedules
+//   - Longer limits for rare schedules (e.g., "Friday the 13th in February")
+//   - Testing scenarios that need predictable behavior
+//
+// Example:
+//
+//	// Allow searching up to 10 years for rare schedules
+//	p := NewParser(Minute | Hour | Dom | Month | Dow | Descriptor).
+//	    WithMaxSearchYears(10)
+//
+//	// Fail faster on invalid schedules (1 year max)
+//	p := NewParser(Minute | Hour | Dom | Month | Dow | Descriptor).
+//	    WithMaxSearchYears(1)
+func (p Parser) WithMaxSearchYears(years int) Parser {
+	p.maxSearchYears = years
+	return p
+}
+
 // MaxSpecLength is the maximum allowed length for a cron spec string.
 // This limit prevents potential resource exhaustion from extremely long inputs.
 const MaxSpecLength = 1024
@@ -174,7 +200,7 @@ func (p Parser) Parse(spec string) (Schedule, error) {
 		if p.options&Descriptor == 0 {
 			return nil, fmt.Errorf("parser does not accept descriptors: %q", spec)
 		}
-		return parseDescriptor(spec, loc, p.minEveryInterval)
+		return parseDescriptor(spec, loc, p.minEveryInterval, p.maxSearchYears)
 	}
 
 	// Split on whitespace.
@@ -208,13 +234,14 @@ func (p Parser) Parse(spec string) (Schedule, error) {
 	}
 
 	return &SpecSchedule{
-		Second:   second,
-		Minute:   minute,
-		Hour:     hour,
-		Dom:      dayofmonth,
-		Month:    month,
-		Dow:      dayofweek,
-		Location: loc,
+		Second:         second,
+		Minute:         minute,
+		Hour:           hour,
+		Dom:            dayofmonth,
+		Month:          month,
+		Dow:            dayofweek,
+		Location:       loc,
+		MaxSearchYears: p.maxSearchYears,
 	}, nil
 }
 
@@ -513,30 +540,31 @@ func all(r bounds) uint64 {
 
 // newDescriptorSchedule creates a SpecSchedule for descriptor-based schedules.
 // Second and Minute are always set to first value (0). Hour, Dom, Month, Dow vary.
-func newDescriptorSchedule(hour, dom, month, dow uint64, loc *time.Location) *SpecSchedule {
+func newDescriptorSchedule(hour, dom, month, dow uint64, loc *time.Location, maxSearchYears int) *SpecSchedule {
 	return &SpecSchedule{
-		Second:   1 << seconds.min,
-		Minute:   1 << minutes.min,
-		Hour:     hour,
-		Dom:      dom,
-		Month:    month,
-		Dow:      dow,
-		Location: loc,
+		Second:         1 << seconds.min,
+		Minute:         1 << minutes.min,
+		Hour:           hour,
+		Dom:            dom,
+		Month:          month,
+		Dow:            dow,
+		Location:       loc,
+		MaxSearchYears: maxSearchYears,
 	}
 }
 
-func parseDescriptor(descriptor string, loc *time.Location, minEveryInterval time.Duration) (Schedule, error) {
+func parseDescriptor(descriptor string, loc *time.Location, minEveryInterval time.Duration, maxSearchYears int) (Schedule, error) {
 	switch descriptor {
 	case "@yearly", "@annually":
-		return newDescriptorSchedule(1<<hours.min, 1<<dom.min, 1<<months.min, all(dow), loc), nil
+		return newDescriptorSchedule(1<<hours.min, 1<<dom.min, 1<<months.min, all(dow), loc, maxSearchYears), nil
 	case "@monthly":
-		return newDescriptorSchedule(1<<hours.min, 1<<dom.min, all(months), all(dow), loc), nil
+		return newDescriptorSchedule(1<<hours.min, 1<<dom.min, all(months), all(dow), loc, maxSearchYears), nil
 	case "@weekly":
-		return newDescriptorSchedule(1<<hours.min, all(dom), all(months), 1<<dow.min, loc), nil
+		return newDescriptorSchedule(1<<hours.min, all(dom), all(months), 1<<dow.min, loc, maxSearchYears), nil
 	case "@daily", "@midnight":
-		return newDescriptorSchedule(1<<hours.min, all(dom), all(months), all(dow), loc), nil
+		return newDescriptorSchedule(1<<hours.min, all(dom), all(months), all(dow), loc, maxSearchYears), nil
 	case "@hourly":
-		return newDescriptorSchedule(all(hours), all(dom), all(months), all(dow), loc), nil
+		return newDescriptorSchedule(all(hours), all(dom), all(months), all(dow), loc, maxSearchYears), nil
 	}
 
 	const every = "@every "
