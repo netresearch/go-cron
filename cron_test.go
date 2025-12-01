@@ -1888,23 +1888,30 @@ func TestTimeoutWithContext_JobCompletesBeforeTimeout(t *testing.T) {
 }
 
 func TestTimeoutWithContext_ContextCanceledOnTimeout(t *testing.T) {
+	// Use a more generous timeout for race detector stability.
+	// 50ms is too tight; 200ms is safe but still fast for tests.
+	jobTimeout := 200 * time.Millisecond
+
 	fc := NewFakeClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
 	c := New(
 		WithClock(fc),
-		WithChain(TimeoutWithContext(DefaultLogger, 50*time.Millisecond)),
+		WithChain(TimeoutWithContext(DefaultLogger, jobTimeout)),
 	)
 
-	var canceled atomic.Bool
-	var jobStarted atomic.Bool
+	// Use channels for synchronization, not atomic polling + time.Sleep.
+	// This makes the test event-driven rather than time-driven.
+	jobStarted := make(chan struct{})
+	jobCanceled := make(chan struct{})
 
 	c.AddJob("@every 1s", FuncJobWithContext(func(ctx context.Context) {
-		jobStarted.Store(true)
-		select {
-		case <-ctx.Done():
-			canceled.Store(true)
-		case <-time.After(5 * time.Second):
-			// Timeout not received
-		}
+		close(jobStarted)
+
+		// Block solely on ctx.Done().
+		// If the timeout doesn't fire, the test runner's timeout catches it.
+		<-ctx.Done()
+
+		// Signal that we successfully caught the cancellation
+		close(jobCanceled)
 	}))
 
 	c.Start()
@@ -1916,21 +1923,22 @@ func TestTimeoutWithContext_ContextCanceledOnTimeout(t *testing.T) {
 	// Advance time to trigger the job
 	fc.Advance(time.Second)
 
-	// Wait for job to start
-	deadline := time.Now().Add(2 * time.Second)
-	for !jobStarted.Load() && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
+	// Wait for job to start (with a safety timeout)
+	select {
+	case <-jobStarted:
+		// Job running
+	case <-time.After(2 * time.Second):
+		t.Fatal("job did not start within 2 seconds")
 	}
 
-	if !jobStarted.Load() {
-		t.Fatal("job did not start")
-	}
-
-	// Wait for real time to allow context timeout (50ms) to fire
-	time.Sleep(100 * time.Millisecond)
-
-	if !canceled.Load() {
-		t.Error("job context was not canceled by timeout")
+	// Wait for the context timeout to fire.
+	// We wait longer than jobTimeout to account for scheduler/race overhead.
+	select {
+	case <-jobCanceled:
+		// Success: The context was canceled as expected
+	case <-time.After(jobTimeout * 5):
+		// Failure: The timeout didn't fire in a reasonable window
+		t.Fatalf("job context was not canceled after %v (expected ~%v)", jobTimeout*5, jobTimeout)
 	}
 }
 
