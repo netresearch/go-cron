@@ -38,8 +38,62 @@ func (c Chain) Then(j Job) Job {
 	return j
 }
 
+// LogLevel defines the severity level for logging recovered panics.
+type LogLevel int
+
+const (
+	// LogLevelError logs panics at Error level (default).
+	LogLevelError LogLevel = iota
+	// LogLevelInfo logs panics at Info level.
+	// Useful when combined with retry wrappers to reduce log noise
+	// for expected transient failures.
+	LogLevelInfo
+)
+
+// recoverOpts holds configuration for the Recover wrapper.
+type recoverOpts struct {
+	logLevel LogLevel
+}
+
+// RecoverOption configures the Recover wrapper.
+type RecoverOption func(*recoverOpts)
+
+// WithLogLevel sets the log level for recovered panics.
+// Default is LogLevelError. Use LogLevelInfo to reduce noise when
+// combined with retry wrappers like RetryWithBackoff.
+//
+// Example:
+//
+//	cron.Recover(logger, cron.WithLogLevel(cron.LogLevelInfo))
+func WithLogLevel(level LogLevel) RecoverOption {
+	return func(o *recoverOpts) {
+		o.logLevel = level
+	}
+}
+
 // Recover panics in wrapped jobs and log them with the provided logger.
-func Recover(logger Logger) JobWrapper {
+//
+// By default, panics are logged at Error level. Use WithLogLevel to
+// change this behavior, for example when combined with retry wrappers.
+//
+// Example:
+//
+//	// Default behavior - logs at Error level
+//	cron.NewChain(cron.Recover(logger)).Then(job)
+//
+//	// Log at Info level (useful with retries)
+//	cron.NewChain(cron.Recover(logger, cron.WithLogLevel(cron.LogLevelInfo))).Then(job)
+func Recover(logger Logger, opts ...RecoverOption) JobWrapper {
+	// Default configuration
+	config := recoverOpts{
+		logLevel: LogLevelError,
+	}
+
+	// Apply options
+	for _, opt := range opts {
+		opt(&config)
+	}
+
 	return func(j Job) Job {
 		return FuncJob(func() {
 			defer func() {
@@ -51,7 +105,14 @@ func Recover(logger Logger) JobWrapper {
 					if !ok {
 						err = fmt.Errorf("%v", r)
 					}
-					logger.Error(err, "panic", "stack", "...\n"+string(buf))
+					stack := "...\n" + string(buf)
+
+					if config.logLevel == LogLevelInfo {
+						// Pass error as structured key-value for Info level
+						logger.Info("panic recovered", "error", err, "stack", stack)
+					} else {
+						logger.Error(err, "panic", "stack", stack)
+					}
 				}
 			}()
 			j.Run()
