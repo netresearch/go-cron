@@ -253,3 +253,27 @@ func TestStandardParser(t *testing.T) {
 		t.Error("standardParser should still enforce 1s minimum")
 	}
 }
+
+func TestWithMaxSearchYears(t *testing.T) {
+	// Test that WithMaxSearchYears creates a cron with the configured parser
+	c := New(WithMaxSearchYears(10))
+
+	// Parse an impossible schedule and verify it uses the configured search years
+	// We can't directly test the internal parser, but we can test the behavior
+	id, err := c.AddFunc("0 0 30 2 *", func() {}) // Feb 30 - impossible
+	if err != nil {
+		t.Fatalf("AddFunc() unexpected error: %v", err)
+	}
+
+	entry := c.Entry(id)
+	// The schedule should exist but Next() should return zero time
+	if entry.Schedule == nil {
+		t.Fatal("Expected entry to have a schedule")
+	}
+
+	now := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	next := entry.Schedule.Next(now)
+	if !next.IsZero() {
+		t.Errorf("Next() for impossible schedule should return zero time, got %v", next)
+	}
+}

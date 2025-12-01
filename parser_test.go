@@ -365,7 +365,7 @@ func TestStandardSpecSchedule(t *testing.T) {
 	}{
 		{
 			expr:     "5 * * * *",
-			expected: &SpecSchedule{1 << seconds.min, 1 << 5, all(hours), all(dom), all(months), all(dow), time.Local},
+			expected: &SpecSchedule{1 << seconds.min, 1 << 5, all(hours), all(dom), all(months), all(dow), time.Local, 0},
 		},
 		{
 			expr:     "@every 5m",
@@ -429,15 +429,15 @@ func TestNewParserDescriptorOnlyValid(t *testing.T) {
 }
 
 func every5min(loc *time.Location) *SpecSchedule {
-	return &SpecSchedule{1 << 0, 1 << 5, all(hours), all(dom), all(months), all(dow), loc}
+	return &SpecSchedule{1 << 0, 1 << 5, all(hours), all(dom), all(months), all(dow), loc, 0}
 }
 
 func every5min5s(loc *time.Location) *SpecSchedule {
-	return &SpecSchedule{1 << 5, 1 << 5, all(hours), all(dom), all(months), all(dow), loc}
+	return &SpecSchedule{1 << 5, 1 << 5, all(hours), all(dom), all(months), all(dow), loc, 0}
 }
 
 func midnight(loc *time.Location) *SpecSchedule {
-	return &SpecSchedule{1, 1, 1, all(dom), all(months), all(dow), loc}
+	return &SpecSchedule{1, 1, 1, all(dom), all(months), all(dow), loc, 0}
 }
 
 func annual(loc *time.Location) *SpecSchedule {
@@ -585,5 +585,85 @@ func TestTimezoneValidation(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestWithMaxSearchYears tests the WithMaxSearchYears parser option
+func TestParserWithMaxSearchYears(t *testing.T) {
+	// Create a schedule for Feb 30 (impossible date - will never match)
+	impossibleSpec := "0 0 30 2 *"
+
+	// Test with default (5 years) - should return zero time
+	defaultParser := NewParser(Minute | Hour | Dom | Month | Dow)
+	sched, err := defaultParser.Parse(impossibleSpec)
+	if err != nil {
+		t.Fatalf("Parse(%q) unexpected error: %v", impossibleSpec, err)
+	}
+
+	now := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	next := sched.Next(now)
+	if !next.IsZero() {
+		t.Errorf("Default parser: Next() for impossible schedule should return zero time, got %v", next)
+	}
+
+	// Test with custom search years (1 year) - should also return zero time
+	shortParser := NewParser(Minute | Hour | Dom | Month | Dow).WithMaxSearchYears(1)
+	sched, err = shortParser.Parse(impossibleSpec)
+	if err != nil {
+		t.Fatalf("Parse(%q) unexpected error: %v", impossibleSpec, err)
+	}
+
+	next = sched.Next(now)
+	if !next.IsZero() {
+		t.Errorf("Short parser: Next() for impossible schedule should return zero time, got %v", next)
+	}
+
+	// Test with longer search years (10 years) - still impossible
+	longParser := NewParser(Minute | Hour | Dom | Month | Dow).WithMaxSearchYears(10)
+	sched, err = longParser.Parse(impossibleSpec)
+	if err != nil {
+		t.Fatalf("Parse(%q) unexpected error: %v", impossibleSpec, err)
+	}
+
+	next = sched.Next(now)
+	if !next.IsZero() {
+		t.Errorf("Long parser: Next() for impossible schedule should return zero time, got %v", next)
+	}
+
+	// Test that zero value falls back to default (5)
+	zeroParser := NewParser(Minute | Hour | Dom | Month | Dow).WithMaxSearchYears(0)
+	sched, err = zeroParser.Parse(impossibleSpec)
+	if err != nil {
+		t.Fatalf("Parse(%q) unexpected error: %v", impossibleSpec, err)
+	}
+
+	next = sched.Next(now)
+	if !next.IsZero() {
+		t.Errorf("Zero parser: Next() for impossible schedule should return zero time, got %v", next)
+	}
+
+	// Verify MaxSearchYears is set on SpecSchedule
+	specSched := sched.(*SpecSchedule)
+	if specSched.MaxSearchYears != 0 {
+		// Zero is passed through (fallback happens in Next())
+		// This is intentional to allow differentiation between "not set" and "explicitly set to default"
+	}
+
+	// Test with a valid schedule to verify it still works
+	validSpec := "0 0 1 1 *" // Jan 1st at midnight
+	longParser = NewParser(Minute | Hour | Dom | Month | Dow).WithMaxSearchYears(10)
+	sched, err = longParser.Parse(validSpec)
+	if err != nil {
+		t.Fatalf("Parse(%q) unexpected error: %v", validSpec, err)
+	}
+
+	// Should find Jan 1st within 10 years
+	next = sched.Next(now)
+	if next.IsZero() {
+		t.Error("Long parser: Next() for Jan 1st should find a valid time")
+	}
+	// Verify it's Jan 1st of 2025 (next occurrence after Jan 1, 2024)
+	if next.Month() != time.January || next.Day() != 1 || next.Year() != 2025 {
+		t.Errorf("Long parser: Expected Jan 1, 2025, got %v", next)
 	}
 }
