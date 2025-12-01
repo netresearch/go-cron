@@ -49,6 +49,9 @@ import (
 //	| -       | -     | Re-panic (fail)   |
 
 // calculateBackoffDelay returns the delay for a given retry attempt using exponential backoff.
+// The delay grows as: initialDelay * (multiplier ^ (attempt-2)), capped at maxDelay.
+// Attempt 1 has no delay (first execution), attempt 2 uses initialDelay, and subsequent
+// attempts grow exponentially.
 func calculateBackoffDelay(attempt int, initialDelay, maxDelay time.Duration, multiplier float64) time.Duration {
 	delay := time.Duration(float64(initialDelay) * math.Pow(multiplier, float64(attempt-2)))
 	if delay > maxDelay {
@@ -57,7 +60,10 @@ func calculateBackoffDelay(attempt int, initialDelay, maxDelay time.Duration, mu
 	return delay
 }
 
-// runWithRecovery executes a job and returns any panic value, or nil on success.
+// runWithRecovery executes the given job within a panic-recovering context.
+// It returns the recovered panic value if the job panics, or nil if the job
+// completes successfully. This allows the caller to handle panics as return
+// values rather than unwinding the stack.
 func runWithRecovery(j Job) (panicValue any) {
 	defer func() {
 		panicValue = recover()

@@ -684,7 +684,9 @@ func (c *Cron) entrySnapshot() []Entry {
 	return entries
 }
 
-// sortEntriesByTime sorts entries by Next time, with zero times at the end.
+// sortEntriesByTime sorts entries in place by their Next scheduled execution time.
+// Entries with zero time (not scheduled or schedule exhausted) are moved to the
+// end of the slice to keep active entries at the front for efficient iteration.
 func sortEntriesByTime(entries []Entry) {
 	sort.Slice(entries, func(i, j int) bool {
 		// Zero times sort to the end (highest priority = earliest time)
@@ -698,6 +700,11 @@ func sortEntriesByTime(entries []Entry) {
 	})
 }
 
+// removeEntry removes the entry with the given ID from the scheduler.
+// It removes the entry from the heap, both index maps, and decrements the entry count.
+// If the entry has a name, it is also removed from the nameIndex.
+// After removal, it may trigger index map compaction to reclaim memory.
+// If the ID is not found, the function returns without error.
 func (c *Cron) removeEntry(id EntryID) {
 	entry, ok := c.entryIndex[id]
 	if !ok {

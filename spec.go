@@ -67,7 +67,10 @@ const (
 	defaultSearchYears = 5
 )
 
-// advanceMinute advances time until minute matches, returns new time and wrap flag.
+// advanceMinute advances time until the minute field matches the schedule bitmask.
+// It returns the updated time, an 'added' flag indicating if time was modified,
+// and a 'wrap' flag that is true if the minute rolled past 59 to 0.
+// When wrap is true, the caller must increment the hour and re-validate.
 func advanceMinute(t time.Time, minuteBits uint64, added bool) (time.Time, bool, bool) {
 	for !fieldMatches(t.Minute(), minuteBits) {
 		if !added {
@@ -82,7 +85,10 @@ func advanceMinute(t time.Time, minuteBits uint64, added bool) (time.Time, bool,
 	return t, added, false
 }
 
-// advanceSecond advances time until second matches, returns new time and wrap flag.
+// advanceSecond advances time until the second field matches the schedule bitmask.
+// It returns the updated time, an 'added' flag indicating if time was modified,
+// and a 'wrap' flag that is true if the second rolled past 59 to 0.
+// When wrap is true, the caller must increment the minute and re-validate.
 func advanceSecond(t time.Time, secondBits uint64, added bool) (time.Time, bool, bool) {
 	for !fieldMatches(t.Second(), secondBits) {
 		if !added {
@@ -136,7 +142,10 @@ func checkHourDSTSkip(prev, curr time.Time, hourBits uint64) bool {
 	return 1<<uint(curr.Hour()-1)&hourBits > 0
 }
 
-// fieldMatches checks if a time component value matches the schedule bits.
+// fieldMatches checks if a time component value matches the schedule bitmask.
+// It returns true if the bit at position 'value' is set in 'bits'.
+// For example, fieldMatches(5, bits) checks if bit 5 (representing minute 5,
+// hour 5, etc.) is set in the schedule.
 func fieldMatches(value int, bits uint64) bool {
 	// #nosec G115 -- time components are bounded and safe for uint
 	return 1<<uint(value)&bits != 0
