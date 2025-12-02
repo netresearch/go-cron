@@ -60,16 +60,29 @@ func calculateBackoffDelay(attempt int, initialDelay, maxDelay time.Duration, mu
 	return delay
 }
 
+// safeExecute runs the given function and captures any panic value.
+// Returns nil if the function completes successfully, or the panic value otherwise.
+// This is a generic helper for panic-safe execution used throughout the library.
+//
+// Example usage:
+//
+//	if panicVal := safeExecute(func() { riskyOperation() }); panicVal != nil {
+//	    log.Printf("operation panicked: %v", panicVal)
+//	}
+func safeExecute(fn func()) (panicValue any) {
+	defer func() {
+		panicValue = recover()
+	}()
+	fn()
+	return nil
+}
+
 // runWithRecovery executes the given job within a panic-recovering context.
 // It returns the recovered panic value if the job panics, or nil if the job
 // completes successfully. This allows the caller to handle panics as return
 // values rather than unwinding the stack.
-func runWithRecovery(j Job) (panicValue any) {
-	defer func() {
-		panicValue = recover()
-	}()
-	j.Run()
-	return nil
+func runWithRecovery(j Job) any {
+	return safeExecute(j.Run)
 }
 
 func RetryWithBackoff(logger Logger, maxRetries int, initialDelay, maxDelay time.Duration, multiplier float64) JobWrapper {
@@ -180,21 +193,11 @@ func CircuitBreaker(logger Logger, threshold int, cooldown time.Duration) JobWra
 				logger.Info("circuit breaker half-open", "attempting_recovery", true)
 			}
 
-			// Execute with panic recovery
-			var panicked bool
-			var panicValue any
-			func() {
-				defer func() {
-					if r := recover(); r != nil {
-						panicked = true
-						panicValue = r
-					}
-				}()
-				j.Run()
-			}()
+			// Execute with panic recovery using consolidated helper
+			panicValue := safeExecute(j.Run)
 
 			mu.Lock()
-			if panicked {
+			if panicValue != nil {
 				failures++
 				lastFailAt = time.Now()
 				currentFailures = failures
