@@ -5,6 +5,7 @@ import (
 	"log"
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -435,5 +436,49 @@ func TestChainTimeout(t *testing.T) {
 		wrappedJob.Run()
 		// Wait for abandoned goroutine's panic (won't propagate)
 		time.Sleep(50 * time.Millisecond)
+	})
+
+	t.Run("callback invoked on timeout", func(t *testing.T) {
+		var callbackCalled int32
+		var callbackTimeout time.Duration
+
+		callback := func(timeout time.Duration) {
+			atomic.AddInt32(&callbackCalled, 1)
+			callbackTimeout = timeout
+		}
+
+		var j countJob
+		j.delay = 50 * time.Millisecond
+		wrappedJob := NewChain(Timeout(DiscardLogger, 5*time.Millisecond, WithTimeoutCallback(callback))).Then(&j)
+		wrappedJob.Run()
+
+		// Callback should have been invoked
+		if c := atomic.LoadInt32(&callbackCalled); c != 1 {
+			t.Errorf("expected callback to be called once, got %d", c)
+		}
+		if callbackTimeout != 5*time.Millisecond {
+			t.Errorf("expected callback to receive timeout of 5ms, got %v", callbackTimeout)
+		}
+
+		// Wait for abandoned goroutine
+		time.Sleep(100 * time.Millisecond)
+	})
+
+	t.Run("callback not invoked when job completes in time", func(t *testing.T) {
+		var callbackCalled int32
+
+		callback := func(timeout time.Duration) {
+			atomic.AddInt32(&callbackCalled, 1)
+		}
+
+		var j countJob
+		j.delay = 5 * time.Millisecond
+		wrappedJob := NewChain(Timeout(DiscardLogger, 50*time.Millisecond, WithTimeoutCallback(callback))).Then(&j)
+		wrappedJob.Run()
+
+		// Callback should NOT have been invoked
+		if c := atomic.LoadInt32(&callbackCalled); c != 0 {
+			t.Errorf("expected callback not to be called, got %d calls", c)
+		}
 	})
 }
