@@ -52,10 +52,70 @@ type Parser struct {
 	maxSearchYears   int
 }
 
+// ErrNoFields is returned when no fields or Descriptor are configured.
+var ErrNoFields = fmt.Errorf("at least one field or Descriptor must be configured")
+
+// ErrMultipleOptionals is returned when more than one optional field is configured.
+var ErrMultipleOptionals = fmt.Errorf("multiple optionals may not be configured")
+
+// TryNewParser creates a Parser with custom options, returning an error if the
+// configuration is invalid. This is the safe alternative to NewParser for cases
+// where parser options come from runtime configuration rather than hardcoded values.
+//
+// Use TryNewParser when:
+//   - Parser options come from config files, environment variables, or user input
+//   - You want to handle configuration errors gracefully
+//
+// Use NewParser when:
+//   - Parser options are hardcoded constants (invalid config = bug)
+//   - You want to fail fast during initialization
+//
+// Returns ErrNoFields if no fields or Descriptor are configured.
+// Returns ErrMultipleOptionals if more than one optional field is configured.
+//
+// Example:
+//
+//	// Safe parsing from config
+//	opts := loadParserOptionsFromConfig()
+//	parser, err := TryNewParser(opts)
+//	if err != nil {
+//	    return fmt.Errorf("invalid parser config: %w", err)
+//	}
+func TryNewParser(options ParseOption) (Parser, error) {
+	// Count how many regular fields are configured
+	fields := 0
+	for _, place := range places {
+		if options&place > 0 {
+			fields++
+		}
+	}
+	if fields == 0 && options&Descriptor == 0 {
+		return Parser{}, ErrNoFields
+	}
+
+	optionals := 0
+	if options&DowOptional > 0 {
+		optionals++
+	}
+	if options&SecondOptional > 0 {
+		optionals++
+	}
+	if optionals > 1 {
+		return Parser{}, ErrMultipleOptionals
+	}
+	return Parser{
+		options:          options,
+		minEveryInterval: time.Second, // default minimum interval for @every
+	}, nil
+}
+
 // NewParser creates a Parser with custom options.
 //
 // It panics if more than one Optional is given, since it would be impossible to
 // correctly infer which optional is provided or missing in general.
+//
+// For runtime configuration where errors should be handled gracefully,
+// use TryNewParser instead.
 //
 // Examples
 //
@@ -71,31 +131,11 @@ type Parser struct {
 //	specParser := NewParser(Dom | Month | DowOptional)
 //	sched, err := specParser.Parse("15 */3")
 func NewParser(options ParseOption) Parser {
-	// Count how many regular fields are configured
-	fields := 0
-	for _, place := range places {
-		if options&place > 0 {
-			fields++
-		}
+	p, err := TryNewParser(options)
+	if err != nil {
+		panic(err)
 	}
-	if fields == 0 && options&Descriptor == 0 {
-		panic("at least one field or Descriptor must be configured")
-	}
-
-	optionals := 0
-	if options&DowOptional > 0 {
-		optionals++
-	}
-	if options&SecondOptional > 0 {
-		optionals++
-	}
-	if optionals > 1 {
-		panic("multiple optionals may not be configured")
-	}
-	return Parser{
-		options:          options,
-		minEveryInterval: time.Second, // default minimum interval for @every
-	}
+	return p
 }
 
 // WithMinEveryInterval returns a new Parser with the specified minimum interval
