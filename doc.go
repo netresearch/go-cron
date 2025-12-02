@@ -169,6 +169,36 @@ The prefix "TZ=(TIME ZONE)" is also supported for legacy compatibility.
 Jobs scheduled during daylight-savings leap-ahead transitions will run
 immediately after the skipped hour (ISC cron-compatible behavior).
 
+# Daylight Saving Time (DST) Handling
+
+This library follows ISC cron-compatible DST behavior:
+
+Spring Forward (clocks skip an hour):
+  - Jobs scheduled during the skipped hour run immediately after the transition
+  - Example: A 2:30 AM job during US spring DST runs at 3:00 AM
+
+Fall Back (clocks repeat an hour):
+  - Jobs run only during the first occurrence of the repeated hour
+  - The second occurrence is skipped to prevent duplicate runs
+
+Midnight Doesn't Exist:
+  - Some DST transitions skip midnight entirely (e.g., São Paulo, Brazil)
+  - Jobs scheduled at midnight run at the first valid time after transition
+
+Testing DST scenarios:
+
+	// Use FakeClock for deterministic DST testing
+	loc, _ := time.LoadLocation("America/New_York")
+	// Start just before spring DST transition
+	clock := cron.NewFakeClock(time.Date(2024, 3, 10, 1, 59, 0, 0, loc))
+	c := cron.New(cron.WithClock(clock), cron.WithLocation(loc))
+	// ... test behavior
+
+Best practices for DST-sensitive schedules:
+  - Use explicit timezones (CRON_TZ=) rather than local time
+  - Test with FakeClock around DST transitions
+  - Consider using UTC for critical jobs that must run exactly once
+
 # Job Wrappers
 
 A Cron runner may be configured with a chain of job wrappers to add
@@ -192,6 +222,54 @@ Install wrappers for individual jobs by explicitly wrapping them:
 	job = cron.NewChain(
 		cron.SkipIfStillRunning(logger),
 	).Then(job)
+
+# Wrapper Composition Patterns
+
+Wrappers are applied in reverse order (outermost first). Understanding the correct
+ordering is critical for proper behavior:
+
+Production-Ready Chain (recommended):
+
+	c := cron.New(cron.WithChain(
+		cron.Recover(logger),              // 1. Outermost: catches all panics
+		cron.RetryWithBackoff(logger, 3,   // 2. Retry transient failures
+			time.Second, time.Minute, 2.0),
+		cron.CircuitBreaker(logger, 5,     // 3. Stop hammering failing services
+			5*time.Minute),
+		cron.SkipIfStillRunning(logger),   // 4. Innermost: prevent overlap
+	))
+
+Context-Aware Chain (for graceful shutdown):
+
+	c := cron.New(cron.WithChain(
+		cron.Recover(logger),
+		cron.TimeoutWithContext(logger, 5*time.Minute),
+	))
+	c.AddJob("@every 1h", cron.FuncJobWithContext(func(ctx context.Context) {
+		select {
+		case <-ctx.Done():
+			return // Shutdown or timeout - exit gracefully
+		case <-doWork():
+			// Work completed
+		}
+	}))
+
+Wrapper Ordering Pitfalls:
+
+	// BAD: Retry inside Recover loses panic information
+	cron.NewChain(cron.RetryWithBackoff(...), cron.Recover(logger))
+
+	// GOOD: Recover catches re-panics from exhausted retries
+	cron.NewChain(cron.Recover(logger), cron.RetryWithBackoff(...))
+
+Available Wrappers:
+  - Recover: Catches panics and logs them
+  - SkipIfStillRunning: Skip if previous run is still active
+  - DelayIfStillRunning: Queue runs, serializing execution
+  - Timeout: Abandon long-running jobs (see caveats below)
+  - TimeoutWithContext: True cancellation via context
+  - RetryWithBackoff: Retry panicking jobs with exponential backoff
+  - CircuitBreaker: Stop execution after consecutive failures
 
 # Timeout Wrapper Caveats
 
@@ -254,6 +332,127 @@ Activate it with a one-off logger as follows:
 	cron.New(
 		cron.WithLogger(
 			cron.VerbosePrintfLogger(log.New(os.Stdout, "cron: ", log.LstdFlags))))
+
+# Resource Management
+
+Use WithMaxEntries to limit the number of scheduled jobs and prevent resource exhaustion:
+
+	c := cron.New(cron.WithMaxEntries(100))
+	id, err := c.AddFunc("@every 1m", myJob)
+	if errors.Is(err, cron.ErrMaxEntriesReached) {
+		// Handle limit reached - remove old jobs or reject new ones
+	}
+
+Behavior when limit is reached:
+  - AddFunc, AddJob, ScheduleJob return ErrMaxEntriesReached
+  - Existing jobs continue running normally
+  - Counter decrements when jobs are removed via Remove(id)
+
+The entry limit is checked atomically but may briefly exceed the limit during
+concurrent additions by the number of in-flight ScheduleJob calls.
+
+# Observability Hooks
+
+ObservabilityHooks provide integration points for metrics, tracing, and monitoring:
+
+	hooks := cron.ObservabilityHooks{
+		OnJobScheduled: func(entry cron.Entry, runTime time.Time) {
+			// Called when a job is scheduled or rescheduled
+			log.Printf("Job %d scheduled for %v", entry.ID, runTime)
+		},
+		OnJobRun: func(entry cron.Entry, runTime time.Time) {
+			// Called just before a job starts running
+			metrics.IncrCounter("cron.job.started", "job", entry.Name)
+		},
+		OnJobCompleted: func(entry cron.Entry, runTime time.Time, duration time.Duration) {
+			// Called after a job completes (successfully or with panic)
+			metrics.RecordDuration("cron.job.duration", duration, "job", entry.Name)
+		},
+		OnJobPanicked: func(entry cron.Entry, runTime time.Time, panicVal any) {
+			// Called when a job panics
+			metrics.IncrCounter("cron.job.panic", "job", entry.Name)
+		},
+	}
+	c := cron.New(cron.WithObservabilityHooks(hooks))
+
+# Testing with FakeClock
+
+FakeClock enables deterministic time control for testing cron jobs:
+
+	func TestJobExecution(t *testing.T) {
+		clock := cron.NewFakeClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
+		c := cron.New(cron.WithClock(clock))
+
+		executed := make(chan struct{})
+		c.AddFunc("@every 1h", func() { close(executed) })
+		c.Start()
+		defer c.Stop()
+
+		// Advance time to trigger job
+		clock.Advance(time.Hour)
+
+		select {
+		case <-executed:
+			// Success
+		case <-time.After(time.Second):
+			t.Fatal("job not executed")
+		}
+	}
+
+FakeClock methods:
+  - NewFakeClock(initial time.Time): Create clock at specific time
+  - Advance(d time.Duration): Move time forward, triggering timers
+  - Set(t time.Time): Jump to specific time
+  - BlockUntil(n int): Wait for n timers to be registered
+  - Now(), Since(), After(), AfterFunc(), NewTicker(), Sleep(): Standard time operations
+
+Use BlockUntil for synchronization in tests with multiple timers:
+
+	clock.BlockUntil(2) // Wait for 2 timers to be registered
+	clock.Advance(time.Hour) // Now safely advance
+
+# Security Considerations
+
+Input Validation:
+  - Cron specifications are limited to 1024 characters (MaxSpecLength)
+  - Timezone specifications are validated against Go's time.LoadLocation
+  - Path traversal attempts in timezone strings (e.g., "../etc/passwd") are rejected
+
+Resource Protection:
+  - Use WithMaxEntries to limit scheduled jobs in multi-tenant environments
+  - Use WithMaxSearchYears to limit schedule search time for complex expressions
+  - Timeout wrappers prevent runaway jobs from consuming resources indefinitely
+
+Recommended Patterns:
+  - Validate user-provided cron expressions before scheduling
+  - Use named jobs with duplicate prevention for user-defined schedules
+  - Monitor entry counts and job durations in production
+  - Run the cron service with minimal privileges
+
+# Migration from robfig/cron
+
+This library is a maintained fork of github.com/robfig/cron/v3 with full
+backward compatibility. To migrate:
+
+	// Before
+	import "github.com/robfig/cron/v3"
+
+	// After
+	import "github.com/netresearch/go-cron"
+
+New features available after migration:
+  - RetryWithBackoff: Automatic retry with exponential backoff
+  - CircuitBreaker: Protect failing jobs from overwhelming services
+  - TimeoutWithContext: True cancellation support via context
+  - ObservabilityHooks: Integrated metrics and tracing support
+  - FakeClock: Deterministic time control for testing
+  - WithMaxEntries: Resource protection for entry limits
+  - WithMaxSearchYears: Configurable schedule search limits
+  - Named jobs: Unique job names with duplicate prevention
+  - Tagged jobs: Categorization and bulk operations
+  - Context support: Graceful shutdown via context cancellation
+
+All existing code will work unchanged. The migration is a drop-in replacement.
 
 # Implementation
 
