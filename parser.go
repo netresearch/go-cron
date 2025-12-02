@@ -111,11 +111,12 @@ func TryNewParser(options ParseOption) (Parser, error) {
 
 // NewParser creates a Parser with custom options.
 //
+// Deprecated: NewParser will change to return (Parser, error) in v2.0.
+// Use [MustNewParser] for panic-on-error behavior (forward compatible),
+// or [TryNewParser] for explicit error handling.
+//
 // It panics if more than one Optional is given, since it would be impossible to
 // correctly infer which optional is provided or missing in general.
-//
-// For runtime configuration where errors should be handled gracefully,
-// use TryNewParser instead.
 //
 // Examples
 //
