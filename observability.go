@@ -5,8 +5,14 @@ import "time"
 // ObservabilityHooks provides callbacks for monitoring cron operations.
 // All callbacks are optional; nil callbacks are safely ignored.
 //
-// Hooks are called synchronously, so implementations should be lightweight
-// or dispatch to a separate goroutine for expensive operations.
+// Hooks are called asynchronously in separate goroutines to prevent
+// slow callbacks from blocking the scheduler. This means:
+//   - Callbacks may execute slightly after the event occurred
+//   - Callback execution order is not guaranteed across events
+//   - Callbacks should be safe for concurrent execution
+//
+// If you need synchronous execution, use channels or sync primitives
+// within your callback implementation.
 //
 // Example with Prometheus:
 //
@@ -64,22 +70,28 @@ func getJobName(j Job) string {
 }
 
 // callOnJobStart safely calls the OnJobStart hook if configured.
+// The hook is called asynchronously to prevent blocking job execution.
 func (h *ObservabilityHooks) callOnJobStart(entryID EntryID, job Job, scheduledTime time.Time) {
 	if h != nil && h.OnJobStart != nil {
-		h.OnJobStart(entryID, getJobName(job), scheduledTime)
+		name := getJobName(job)
+		go h.OnJobStart(entryID, name, scheduledTime)
 	}
 }
 
 // callOnJobComplete safely calls the OnJobComplete hook if configured.
+// The hook is called asynchronously to prevent blocking.
 func (h *ObservabilityHooks) callOnJobComplete(entryID EntryID, job Job, duration time.Duration, recovered any) {
 	if h != nil && h.OnJobComplete != nil {
-		h.OnJobComplete(entryID, getJobName(job), duration, recovered)
+		name := getJobName(job)
+		go h.OnJobComplete(entryID, name, duration, recovered)
 	}
 }
 
 // callOnSchedule safely calls the OnSchedule hook if configured.
+// The hook is called asynchronously to prevent blocking the scheduler.
 func (h *ObservabilityHooks) callOnSchedule(entryID EntryID, job Job, nextRun time.Time) {
 	if h != nil && h.OnSchedule != nil {
-		h.OnSchedule(entryID, getJobName(job), nextRun)
+		name := getJobName(job)
+		go h.OnSchedule(entryID, name, nextRun)
 	}
 }
