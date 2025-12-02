@@ -1,6 +1,7 @@
 package cron
 
 import (
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -426,6 +427,68 @@ func TestNewParserDescriptorOnlyValid(t *testing.T) {
 	if err == nil {
 		t.Error("expected cron expression to fail with Descriptor-only parser")
 	}
+}
+
+func TestTryNewParser(t *testing.T) {
+	t.Run("returns ErrNoFields for empty options", func(t *testing.T) {
+		_, err := TryNewParser(0)
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !errors.Is(err, ErrNoFields) {
+			t.Errorf("expected ErrNoFields, got: %v", err)
+		}
+	})
+
+	t.Run("returns ErrMultipleOptionals for multiple optionals", func(t *testing.T) {
+		_, err := TryNewParser(Minute | Hour | Dom | Month | SecondOptional | DowOptional)
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !errors.Is(err, ErrMultipleOptionals) {
+			t.Errorf("expected ErrMultipleOptionals, got: %v", err)
+		}
+	})
+
+	t.Run("succeeds with valid options", func(t *testing.T) {
+		parser, err := TryNewParser(Minute | Hour | Dom | Month | Dow)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		// Verify parser works
+		_, err = parser.Parse("0 0 * * *")
+		if err != nil {
+			t.Errorf("parser should work, got: %v", err)
+		}
+	})
+
+	t.Run("succeeds with Descriptor only", func(t *testing.T) {
+		parser, err := TryNewParser(Descriptor)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		// Verify parser works
+		_, err = parser.Parse("@daily")
+		if err != nil {
+			t.Errorf("parser should work with @daily, got: %v", err)
+		}
+	})
+
+	t.Run("succeeds with single optional", func(t *testing.T) {
+		parser, err := TryNewParser(Minute | Hour | Dom | Month | DowOptional)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		// Verify parser works with and without optional field
+		_, err = parser.Parse("0 0 * *")
+		if err != nil {
+			t.Errorf("parser should work without optional dow, got: %v", err)
+		}
+		_, err = parser.Parse("0 0 * * 1")
+		if err != nil {
+			t.Errorf("parser should work with optional dow, got: %v", err)
+		}
+	})
 }
 
 func every5min(loc *time.Location) *SpecSchedule {
