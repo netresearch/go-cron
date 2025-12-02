@@ -138,6 +138,34 @@ func NewParser(options ParseOption) Parser {
 	return p
 }
 
+// MustNewParser is like TryNewParser but panics if the options are invalid.
+// This follows the Go convention of Must* functions for cases where failure
+// indicates a programming error rather than a runtime condition.
+//
+// Use MustNewParser when:
+//   - Parser options are hardcoded constants
+//   - Invalid configuration is a bug that should fail fast
+//
+// Use TryNewParser when:
+//   - Parser options come from config files, environment, or user input
+//   - You want to handle configuration errors gracefully
+//
+// Note: In v2.0, NewParser will return (Parser, error) and MustNewParser
+// will be the only panicking variant. Using MustNewParser now ensures
+// forward compatibility with v2.0.
+//
+// Example:
+//
+//	// Panics if options are invalid (hardcoded, so invalid = bug)
+//	var parser = cron.MustNewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+func MustNewParser(options ParseOption) Parser {
+	p, err := TryNewParser(options)
+	if err != nil {
+		panic(err)
+	}
+	return p
+}
+
 // WithMinEveryInterval returns a new Parser with the specified minimum interval
 // for @every expressions. This allows overriding the default 1-second minimum.
 //

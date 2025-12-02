@@ -491,6 +491,26 @@ func TestTryNewParser(t *testing.T) {
 	})
 }
 
+func TestMustNewParser(t *testing.T) {
+	t.Run("panics with invalid options", func(t *testing.T) {
+		defer func() {
+			if r := recover(); r == nil {
+				t.Error("MustNewParser(0) should panic with no fields configured")
+			}
+		}()
+		MustNewParser(0)
+	})
+
+	t.Run("succeeds with valid options", func(t *testing.T) {
+		// Should not panic
+		parser := MustNewParser(Minute | Hour | Dom | Month | Dow)
+		_, err := parser.Parse("0 0 * * *")
+		if err != nil {
+			t.Errorf("parser should work, got: %v", err)
+		}
+	})
+}
+
 func every5min(loc *time.Location) *SpecSchedule {
 	return &SpecSchedule{1 << 0, 1 << 5, all(hours), all(dom), all(months), all(dow), loc, 0}
 }
