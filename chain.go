@@ -213,15 +213,10 @@ func Timeout(logger Logger, timeout time.Duration) JobWrapper {
 		}
 		return FuncJob(func() {
 			done := make(chan struct{})
-			var panicVal interface{}
+			var panicVal any
 			go func() {
 				defer close(done)
-				defer func() {
-					if r := recover(); r != nil {
-						panicVal = r
-					}
-				}()
-				j.Run()
+				panicVal = safeExecute(j.Run)
 			}()
 
 			timer := time.NewTimer(timeout)
@@ -298,20 +293,15 @@ func (t *timeoutContextJob) RunWithContext(ctx context.Context) {
 	defer cancel()
 
 	done := make(chan struct{})
-	var panicVal interface{}
+	var panicVal any
 
 	go func() {
 		defer close(done)
-		defer func() {
-			if r := recover(); r != nil {
-				panicVal = r
-			}
-		}()
-		// Pass context to inner job if it supports it
+		// Pass context to inner job if it supports it, using consolidated helper
 		if jc, ok := t.inner.(JobWithContext); ok {
-			jc.RunWithContext(ctx)
+			panicVal = safeExecute(func() { jc.RunWithContext(ctx) })
 		} else {
-			t.inner.Run()
+			panicVal = safeExecute(t.inner.Run)
 		}
 	}()
 
