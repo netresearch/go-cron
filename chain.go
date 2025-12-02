@@ -176,6 +176,37 @@ func SkipIfStillRunning(logger Logger) JobWrapper {
 	}
 }
 
+// timeoutConfig holds configuration for timeout wrappers.
+type timeoutConfig struct {
+	onTimeout func(timeout time.Duration) // Called when job times out (abandoned)
+}
+
+// TimeoutOption configures Timeout and TimeoutWithContext wrappers.
+type TimeoutOption func(*timeoutConfig)
+
+// WithTimeoutCallback sets a callback invoked when a job times out and is abandoned.
+// This is useful for metrics collection and alerting on goroutine accumulation.
+//
+// Example with Prometheus:
+//
+//	abandonedGoroutines := prometheus.NewCounter(prometheus.CounterOpts{
+//	    Name: "cron_abandoned_goroutines_total",
+//	    Help: "Number of job goroutines abandoned due to timeout",
+//	})
+//
+//	c := cron.New(cron.WithChain(
+//	    cron.Timeout(logger, 5*time.Minute,
+//	        cron.WithTimeoutCallback(func(timeout time.Duration) {
+//	            abandonedGoroutines.Inc()
+//	        }),
+//	    ),
+//	))
+func WithTimeoutCallback(fn func(timeout time.Duration)) TimeoutOption {
+	return func(c *timeoutConfig) {
+		c.onTimeout = fn
+	}
+}
+
 // Timeout wraps a job with a timeout. If the job takes longer than the given
 // duration, the wrapper returns and logs an error, but the underlying job
 // goroutine continues running until completion.
@@ -199,6 +230,16 @@ func SkipIfStillRunning(logger Logger) JobWrapper {
 //	    time.Sleep(5 * time.Second) // Takes 5x longer than schedule
 //	})
 //	// With Timeout(2s), a new abandoned goroutine is created every second
+//
+// # Tracking Abandoned Goroutines
+//
+// Use [WithTimeoutCallback] to track timeout events for metrics and alerting:
+//
+//	cron.Timeout(logger, 5*time.Minute,
+//	    cron.WithTimeoutCallback(func(timeout time.Duration) {
+//	        abandonedGoroutines.Inc() // Prometheus counter
+//	    }),
+//	)
 //
 // # Recommended Alternatives
 //
@@ -226,7 +267,13 @@ func SkipIfStillRunning(logger Logger) JobWrapper {
 //	))
 //
 // A timeout of zero or negative disables the timeout and returns the job unchanged.
-func Timeout(logger Logger, timeout time.Duration) JobWrapper {
+func Timeout(logger Logger, timeout time.Duration, opts ...TimeoutOption) JobWrapper {
+	// Apply options
+	var config timeoutConfig
+	for _, opt := range opts {
+		opt(&config)
+	}
+
 	return func(j Job) Job {
 		if timeout <= 0 {
 			return j
@@ -250,6 +297,10 @@ func Timeout(logger Logger, timeout time.Duration) JobWrapper {
 				}
 			case <-timer.C:
 				logger.Error(fmt.Errorf("job exceeded timeout of %v; goroutine still running in background", timeout), "timeout", "duration", timeout)
+				// Invoke callback for metrics/alerting
+				if config.onTimeout != nil {
+					config.onTimeout(timeout)
+				}
 			}
 		})
 	}
@@ -262,6 +313,14 @@ func Timeout(logger Logger, timeout time.Duration) JobWrapper {
 // When the timeout expires:
 //   - Jobs implementing JobWithContext receive a canceled context and can stop gracefully
 //   - Jobs implementing only Job continue running (same as Timeout wrapper)
+//
+// Use [WithTimeoutCallback] to track timeout/abandonment events:
+//
+//	cron.TimeoutWithContext(logger, 5*time.Minute,
+//	    cron.WithTimeoutCallback(func(timeout time.Duration) {
+//	        timeoutCounter.Inc()
+//	    }),
+//	)
 //
 // A timeout of zero or negative disables the timeout and returns the job unchanged.
 //
@@ -281,15 +340,22 @@ func Timeout(logger Logger, timeout time.Duration) JobWrapper {
 //	        // Work completed
 //	    }
 //	}))
-func TimeoutWithContext(logger Logger, timeout time.Duration) JobWrapper {
+func TimeoutWithContext(logger Logger, timeout time.Duration, opts ...TimeoutOption) JobWrapper {
+	// Apply options
+	var config timeoutConfig
+	for _, opt := range opts {
+		opt(&config)
+	}
+
 	return func(j Job) Job {
 		if timeout <= 0 {
 			return j
 		}
 		return &timeoutContextJob{
-			inner:   j,
-			timeout: timeout,
-			logger:  logger,
+			inner:     j,
+			timeout:   timeout,
+			logger:    logger,
+			onTimeout: config.onTimeout,
 		}
 	}
 }
@@ -302,9 +368,10 @@ const cleanupTimeout = 5 * time.Second
 
 // timeoutContextJob implements JobWithContext for the TimeoutWithContext wrapper.
 type timeoutContextJob struct {
-	inner   Job
-	timeout time.Duration
-	logger  Logger
+	inner     Job
+	timeout   time.Duration
+	logger    Logger
+	onTimeout func(time.Duration) // Optional callback for timeout events
 }
 
 // Run implements Job interface by calling RunWithContext with context.Background().
@@ -340,6 +407,10 @@ func (t *timeoutContextJob) RunWithContext(ctx context.Context) {
 	case <-ctx.Done():
 		if ctx.Err() == context.DeadlineExceeded {
 			t.logger.Error(fmt.Errorf("job exceeded timeout of %v", t.timeout), "timeout", "duration", t.timeout)
+			// Invoke callback for metrics/alerting (timeout occurred)
+			if t.onTimeout != nil {
+				t.onTimeout(t.timeout)
+			}
 		}
 		// Context canceled - give job a grace period to clean up.
 		// If it doesn't finish, abandon it (same as Timeout wrapper behavior).

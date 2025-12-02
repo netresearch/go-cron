@@ -171,33 +171,50 @@ immediately after the skipped hour (ISC cron-compatible behavior).
 
 # Daylight Saving Time (DST) Handling
 
-This library follows ISC cron-compatible DST behavior:
+This library follows ISC cron-compatible DST behavior. Understanding these edge
+cases is critical for time-sensitive scheduling.
 
 Spring Forward (clocks skip an hour):
   - Jobs scheduled during the skipped hour run immediately after the transition
   - Example: A 2:30 AM job during US spring DST runs at 3:00 AM
+  - Jobs scheduled exactly at the transition boundary may run immediately
 
 Fall Back (clocks repeat an hour):
   - Jobs run only during the first occurrence of the repeated hour
   - The second occurrence is skipped to prevent duplicate runs
+  - ⚠️ Note: This means jobs scheduled in the repeated hour run once, not twice
 
 Midnight Doesn't Exist:
   - Some DST transitions skip midnight entirely (e.g., São Paulo, Brazil)
   - Jobs scheduled at midnight run at the first valid time after transition
+  - This affects daily (@daily) and midnight-scheduled jobs in those timezones
+
+30-Minute Offset Timezones:
+  - Some regions (e.g., Lord Howe Island, Australia) use 30-minute DST changes
+  - The same DST handling rules apply, but at 30-minute boundaries
+
+⚠️ Important Edge Cases:
+  - Jobs during spring-forward gap: Run immediately after transition
+  - Jobs during fall-back repeat: Run only on first occurrence
+  - Multi-timezone systems: Each job uses its configured timezone independently
+  - Leap seconds: Not handled; use NTP-synced systems for best results
 
 Testing DST scenarios:
 
 	// Use FakeClock for deterministic DST testing
 	loc, _ := time.LoadLocation("America/New_York")
-	// Start just before spring DST transition
+	// Start just before spring DST transition (2024: March 10, 2:00 AM)
 	clock := cron.NewFakeClock(time.Date(2024, 3, 10, 1, 59, 0, 0, loc))
 	c := cron.New(cron.WithClock(clock), cron.WithLocation(loc))
 	// ... test behavior
 
 Best practices for DST-sensitive schedules:
-  - Use explicit timezones (CRON_TZ=) rather than local time
-  - Test with FakeClock around DST transitions
-  - Consider using UTC for critical jobs that must run exactly once
+  - Use UTC (CRON_TZ=UTC) for critical jobs that must run exactly once
+  - Use explicit timezones (CRON_TZ=America/New_York) rather than local time
+  - Avoid scheduling jobs between 2:00-3:00 AM in DST-observing timezones
+  - Test with FakeClock around DST transitions before production deployment
+  - Consider using @every intervals for tasks where exact wall-clock time is less important
+  - Monitor job execution times during DST transition periods
 
 # Job Wrappers
 
