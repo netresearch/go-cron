@@ -35,11 +35,13 @@ type Cron struct {
 	entryIndex map[EntryID]*Entry // O(1) lookup by ID
 	nameIndex  map[string]*Entry  // O(1) lookup by Name
 	chain      Chain
-	stop       chan struct{}
-	add        chan *Entry
-	remove     chan EntryID
-	snapshot   chan chan []Entry
-	running    bool
+	stop        chan struct{}
+	add         chan *Entry
+	remove      chan EntryID
+	snapshot    chan chan []Entry
+	entryLookup chan entryLookupRequest // O(1) single-entry lookup when running
+	nameLookup  chan nameLookupRequest  // O(1) entry lookup by name when running
+	running     bool
 	logger     Logger
 	runningMu  sync.Mutex
 	location   *time.Location
@@ -108,6 +110,18 @@ type Schedule interface {
 // EntryID identifies an entry within a Cron instance.
 // Using uint64 prevents overflow and ID collisions on all platforms.
 type EntryID uint64
+
+// entryLookupRequest is used for O(1) entry lookup via the run loop.
+type entryLookupRequest struct {
+	id    EntryID
+	reply chan Entry
+}
+
+// nameLookupRequest is used for O(1) entry lookup by name via the run loop.
+type nameLookupRequest struct {
+	name  string
+	reply chan Entry
+}
 
 // Entry consists of a schedule and the func to execute on that schedule.
 type Entry struct {
@@ -181,21 +195,23 @@ func (e Entry) Run() {
 // See "cron.With*" to modify the default behavior.
 func New(opts ...Option) *Cron {
 	c := &Cron{
-		entries:    nil,
-		entryIndex: make(map[EntryID]*Entry),
-		nameIndex:  make(map[string]*Entry),
-		chain:      NewChain(),
-		add:        make(chan *Entry),
-		stop:       make(chan struct{}),
-		snapshot:   make(chan chan []Entry),
-		remove:     make(chan EntryID),
-		running:    false,
-		runningMu:  sync.Mutex{},
-		logger:     DefaultLogger,
-		location:   time.Local,
-		parser:     standardParser,
-		clock:      RealClock{},
-		baseCtx:    context.Background(), // Default base context
+		entries:     nil,
+		entryIndex:  make(map[EntryID]*Entry),
+		nameIndex:   make(map[string]*Entry),
+		chain:       NewChain(),
+		add:         make(chan *Entry),
+		stop:        make(chan struct{}),
+		snapshot:    make(chan chan []Entry),
+		entryLookup: make(chan entryLookupRequest),
+		nameLookup:  make(chan nameLookupRequest),
+		remove:      make(chan EntryID),
+		running:     false,
+		runningMu:   sync.Mutex{},
+		logger:      DefaultLogger,
+		location:    time.Local,
+		parser:      standardParser,
+		clock:       RealClock{},
+		baseCtx:     context.Background(), // Default base context
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -401,18 +417,15 @@ func (c *Cron) Location() *time.Location {
 }
 
 // Entry returns a snapshot of the given entry, or nil if it couldn't be found.
-// This operation is O(1) when not running using the internal index map.
+// This operation is O(1) in all cases using the internal index map.
 func (c *Cron) Entry(id EntryID) Entry {
 	c.runningMu.Lock()
 	if c.running {
 		c.runningMu.Unlock()
-		// When running, use snapshot from run goroutine (same as Entries())
-		for _, entry := range c.Entries() {
-			if id == entry.ID {
-				return entry
-			}
-		}
-		return Entry{}
+		// When running, use dedicated lookup channel for O(1) access
+		replyChan := make(chan Entry, 1)
+		c.entryLookup <- entryLookupRequest{id: id, reply: replyChan}
+		return <-replyChan
 	}
 	// When not running, use direct map lookup (O(1))
 	entry, ok := c.entryIndex[id]
@@ -539,6 +552,24 @@ func (c *Cron) run() {
 
 			case replyChan := <-c.snapshot:
 				replyChan <- c.entrySnapshot()
+				continue
+
+			case req := <-c.entryLookup:
+				// O(1) single-entry lookup using index map
+				if entry, ok := c.entryIndex[req.id]; ok {
+					req.reply <- *entry
+				} else {
+					req.reply <- Entry{}
+				}
+				continue
+
+			case req := <-c.nameLookup:
+				// O(1) entry lookup by name using nameIndex
+				if entry, ok := c.nameIndex[req.name]; ok {
+					req.reply <- *entry
+				} else {
+					req.reply <- Entry{}
+				}
 				continue
 
 			case <-c.stop:
@@ -781,19 +812,15 @@ func (c *Cron) maybeCompactIndexes() {
 // EntryByName returns a snapshot of the entry with the given name,
 // or an invalid Entry (Entry.Valid() == false) if not found.
 //
-// This operation is O(1) when not running.
-// When running, it iterates through a snapshot of entries.
+// This operation is O(1) in all cases using the internal name index.
 func (c *Cron) EntryByName(name string) Entry {
 	c.runningMu.Lock()
 	if c.running {
 		c.runningMu.Unlock()
-		// When running, search through snapshot
-		for _, entry := range c.Entries() {
-			if entry.Name == name {
-				return entry
-			}
-		}
-		return Entry{}
+		// When running, use dedicated lookup channel for O(1) access
+		replyChan := make(chan Entry, 1)
+		c.nameLookup <- nameLookupRequest{name: name, reply: replyChan}
+		return <-replyChan
 	}
 	// When not running, use direct map lookup (O(1))
 	entry, ok := c.nameIndex[name]

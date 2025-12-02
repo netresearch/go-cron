@@ -160,15 +160,50 @@ func SkipIfStillRunning(logger Logger) JobWrapper {
 // duration, the wrapper returns and logs an error, but the underlying job
 // goroutine continues running until completion.
 //
-// WARNING: This implements an "abandonment model" - when a timeout occurs,
+// # ⚠️ IMPORTANT: Abandonment Model
+//
+// This wrapper implements an "abandonment model" - when a timeout occurs,
 // the wrapper returns but the job's goroutine is NOT canceled. The job will
 // continue executing in the background until it naturally completes. This means:
 //   - Resources held by the job will not be released until completion
 //   - Side effects will still occur even after timeout
 //   - Multiple abandoned goroutines can accumulate if jobs consistently timeout
 //
-// For jobs that need true cancellation support, consider implementing the Job
-// interface with context awareness and checking for cancellation signals.
+// # Goroutine Accumulation Risk
+//
+// If a job consistently takes longer than its schedule interval, abandoned
+// goroutines will accumulate:
+//
+//	// DANGER: This pattern causes goroutine accumulation!
+//	c.AddFunc("@every 1s", func() {
+//	    time.Sleep(5 * time.Second) // Takes 5x longer than schedule
+//	})
+//	// With Timeout(2s), a new abandoned goroutine is created every second
+//
+// # Recommended Alternatives
+//
+// For jobs that need true cancellation support, use [TimeoutWithContext] with
+// jobs that implement [JobWithContext]:
+//
+//	c := cron.New(cron.WithChain(
+//	    cron.TimeoutWithContext(logger, 5*time.Minute),
+//	))
+//	c.AddJob("@every 1h", cron.FuncJobWithContext(func(ctx context.Context) {
+//	    select {
+//	    case <-ctx.Done():
+//	        return // Timeout - clean up and exit
+//	    case <-doWork():
+//	        // Work completed
+//	    }
+//	}))
+//
+// To prevent accumulation without context support, combine with [SkipIfStillRunning]:
+//
+//	c := cron.New(cron.WithChain(
+//	    cron.Recover(logger),
+//	    cron.Timeout(logger, 5*time.Minute),
+//	    cron.SkipIfStillRunning(logger), // Prevents overlapping executions
+//	))
 //
 // A timeout of zero or negative disables the timeout and returns the job unchanged.
 func Timeout(logger Logger, timeout time.Duration) JobWrapper {
