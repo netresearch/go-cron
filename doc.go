@@ -309,13 +309,25 @@ Example of a cancellable job pattern:
 		}
 	}
 
-# Thread safety
+# Thread Safety
 
-Since the Cron service runs concurrently with the calling code, some amount of
-care must be taken to ensure proper synchronization.
+Cron is safe for concurrent use. Multiple goroutines may call methods on a Cron
+instance simultaneously without external synchronization.
 
-All cron methods are designed to be correctly synchronized as long as the caller
-ensures that invocations have a clear happens-before ordering between them.
+Specific guarantees:
+  - AddJob/AddFunc: Safe to call while scheduler is running
+  - Remove: Safe to call while scheduler is running
+  - Entries: Returns a snapshot; safe but may be stale
+  - Start/Stop: Safe to call multiple times (idempotent)
+  - Entry: Safe to call; returns copy of entry data
+
+Job Execution:
+  - Jobs may run concurrently by default
+  - Use SkipIfStillRunning or DelayIfStillRunning for serialization
+  - Jobs should not block indefinitely (use Timeout or TimeoutWithContext)
+
+The scheduler uses an internal channel-based synchronization model. All
+operations that modify scheduler state are serialized through this channel.
 
 # Logging
 

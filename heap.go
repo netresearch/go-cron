@@ -40,9 +40,14 @@ func (h *entryHeap) Push(x any) {
 }
 
 // Pop removes and returns the minimum entry (earliest Next time).
+// Returns nil if the heap is empty (defensive check for direct calls
+// bypassing container/heap which already checks Len() > 0).
 func (h *entryHeap) Pop() any {
 	old := *h
 	n := len(old)
+	if n == 0 {
+		return nil // defensive: prevent panic on empty heap
+	}
 	entry := old[n-1]
 	old[n-1] = nil       // avoid memory leak
 	entry.heapIndex = -1 // mark as removed

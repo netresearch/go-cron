@@ -3,6 +3,8 @@ package cron
 import (
 	"fmt"
 	"math"
+	"math/rand/v2"
+	"runtime"
 	"sync"
 	"time"
 )
@@ -48,21 +50,57 @@ import (
 //	| 4       | 4s    | Final retry       |
 //	| -       | -     | Re-panic (fail)   |
 
-// calculateBackoffDelay returns the delay for a given retry attempt using exponential backoff.
-// The delay grows as: initialDelay * (multiplier ^ (attempt-2)), capped at maxDelay.
-// Attempt 1 has no delay (first execution), attempt 2 uses initialDelay, and subsequent
-// attempts grow exponentially.
+// jitterFraction is the maximum percentage of delay to add/subtract as jitter.
+// 0.1 means ±10% jitter, which helps prevent thundering herd when multiple
+// jobs retry simultaneously.
+const jitterFraction = 0.1
+
+// calculateBackoffDelay returns the delay for a given retry attempt using exponential backoff
+// with jitter. The base delay grows as: initialDelay * (multiplier ^ (attempt-2)), capped at
+// maxDelay. Jitter of ±10% is applied to prevent thundering herd when multiple jobs retry
+// simultaneously. Attempt 1 has no delay (first execution), attempt 2 uses initialDelay,
+// and subsequent attempts grow exponentially.
 func calculateBackoffDelay(attempt int, initialDelay, maxDelay time.Duration, multiplier float64) time.Duration {
 	delay := time.Duration(float64(initialDelay) * math.Pow(multiplier, float64(attempt-2)))
 	if delay > maxDelay {
-		return maxDelay
+		delay = maxDelay
 	}
-	return delay
+	// Apply jitter: ±10% randomization to prevent thundering herd
+	jitter := time.Duration(float64(delay) * jitterFraction * (2*rand.Float64() - 1))
+	return delay + jitter
 }
 
-// safeExecute runs the given function and captures any panic value.
-// Returns nil if the function completes successfully, or the panic value otherwise.
+// PanicWithStack wraps a panic value with the stack trace at the point of panic.
+// This allows re-panicking to preserve the original stack trace for debugging.
+type PanicWithStack struct {
+	Value any    // The original panic value
+	Stack []byte // Stack trace at point of panic
+}
+
+// Error implements the error interface for PanicWithStack.
+func (p *PanicWithStack) Error() string {
+	return fmt.Sprintf("panic: %v", p.Value)
+}
+
+// String returns a detailed representation including the stack trace.
+func (p *PanicWithStack) String() string {
+	return fmt.Sprintf("panic: %v\nstack:\n%s", p.Value, p.Stack)
+}
+
+// Unwrap returns the original panic value if it was an error.
+func (p *PanicWithStack) Unwrap() error {
+	if err, ok := p.Value.(error); ok {
+		return err
+	}
+	return nil
+}
+
+// safeExecute runs the given function and captures any panic value with stack trace.
+// Returns nil if the function completes successfully, or a *PanicWithStack otherwise.
 // This is a generic helper for panic-safe execution used throughout the library.
+//
+// The returned *PanicWithStack preserves the original stack trace, which is critical
+// for debugging when panics are re-thrown by wrappers like RetryWithBackoff.
 //
 // Example usage:
 //
@@ -71,7 +109,12 @@ func calculateBackoffDelay(attempt int, initialDelay, maxDelay time.Duration, mu
 //	}
 func safeExecute(fn func()) (panicValue any) {
 	defer func() {
-		panicValue = recover()
+		if r := recover(); r != nil {
+			const size = 64 << 10 // 64KB buffer for stack trace
+			buf := make([]byte, size)
+			buf = buf[:runtime.Stack(buf, false)]
+			panicValue = &PanicWithStack{Value: r, Stack: buf}
+		}
 	}()
 	fn()
 	return nil
@@ -101,7 +144,12 @@ func RetryWithBackoff(logger Logger, maxRetries int, initialDelay, maxDelay time
 			for attempt := 1; maxAttempts == 0 || attempt <= maxAttempts; attempt++ {
 				if attempt > 1 {
 					delay := calculateBackoffDelay(attempt, initialDelay, maxDelay, multiplier)
-					logger.Info("retry", "attempt", attempt, "delay", delay, "last_panic", lastPanic)
+					// Extract original panic value for logging
+					panicVal := lastPanic
+					if pws, ok := lastPanic.(*PanicWithStack); ok {
+						panicVal = pws.Value
+					}
+					logger.Info("retry", "attempt", attempt, "delay", delay, "last_panic", panicVal)
 					time.Sleep(delay)
 				}
 
@@ -114,8 +162,22 @@ func RetryWithBackoff(logger Logger, maxRetries int, initialDelay, maxDelay time
 				}
 			}
 
-			// All retries exhausted
-			logger.Error(fmt.Errorf("%v", lastPanic), "retry exhausted", "attempts", maxAttempts)
+			// All retries exhausted - log with stack trace if available
+			panicVal := lastPanic
+			var stack string
+			if pws, ok := lastPanic.(*PanicWithStack); ok {
+				panicVal = pws.Value
+				stack = string(pws.Stack)
+			}
+			err, ok := panicVal.(error)
+			if !ok {
+				err = fmt.Errorf("%v", panicVal)
+			}
+			if stack != "" {
+				logger.Error(err, "retry exhausted", "attempts", maxAttempts, "stack", stack)
+			} else {
+				logger.Error(err, "retry exhausted", "attempts", maxAttempts)
+			}
 			panic(lastPanic) // Re-panic for outer wrappers to handle
 		})
 	}
@@ -203,12 +265,34 @@ func CircuitBreaker(logger Logger, threshold int, cooldown time.Duration) JobWra
 				currentFailures = failures
 				mu.Unlock()
 
+				// Extract original value and stack for logging
+				pVal := panicValue
+				var stack string
+				if pws, ok := panicValue.(*PanicWithStack); ok {
+					pVal = pws.Value
+					stack = string(pws.Stack)
+				}
+				err, ok := pVal.(error)
+				if !ok {
+					err = fmt.Errorf("%v", pVal)
+				}
+
 				if currentFailures == threshold {
-					logger.Error(fmt.Errorf("%v", panicValue), "circuit breaker opened",
-						"failures", currentFailures, "cooldown", cooldown)
+					if stack != "" {
+						logger.Error(err, "circuit breaker opened",
+							"failures", currentFailures, "cooldown", cooldown, "stack", stack)
+					} else {
+						logger.Error(err, "circuit breaker opened",
+							"failures", currentFailures, "cooldown", cooldown)
+					}
 				} else {
-					logger.Error(fmt.Errorf("%v", panicValue), "circuit breaker recorded failure",
-						"failures", currentFailures, "threshold", threshold)
+					if stack != "" {
+						logger.Error(err, "circuit breaker recorded failure",
+							"failures", currentFailures, "threshold", threshold, "stack", stack)
+					} else {
+						logger.Error(err, "circuit breaker recorded failure",
+							"failures", currentFailures, "threshold", threshold)
+					}
 				}
 				panic(panicValue) // Re-panic
 			}

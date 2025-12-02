@@ -619,6 +619,40 @@ func callExternalAPI() error {
 	return nil
 }
 
+// This example demonstrates TimeoutWithContext for true context-based cancellation.
+// Jobs implementing JobWithContext receive a context that is canceled on timeout.
+func ExampleTimeoutWithContext() {
+	logger := cron.DefaultLogger
+
+	c := cron.New(cron.WithChain(
+		// Outermost: catches any panics
+		cron.Recover(logger),
+		// Jobs have 5 minutes to complete; context is canceled on timeout
+		cron.TimeoutWithContext(logger, 5*time.Minute),
+	))
+
+	// Use FuncJobWithContext for jobs that need context support
+	c.AddJob("@hourly", cron.FuncJobWithContext(func(ctx context.Context) {
+		// Create a timer for simulated work
+		workTimer := time.NewTimer(10 * time.Minute)
+		defer workTimer.Stop()
+
+		select {
+		case <-ctx.Done():
+			// Context canceled - clean up and exit gracefully
+			fmt.Println("Job canceled:", ctx.Err())
+			return
+		case <-workTimer.C:
+			// Work completed normally
+			fmt.Println("Job completed")
+		}
+	}))
+
+	c.Start()
+	defer c.Stop()
+	// Output:
+}
+
 // This example demonstrates using WithMaxEntries to limit the number of jobs.
 // This provides protection against memory exhaustion from excessive entry additions.
 func ExampleWithMaxEntries() {

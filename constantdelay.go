@@ -54,7 +54,14 @@ func EveryWithMin(duration, minInterval time.Duration) ConstantDelaySchedule {
 // Next returns the next time this should be run.
 // For delays of 1 second or more, this rounds to the next second boundary.
 // For sub-second delays, no rounding is performed.
+//
+// If the delay is zero or negative (invalid), returns t + 1 second as a
+// safe fallback to prevent CPU spin loops in the scheduler.
 func (schedule ConstantDelaySchedule) Next(t time.Time) time.Time {
+	// Defensive: prevent CPU spin loop if delay is zero or negative
+	if schedule.Delay <= 0 {
+		return t.Add(time.Second)
+	}
 	// For sub-second intervals, don't round to second boundary
 	if schedule.Delay < time.Second {
 		return t.Add(schedule.Delay)
