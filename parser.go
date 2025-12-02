@@ -292,8 +292,9 @@ func (p Parser) Parse(spec string) (Schedule, error) {
 	// Check cache first if enabled
 	if p.cache != nil {
 		if cached, ok := p.cache.Load(spec); ok {
-			entry := cached.(cacheEntry)
-			return entry.schedule, entry.err
+			if entry, ok := cached.(cacheEntry); ok {
+				return entry.schedule, entry.err
+			}
 		}
 	}
 

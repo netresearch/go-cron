@@ -31,10 +31,10 @@ const maxIdleDuration = 100000 * time.Hour
 // O(log n) insertion/removal and O(1) access to the next entry to run.
 // An index map provides O(1) entry lookup by ID.
 type Cron struct {
-	entries    entryHeap
-	entryIndex map[EntryID]*Entry // O(1) lookup by ID
-	nameIndex  map[string]*Entry  // O(1) lookup by Name
-	chain      Chain
+	entries     entryHeap
+	entryIndex  map[EntryID]*Entry // O(1) lookup by ID
+	nameIndex   map[string]*Entry  // O(1) lookup by Name
+	chain       Chain
 	stop        chan struct{}
 	add         chan *Entry
 	remove      chan EntryID
@@ -42,18 +42,18 @@ type Cron struct {
 	entryLookup chan entryLookupRequest // O(1) single-entry lookup when running
 	nameLookup  chan nameLookupRequest  // O(1) entry lookup by name when running
 	running     bool
-	logger     Logger
-	runningMu  sync.Mutex
-	location   *time.Location
-	parser     ScheduleParser
-	nextID     EntryID
-	jobWaiter  sync.WaitGroup
-	clock      Clock
-	hooks      *ObservabilityHooks
-	maxEntries int                // 0 means unlimited
-	entryCount int64              // atomic counter for race-free limit checking
-	baseCtx    context.Context    // base context for all jobs
-	cancelCtx  context.CancelFunc // cancels baseCtx when Stop() is called
+	logger      Logger
+	runningMu   sync.Mutex
+	location    *time.Location
+	parser      ScheduleParser
+	nextID      EntryID
+	jobWaiter   sync.WaitGroup
+	clock       Clock
+	hooks       *ObservabilityHooks
+	maxEntries  int                // 0 means unlimited
+	entryCount  int64              // atomic counter for race-free limit checking
+	baseCtx     context.Context    // base context for all jobs
+	cancelCtx   context.CancelFunc // cancels baseCtx when Stop() is called
 
 	// indexDeletions tracks removals from index maps since last compaction.
 	// Go maps don't release memory when entries are deleted, so we periodically

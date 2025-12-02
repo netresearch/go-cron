@@ -67,6 +67,7 @@ func calculateBackoffDelay(attempt int, initialDelay, maxDelay time.Duration, mu
 		delay = maxDelay
 	}
 	// Apply jitter: ±10% randomization to prevent thundering herd
+	// #nosec G404 -- math/rand is appropriate for jitter; cryptographic randomness not needed
 	jitter := time.Duration(float64(delay) * jitterFraction * (2*rand.Float64() - 1))
 	return delay + jitter
 }
@@ -228,8 +229,8 @@ func RetryWithBackoff(logger Logger, maxRetries int, initialDelay, maxDelay time
 func CircuitBreaker(logger Logger, threshold int, cooldown time.Duration) JobWrapper {
 	return func(j Job) Job {
 		var (
-			failures     int64 // atomic: current consecutive failure count
-			lastFailNano int64 // atomic: unix nano of last failure
+			failures     int64      // atomic: current consecutive failure count
+			lastFailNano int64      // atomic: unix nano of last failure
 			mu           sync.Mutex // only for state transitions (not hot path)
 		)
 
