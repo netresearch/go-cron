@@ -763,7 +763,7 @@ next := schedule.Next(time.Now())
 ### MaxSpecLength
 
 ```go
-const MaxSpecLength = 256
+const MaxSpecLength = 1024
 ```
 
 MaxSpecLength is the maximum allowed length for a cron spec string.

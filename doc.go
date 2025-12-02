@@ -216,6 +216,31 @@ Best practices for DST-sensitive schedules:
   - Consider using @every intervals for tasks where exact wall-clock time is less important
   - Monitor job execution times during DST transition periods
 
+# Error Handling
+
+Jobs in go-cron signal failure by panicking rather than returning errors. This design:
+
+  - Keeps the Job interface simple (Run() has no return value)
+  - Enables consistent recovery and retry behavior via wrapper chains
+  - Allows adding retry/circuit-breaker logic without modifying job code
+  - Matches Go's convention of panicking for unrecoverable errors
+
+Best practices:
+
+  - Use panic() for transient failures that should trigger retries
+  - Use log-and-continue for errors that shouldn't affect the next run
+  - Always wrap jobs with Recover() to prevent scheduler crashes
+  - Combine with RetryWithBackoff for automatic retry of transient failures
+  - Use CircuitBreaker to prevent hammering failing external services
+
+Error flow through wrapper chain:
+
+	Recover → CircuitBreaker → RetryWithBackoff → Job
+	   ↑           ↑                 ↑              │
+	   │           │                 └── catches ───┤ (panic)
+	   │           └── tracks/opens ────────────────┤ (panic)
+	   └── logs/swallows ───────────────────────────┘ (panic)
+
 # Job Wrappers
 
 A Cron runner may be configured with a chain of job wrappers to add
@@ -385,24 +410,23 @@ concurrent additions by the number of in-flight ScheduleJob calls.
 ObservabilityHooks provide integration points for metrics, tracing, and monitoring:
 
 	hooks := cron.ObservabilityHooks{
-		OnJobScheduled: func(entry cron.Entry, runTime time.Time) {
-			// Called when a job is scheduled or rescheduled
-			log.Printf("Job %d scheduled for %v", entry.ID, runTime)
+		OnSchedule: func(entryID cron.EntryID, name string, nextRun time.Time) {
+			// Called when a job's next execution time is calculated
+			log.Printf("Job %d (%s) scheduled for %v", entryID, name, nextRun)
 		},
-		OnJobRun: func(entry cron.Entry, runTime time.Time) {
+		OnJobStart: func(entryID cron.EntryID, name string, scheduledTime time.Time) {
 			// Called just before a job starts running
-			metrics.IncrCounter("cron.job.started", "job", entry.Name)
+			metrics.IncrCounter("cron.job.started", "job", name)
 		},
-		OnJobCompleted: func(entry cron.Entry, runTime time.Time, duration time.Duration) {
+		OnJobComplete: func(entryID cron.EntryID, name string, duration time.Duration, recovered any) {
 			// Called after a job completes (successfully or with panic)
-			metrics.RecordDuration("cron.job.duration", duration, "job", entry.Name)
-		},
-		OnJobPanicked: func(entry cron.Entry, runTime time.Time, panicVal any) {
-			// Called when a job panics
-			metrics.IncrCounter("cron.job.panic", "job", entry.Name)
+			metrics.RecordDuration("cron.job.duration", duration, "job", name)
+			if recovered != nil {
+				metrics.IncrCounter("cron.job.panic", "job", name)
+			}
 		},
 	}
-	c := cron.New(cron.WithObservabilityHooks(hooks))
+	c := cron.New(cron.WithObservability(hooks))
 
 # Testing with FakeClock
 

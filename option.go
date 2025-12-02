@@ -65,7 +65,8 @@ func WithClock(clock Clock) Option {
 }
 
 // WithObservability configures observability hooks for monitoring cron operations.
-// Hooks are called synchronously at various points during job execution lifecycle.
+// Hooks are called asynchronously in separate goroutines to prevent slow callbacks
+// from blocking the scheduler. This means callback execution order is not guaranteed.
 //
 // All hook callbacks are optional; nil callbacks are safely ignored.
 //
