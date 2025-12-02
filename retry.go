@@ -6,6 +6,7 @@ import (
 	"math/rand/v2"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -227,19 +228,19 @@ func RetryWithBackoff(logger Logger, maxRetries int, initialDelay, maxDelay time
 func CircuitBreaker(logger Logger, threshold int, cooldown time.Duration) JobWrapper {
 	return func(j Job) Job {
 		var (
-			failures   int
-			lastFailAt time.Time
-			mu         sync.Mutex
+			failures     int64 // atomic: current consecutive failure count
+			lastFailNano int64 // atomic: unix nano of last failure
+			mu           sync.Mutex // only for state transitions (not hot path)
 		)
 
 		return FuncJob(func() {
-			mu.Lock()
-			currentFailures := failures
-			timeSinceLastFail := time.Since(lastFailAt)
+			// Fast path: check circuit state with atomics (no lock)
+			currentFailures := int(atomic.LoadInt64(&failures))
+			lastFail := atomic.LoadInt64(&lastFailNano)
+			timeSinceLastFail := time.Since(time.Unix(0, lastFail))
 
 			// Check if circuit is open
 			if currentFailures >= threshold && timeSinceLastFail < cooldown {
-				mu.Unlock()
 				remaining := cooldown - timeSinceLastFail
 				logger.Info("circuit breaker open",
 					"failures", currentFailures,
@@ -249,8 +250,6 @@ func CircuitBreaker(logger Logger, threshold int, cooldown time.Duration) JobWra
 
 			// Entering half-open state if recovering from open
 			halfOpen := currentFailures >= threshold
-			mu.Unlock()
-
 			if halfOpen {
 				logger.Info("circuit breaker half-open", "attempting_recovery", true)
 			}
@@ -258,11 +257,11 @@ func CircuitBreaker(logger Logger, threshold int, cooldown time.Duration) JobWra
 			// Execute with panic recovery using consolidated helper
 			panicValue := safeExecute(j.Run)
 
+			// State transition: use mutex to ensure consistency
 			mu.Lock()
 			if panicValue != nil {
-				failures++
-				lastFailAt = time.Now()
-				currentFailures = failures
+				newFailures := atomic.AddInt64(&failures, 1)
+				atomic.StoreInt64(&lastFailNano, time.Now().UnixNano())
 				mu.Unlock()
 
 				// Extract original value and stack for logging
@@ -277,29 +276,29 @@ func CircuitBreaker(logger Logger, threshold int, cooldown time.Duration) JobWra
 					err = fmt.Errorf("%v", pVal)
 				}
 
-				if currentFailures == threshold {
+				if int(newFailures) == threshold {
 					if stack != "" {
 						logger.Error(err, "circuit breaker opened",
-							"failures", currentFailures, "cooldown", cooldown, "stack", stack)
+							"failures", newFailures, "cooldown", cooldown, "stack", stack)
 					} else {
 						logger.Error(err, "circuit breaker opened",
-							"failures", currentFailures, "cooldown", cooldown)
+							"failures", newFailures, "cooldown", cooldown)
 					}
 				} else {
 					if stack != "" {
 						logger.Error(err, "circuit breaker recorded failure",
-							"failures", currentFailures, "threshold", threshold, "stack", stack)
+							"failures", newFailures, "threshold", threshold, "stack", stack)
 					} else {
 						logger.Error(err, "circuit breaker recorded failure",
-							"failures", currentFailures, "threshold", threshold)
+							"failures", newFailures, "threshold", threshold)
 					}
 				}
 				panic(panicValue) // Re-panic
 			}
 
-			// Success - reset failures
-			wasOpen := failures >= threshold
-			failures = 0
+			// Success - reset failures atomically
+			wasOpen := atomic.LoadInt64(&failures) >= int64(threshold)
+			atomic.StoreInt64(&failures, 0)
 			mu.Unlock()
 
 			if wasOpen {

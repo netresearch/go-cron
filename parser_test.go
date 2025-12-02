@@ -511,6 +511,86 @@ func TestMustNewParser(t *testing.T) {
 	})
 }
 
+func TestParserWithCache(t *testing.T) {
+	t.Run("returns same schedule for repeated parse", func(t *testing.T) {
+		parser := NewParser(Minute | Hour | Dom | Month | Dow | Descriptor).WithCache()
+
+		sched1, err1 := parser.Parse("0 * * * *")
+		if err1 != nil {
+			t.Fatalf("first parse failed: %v", err1)
+		}
+
+		sched2, err2 := parser.Parse("0 * * * *")
+		if err2 != nil {
+			t.Fatalf("second parse failed: %v", err2)
+		}
+
+		// Both should return the exact same schedule pointer (cached)
+		if sched1 != sched2 {
+			t.Error("cached parser should return same schedule instance")
+		}
+	})
+
+	t.Run("caches errors too", func(t *testing.T) {
+		parser := NewParser(Minute | Hour | Dom | Month | Dow).WithCache()
+
+		_, err1 := parser.Parse("invalid spec")
+		if err1 == nil {
+			t.Fatal("first parse should fail")
+		}
+
+		_, err2 := parser.Parse("invalid spec")
+		if err2 == nil {
+			t.Fatal("second parse should fail")
+		}
+
+		// Error messages should match (same cached error)
+		if err1.Error() != err2.Error() {
+			t.Errorf("cached error mismatch: %v vs %v", err1, err2)
+		}
+	})
+
+	t.Run("different specs return different schedules", func(t *testing.T) {
+		parser := NewParser(Minute | Hour | Dom | Month | Dow | Descriptor).WithCache()
+
+		sched1, _ := parser.Parse("0 * * * *")
+		sched2, _ := parser.Parse("30 * * * *")
+
+		if sched1 == sched2 {
+			t.Error("different specs should return different schedules")
+		}
+	})
+
+	t.Run("parser without cache returns new schedules", func(t *testing.T) {
+		parser := NewParser(Minute | Hour | Dom | Month | Dow | Descriptor)
+
+		sched1, _ := parser.Parse("0 * * * *")
+		sched2, _ := parser.Parse("0 * * * *")
+
+		// Without cache, each parse creates a new schedule
+		if sched1 == sched2 {
+			t.Error("non-cached parser should return new schedule instances")
+		}
+	})
+
+	t.Run("concurrent access is safe", func(t *testing.T) {
+		parser := NewParser(Minute | Hour | Dom | Month | Dow | Descriptor).WithCache()
+		specs := []string{"0 * * * *", "30 * * * *", "@hourly", "@daily"}
+
+		done := make(chan bool, 100)
+		for i := 0; i < 100; i++ {
+			go func(idx int) {
+				_, _ = parser.Parse(specs[idx%len(specs)])
+				done <- true
+			}(i)
+		}
+
+		for i := 0; i < 100; i++ {
+			<-done
+		}
+	})
+}
+
 func every5min(loc *time.Location) *SpecSchedule {
 	return &SpecSchedule{1 << 0, 1 << 5, all(hours), all(dom), all(months), all(dow), loc, 0}
 }

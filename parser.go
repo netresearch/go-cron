@@ -5,6 +5,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -50,6 +51,13 @@ type Parser struct {
 	options          ParseOption
 	minEveryInterval time.Duration
 	maxSearchYears   int
+	cache            *sync.Map // optional cache: spec string -> cacheEntry
+}
+
+// cacheEntry holds a cached parse result.
+type cacheEntry struct {
+	schedule Schedule
+	err      error
 }
 
 // ErrNoFields is returned when no fields or Descriptor are configured.
@@ -212,6 +220,32 @@ func (p Parser) WithMaxSearchYears(years int) Parser {
 	return p
 }
 
+// WithCache returns a new Parser with caching enabled for parsed schedules.
+// When caching is enabled, repeated calls to Parse with the same spec string
+// will return the cached result instead of re-parsing.
+//
+// Caching is particularly beneficial when:
+//   - The same cron expressions are parsed repeatedly
+//   - Multiple cron instances share the same parser
+//   - Configuration is reloaded frequently
+//
+// The cache is thread-safe and grows unbounded. For applications with many
+// unique spec strings, consider using a single shared parser instance.
+//
+// Example:
+//
+//	// Create a caching parser for improved performance
+//	p := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor).
+//	    WithCache()
+//
+//	// Subsequent parses of the same spec return cached results
+//	sched1, _ := p.Parse("0 * * * *") // parsed
+//	sched2, _ := p.Parse("0 * * * *") // cached (same reference)
+func (p Parser) WithCache() Parser {
+	p.cache = &sync.Map{}
+	return p
+}
+
 // MaxSpecLength is the maximum allowed length for a cron spec string.
 // This limit prevents potential resource exhaustion from extremely long inputs.
 const MaxSpecLength = 1024
@@ -251,7 +285,30 @@ func parseTimezone(spec string) (*time.Location, string, error) {
 // Parse returns a new crontab schedule representing the given spec.
 // It returns a descriptive error if the spec is not valid.
 // It accepts crontab specs and features configured by NewParser.
+//
+// If caching is enabled via WithCache(), repeated calls with the same spec
+// will return the cached result.
 func (p Parser) Parse(spec string) (Schedule, error) {
+	// Check cache first if enabled
+	if p.cache != nil {
+		if cached, ok := p.cache.Load(spec); ok {
+			entry := cached.(cacheEntry)
+			return entry.schedule, entry.err
+		}
+	}
+
+	schedule, err := p.parse(spec)
+
+	// Store in cache if enabled
+	if p.cache != nil {
+		p.cache.Store(spec, cacheEntry{schedule: schedule, err: err})
+	}
+
+	return schedule, err
+}
+
+// parse is the internal parsing logic, called by Parse.
+func (p Parser) parse(spec string) (Schedule, error) {
 	if len(spec) == 0 {
 		return nil, fmt.Errorf("empty spec string")
 	}
