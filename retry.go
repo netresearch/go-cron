@@ -139,13 +139,6 @@ func extractPanicValueAndStack(p any) (value any, stack string) {
 	return p, ""
 }
 
-// panicToError converts a panic value to an error.
-func panicToError(v any) error {
-	if err, ok := v.(error); ok {
-		return err
-	}
-	return fmt.Errorf("%v", v)
-}
 
 // logErrorWithOptionalStack logs an error with optional stack trace.
 func logErrorWithOptionalStack(logger Logger, err error, msg, stack string, keysAndValues ...any) {
@@ -205,7 +198,7 @@ func logRetrySuccess(logger Logger, attempt int) {
 // logRetryExhausted logs when all retry attempts are exhausted.
 func logRetryExhausted(logger Logger, lastPanic any, maxAttempts int) {
 	panicVal, stack := extractPanicValueAndStack(lastPanic)
-	err := panicToError(panicVal)
+	err := toError(panicVal)
 	logErrorWithOptionalStack(logger, err, "retry exhausted", stack, "attempts", maxAttempts)
 }
 
@@ -296,7 +289,7 @@ func (s *circuitState) resetOnSuccess(threshold int) bool {
 // logCircuitFailure logs a circuit breaker failure with appropriate message.
 func logCircuitFailure(logger Logger, panicValue any, newFailures int64, threshold int, cooldown time.Duration) {
 	panicVal, stack := extractPanicValueAndStack(panicValue)
-	err := panicToError(panicVal)
+	err := toError(panicVal)
 
 	if int(newFailures) == threshold {
 		logErrorWithOptionalStack(logger, err, "circuit breaker opened",
