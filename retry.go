@@ -130,59 +130,83 @@ func runWithRecovery(j Job) any {
 	return safeExecute(j.Run)
 }
 
+// extractPanicValueAndStack extracts the original panic value and stack from a PanicWithStack.
+// If the value is not a PanicWithStack, returns the value directly with empty stack.
+func extractPanicValueAndStack(p any) (value any, stack string) {
+	if pws, ok := p.(*PanicWithStack); ok {
+		return pws.Value, string(pws.Stack)
+	}
+	return p, ""
+}
+
+// panicToError converts a panic value to an error.
+func panicToError(v any) error {
+	if err, ok := v.(error); ok {
+		return err
+	}
+	return fmt.Errorf("%v", v)
+}
+
+// logErrorWithOptionalStack logs an error with optional stack trace.
+func logErrorWithOptionalStack(logger Logger, err error, msg, stack string, keysAndValues ...any) {
+	if stack != "" {
+		keysAndValues = append(keysAndValues, "stack", stack)
+	}
+	logger.Error(err, msg, keysAndValues...)
+}
+
+// computeMaxAttempts converts maxRetries to maxAttempts.
+// maxRetries: 0 = 1 attempt, >0 = N+1 attempts, -1 = unlimited (returns 0).
+func computeMaxAttempts(maxRetries int) int {
+	if maxRetries < 0 {
+		return 0 // unlimited
+	}
+	return maxRetries + 1
+}
+
 func RetryWithBackoff(logger Logger, maxRetries int, initialDelay, maxDelay time.Duration, multiplier float64) JobWrapper {
 	return func(j Job) Job {
 		return FuncJob(func() {
-			// maxRetries semantics:
-			//   0  = no retries (1 execution total) - safe default
-			//   >0 = retry up to N times (N+1 total attempts)
-			//   -1 = unlimited retries (explicit opt-in)
-			maxAttempts := maxRetries + 1 // maxRetries=3 means 4 total attempts (1 initial + 3 retries)
-			if maxRetries < 0 {
-				maxAttempts = 0 // unlimited (loop condition becomes: 0 == 0 || attempt <= 0 → always true)
-			}
-
+			maxAttempts := computeMaxAttempts(maxRetries)
 			var lastPanic any
+
 			for attempt := 1; maxAttempts == 0 || attempt <= maxAttempts; attempt++ {
-				if attempt > 1 {
-					delay := calculateBackoffDelay(attempt, initialDelay, maxDelay, multiplier)
-					// Extract original panic value for logging
-					panicVal := lastPanic
-					if pws, ok := lastPanic.(*PanicWithStack); ok {
-						panicVal = pws.Value
-					}
-					logger.Info("retry", "attempt", attempt, "delay", delay, "last_panic", panicVal)
-					time.Sleep(delay)
-				}
-
-				lastPanic = runWithRecovery(j)
+				lastPanic = executeRetryAttempt(j, logger, attempt, lastPanic, initialDelay, maxDelay, multiplier)
 				if lastPanic == nil {
-					if attempt > 1 {
-						logger.Info("retry succeeded", "attempt", attempt)
-					}
-					return // Success
+					logRetrySuccess(logger, attempt)
+					return
 				}
 			}
 
-			// All retries exhausted - log with stack trace if available
-			panicVal := lastPanic
-			var stack string
-			if pws, ok := lastPanic.(*PanicWithStack); ok {
-				panicVal = pws.Value
-				stack = string(pws.Stack)
-			}
-			err, ok := panicVal.(error)
-			if !ok {
-				err = fmt.Errorf("%v", panicVal)
-			}
-			if stack != "" {
-				logger.Error(err, "retry exhausted", "attempts", maxAttempts, "stack", stack)
-			} else {
-				logger.Error(err, "retry exhausted", "attempts", maxAttempts)
-			}
-			panic(lastPanic) // Re-panic for outer wrappers to handle
+			logRetryExhausted(logger, lastPanic, maxAttempts)
+			panic(lastPanic)
 		})
 	}
+}
+
+// executeRetryAttempt runs a single retry attempt with optional delay.
+func executeRetryAttempt(j Job, logger Logger, attempt int, lastPanic any, initialDelay, maxDelay time.Duration, multiplier float64) any {
+	if attempt > 1 {
+		delay := calculateBackoffDelay(attempt, initialDelay, maxDelay, multiplier)
+		panicVal, _ := extractPanicValueAndStack(lastPanic)
+		logger.Info("retry", "attempt", attempt, "delay", delay, "last_panic", panicVal)
+		time.Sleep(delay)
+	}
+	return runWithRecovery(j)
+}
+
+// logRetrySuccess logs success if this was a retry attempt.
+func logRetrySuccess(logger Logger, attempt int) {
+	if attempt > 1 {
+		logger.Info("retry succeeded", "attempt", attempt)
+	}
+}
+
+// logRetryExhausted logs when all retry attempts are exhausted.
+func logRetryExhausted(logger Logger, lastPanic any, maxAttempts int) {
+	panicVal, stack := extractPanicValueAndStack(lastPanic)
+	err := panicToError(panicVal)
+	logErrorWithOptionalStack(logger, err, "retry exhausted", stack, "attempts", maxAttempts)
 }
 
 // CircuitBreaker wraps a job to stop execution after consecutive failures.
@@ -226,83 +250,93 @@ func RetryWithBackoff(logger Logger, maxRetries int, initialDelay, maxDelay time
 //	                      |
 //	                      v
 //	                    OPEN
+//
+// circuitState holds the shared state for a circuit breaker.
+type circuitState struct {
+	failures     int64      // atomic: current consecutive failure count
+	lastFailNano int64      // atomic: unix nano of last failure
+	mu           sync.Mutex // only for state transitions
+}
+
+// isOpen returns true if the circuit is open (in cooldown period).
+func (s *circuitState) isOpen(threshold int, cooldown time.Duration) (bool, time.Duration) {
+	currentFailures := int(atomic.LoadInt64(&s.failures))
+	lastFail := atomic.LoadInt64(&s.lastFailNano)
+	timeSinceLastFail := time.Since(time.Unix(0, lastFail))
+
+	if currentFailures >= threshold && timeSinceLastFail < cooldown {
+		return true, cooldown - timeSinceLastFail
+	}
+	return false, 0
+}
+
+// isHalfOpen returns true if the circuit is in half-open state (ready to attempt recovery).
+func (s *circuitState) isHalfOpen(threshold int) bool {
+	return int(atomic.LoadInt64(&s.failures)) >= threshold
+}
+
+// recordFailure increments the failure counter and returns the new count.
+func (s *circuitState) recordFailure() int64 {
+	s.mu.Lock()
+	newFailures := atomic.AddInt64(&s.failures, 1)
+	atomic.StoreInt64(&s.lastFailNano, time.Now().UnixNano())
+	s.mu.Unlock()
+	return newFailures
+}
+
+// resetOnSuccess resets the circuit if successful, returning true if it was previously open.
+func (s *circuitState) resetOnSuccess(threshold int) bool {
+	s.mu.Lock()
+	wasOpen := atomic.LoadInt64(&s.failures) >= int64(threshold)
+	atomic.StoreInt64(&s.failures, 0)
+	s.mu.Unlock()
+	return wasOpen
+}
+
+// logCircuitFailure logs a circuit breaker failure with appropriate message.
+func logCircuitFailure(logger Logger, panicValue any, newFailures int64, threshold int, cooldown time.Duration) {
+	panicVal, stack := extractPanicValueAndStack(panicValue)
+	err := panicToError(panicVal)
+
+	if int(newFailures) == threshold {
+		logErrorWithOptionalStack(logger, err, "circuit breaker opened",
+			stack, "failures", newFailures, "cooldown", cooldown)
+	} else {
+		logErrorWithOptionalStack(logger, err, "circuit breaker recorded failure",
+			stack, "failures", newFailures, "threshold", threshold)
+	}
+}
+
 func CircuitBreaker(logger Logger, threshold int, cooldown time.Duration) JobWrapper {
 	return func(j Job) Job {
-		var (
-			failures     int64      // atomic: current consecutive failure count
-			lastFailNano int64      // atomic: unix nano of last failure
-			mu           sync.Mutex // only for state transitions (not hot path)
-		)
+		state := &circuitState{}
 
 		return FuncJob(func() {
-			// Fast path: check circuit state with atomics (no lock)
-			currentFailures := int(atomic.LoadInt64(&failures))
-			lastFail := atomic.LoadInt64(&lastFailNano)
-			timeSinceLastFail := time.Since(time.Unix(0, lastFail))
-
 			// Check if circuit is open
-			if currentFailures >= threshold && timeSinceLastFail < cooldown {
-				remaining := cooldown - timeSinceLastFail
+			if open, remaining := state.isOpen(threshold, cooldown); open {
 				logger.Info("circuit breaker open",
-					"failures", currentFailures,
+					"failures", atomic.LoadInt64(&state.failures),
 					"cooldown_remaining", remaining.Round(time.Second))
-				return // Skip execution
+				return
 			}
 
-			// Entering half-open state if recovering from open
-			halfOpen := currentFailures >= threshold
-			if halfOpen {
+			// Log half-open state
+			if state.isHalfOpen(threshold) {
 				logger.Info("circuit breaker half-open", "attempting_recovery", true)
 			}
 
-			// Execute with panic recovery using consolidated helper
+			// Execute job
 			panicValue := safeExecute(j.Run)
 
-			// State transition: use mutex to ensure consistency
-			mu.Lock()
+			// Handle failure
 			if panicValue != nil {
-				newFailures := atomic.AddInt64(&failures, 1)
-				atomic.StoreInt64(&lastFailNano, time.Now().UnixNano())
-				mu.Unlock()
-
-				// Extract original value and stack for logging
-				pVal := panicValue
-				var stack string
-				if pws, ok := panicValue.(*PanicWithStack); ok {
-					pVal = pws.Value
-					stack = string(pws.Stack)
-				}
-				err, ok := pVal.(error)
-				if !ok {
-					err = fmt.Errorf("%v", pVal)
-				}
-
-				if int(newFailures) == threshold {
-					if stack != "" {
-						logger.Error(err, "circuit breaker opened",
-							"failures", newFailures, "cooldown", cooldown, "stack", stack)
-					} else {
-						logger.Error(err, "circuit breaker opened",
-							"failures", newFailures, "cooldown", cooldown)
-					}
-				} else {
-					if stack != "" {
-						logger.Error(err, "circuit breaker recorded failure",
-							"failures", newFailures, "threshold", threshold, "stack", stack)
-					} else {
-						logger.Error(err, "circuit breaker recorded failure",
-							"failures", newFailures, "threshold", threshold)
-					}
-				}
-				panic(panicValue) // Re-panic
+				newFailures := state.recordFailure()
+				logCircuitFailure(logger, panicValue, newFailures, threshold, cooldown)
+				panic(panicValue)
 			}
 
-			// Success - reset failures atomically
-			wasOpen := atomic.LoadInt64(&failures) >= int64(threshold)
-			atomic.StoreInt64(&failures, 0)
-			mu.Unlock()
-
-			if wasOpen {
+			// Handle success
+			if state.resetOnSuccess(threshold) {
 				logger.Info("circuit breaker closed", "recovered", true)
 			}
 		})

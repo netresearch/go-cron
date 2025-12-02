@@ -499,6 +499,24 @@ func (c *Cron) handleTimeBackwards(now time.Time) {
 	}
 }
 
+// processDueEntries runs all entries whose scheduled time has passed.
+// Entries are processed in order from the heap and rescheduled for their next run.
+func (c *Cron) processDueEntries(now time.Time) {
+	for c.entries.Peek() != nil {
+		e := c.entries.Peek()
+		if e.Next.After(now) || e.Next.IsZero() {
+			break
+		}
+		scheduledTime := e.Next
+		c.startJob(e.ID, e.Job, e.WrappedJob, scheduledTime)
+		e.Prev = e.Next
+		e.Next = e.Schedule.Next(now)
+		c.hooks.callOnSchedule(e.ID, e.Job, e.Next)
+		c.entries.Update(e) // Re-heapify after updating Next time
+		c.logger.Info("run", "now", now, "entry", e.ID, "next", e.Next)
+	}
+}
+
 func (c *Cron) run() {
 	c.logger.Info("start")
 
@@ -533,20 +551,7 @@ func (c *Cron) run() {
 				c.handleTimeBackwards(now)
 
 				// Run every entry whose next time was less than now.
-				// Keep popping from heap while entries are due.
-				for c.entries.Peek() != nil {
-					e := c.entries.Peek()
-					if e.Next.After(now) || e.Next.IsZero() {
-						break
-					}
-					scheduledTime := e.Next
-					c.startJob(e.ID, e.Job, e.WrappedJob, scheduledTime)
-					e.Prev = e.Next
-					e.Next = e.Schedule.Next(now)
-					c.hooks.callOnSchedule(e.ID, e.Job, e.Next)
-					c.entries.Update(e) // Re-heapify after updating Next time
-					c.logger.Info("run", "now", now, "entry", e.ID, "next", e.Next)
-				}
+				c.processDueEntries(now)
 
 			case newEntry := <-c.add:
 				timer.Stop()
