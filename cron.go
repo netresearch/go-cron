@@ -357,10 +357,19 @@ func (c *Cron) ScheduleJob(schedule Schedule, cmd Job, opts ...JobOption) (Entry
 	c.runningMu.Lock()
 	defer c.runningMu.Unlock()
 
-	// Check entry limit using atomic counter for race-free checking
-	if c.maxEntries > 0 && int(atomic.LoadInt64(&c.entryCount)) >= c.maxEntries {
+	// Atomically check and increment entry count to prevent race conditions.
+	// Must be done before any other work to ensure we can decrement on error.
+	if !c.tryIncrementEntryCount() {
 		return 0, ErrMaxEntriesReached
 	}
+	// Track that we've incremented; must decrement on any error path
+	countIncremented := true
+	defer func() {
+		if countIncremented {
+			// Error path - decrement the count we incremented
+			atomic.AddInt64(&c.entryCount, -1)
+		}
+	}()
 
 	c.nextID++
 	if c.nextID == 0 {
@@ -392,10 +401,11 @@ func (c *Cron) ScheduleJob(schedule Schedule, cmd Job, opts ...JobOption) (Entry
 	if !c.running {
 		heap.Push(&c.entries, entry)
 		c.entryIndex[entry.ID] = entry
-		atomic.AddInt64(&c.entryCount, 1)
 	} else {
 		c.add <- entry
 	}
+	// Success - don't decrement count in deferred function
+	countIncremented = false
 	return entry.ID, nil
 }
 
@@ -544,9 +554,8 @@ func (c *Cron) run() {
 				newEntry.Next = newEntry.Schedule.Next(now)
 				heap.Push(&c.entries, newEntry)
 				c.entryIndex[newEntry.ID] = newEntry
-				// Note: nameIndex already updated by ScheduleJob (while holding runningMu)
-				// to prevent TOCTOU race in duplicate name detection
-				atomic.AddInt64(&c.entryCount, 1)
+				// Note: nameIndex and entryCount already updated by ScheduleJob
+				// (while holding runningMu) to prevent TOCTOU races
 				c.hooks.callOnSchedule(newEntry.ID, newEntry.Job, newEntry.Next)
 				c.logger.Info("added", "now", now, "entry", newEntry.ID, "next", newEntry.Next)
 
@@ -729,6 +738,27 @@ func sortEntriesByTime(entries []Entry) {
 		}
 		return entries[i].Next.Before(entries[j].Next)
 	})
+}
+
+// tryIncrementEntryCount atomically checks and increments the entry count.
+// Returns true if the increment was successful (under limit or unlimited),
+// false if the limit has been reached.
+// This uses Compare-And-Swap to prevent race conditions where multiple
+// concurrent ScheduleJob calls could exceed the maxEntries limit.
+func (c *Cron) tryIncrementEntryCount() bool {
+	if c.maxEntries <= 0 {
+		return true // unlimited
+	}
+	for {
+		current := atomic.LoadInt64(&c.entryCount)
+		if int(current) >= c.maxEntries {
+			return false
+		}
+		if atomic.CompareAndSwapInt64(&c.entryCount, current, current+1) {
+			return true
+		}
+		// CAS failed, another goroutine modified count - retry
+	}
 }
 
 // removeEntry removes the entry with the given ID from the scheduler.
