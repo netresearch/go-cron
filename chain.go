@@ -71,6 +71,45 @@ func WithLogLevel(level LogLevel) RecoverOption {
 	}
 }
 
+// panicInfo holds extracted information from a recovered panic value.
+type panicInfo struct {
+	err       error
+	stack     string
+	panicType string
+}
+
+// extractPanicInfo extracts error, stack trace, and type information from a panic value.
+// It handles both PanicWithStack (from safeExecute) and direct panic values.
+func extractPanicInfo(r any) panicInfo {
+	// Handle PanicWithStack from safeExecute (preserves original stack)
+	if pws, ok := r.(*PanicWithStack); ok {
+		err := toError(pws.Value)
+		return panicInfo{
+			err:       err,
+			stack:     "...\n" + string(pws.Stack),
+			panicType: fmt.Sprintf("%T", pws.Value),
+		}
+	}
+
+	// Direct panic - capture current stack
+	const size = 64 << 10
+	buf := make([]byte, size)
+	buf = buf[:runtime.Stack(buf, false)]
+	return panicInfo{
+		err:       toError(r),
+		stack:     "...\n" + string(buf),
+		panicType: fmt.Sprintf("%T", r),
+	}
+}
+
+// toError converts a panic value to an error.
+func toError(v any) error {
+	if err, ok := v.(error); ok {
+		return err
+	}
+	return fmt.Errorf("%v", v)
+}
+
 // Recover panics in wrapped jobs and log them with the provided logger.
 //
 // By default, panics are logged at Error level. Use WithLogLevel to
@@ -98,40 +137,11 @@ func Recover(logger Logger, opts ...RecoverOption) JobWrapper {
 		return FuncJob(func() {
 			defer func() {
 				if r := recover(); r != nil {
-					var (
-						err       error
-						stack     string
-						panicType string
-					)
-
-					// Handle PanicWithStack from safeExecute (preserves original stack)
-					if pws, ok := r.(*PanicWithStack); ok {
-						if e, ok := pws.Value.(error); ok {
-							err = e
-						} else {
-							err = fmt.Errorf("%v", pws.Value)
-						}
-						stack = "...\n" + string(pws.Stack)
-						panicType = fmt.Sprintf("%T", pws.Value)
-					} else {
-						// Direct panic - capture current stack
-						const size = 64 << 10
-						buf := make([]byte, size)
-						buf = buf[:runtime.Stack(buf, false)]
-						if e, ok := r.(error); ok {
-							err = e
-						} else {
-							err = fmt.Errorf("%v", r)
-						}
-						stack = "...\n" + string(buf)
-						panicType = fmt.Sprintf("%T", r)
-					}
-
+					info := extractPanicInfo(r)
 					if config.logLevel == LogLevelInfo {
-						// Pass error as structured key-value for Info level
-						logger.Info("panic recovered", "error", err, "panic_type", panicType, "stack", stack)
+						logger.Info("panic recovered", "error", info.err, "panic_type", info.panicType, "stack", info.stack)
 					} else {
-						logger.Error(err, "panic", "panic_type", panicType, "stack", stack)
+						logger.Error(info.err, "panic", "panic_type", info.panicType, "stack", info.stack)
 					}
 				}
 			}()
