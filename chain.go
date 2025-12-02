@@ -98,20 +98,40 @@ func Recover(logger Logger, opts ...RecoverOption) JobWrapper {
 		return FuncJob(func() {
 			defer func() {
 				if r := recover(); r != nil {
-					const size = 64 << 10
-					buf := make([]byte, size)
-					buf = buf[:runtime.Stack(buf, false)]
-					err, ok := r.(error)
-					if !ok {
-						err = fmt.Errorf("%v", r)
+					var (
+						err       error
+						stack     string
+						panicType string
+					)
+
+					// Handle PanicWithStack from safeExecute (preserves original stack)
+					if pws, ok := r.(*PanicWithStack); ok {
+						if e, ok := pws.Value.(error); ok {
+							err = e
+						} else {
+							err = fmt.Errorf("%v", pws.Value)
+						}
+						stack = "...\n" + string(pws.Stack)
+						panicType = fmt.Sprintf("%T", pws.Value)
+					} else {
+						// Direct panic - capture current stack
+						const size = 64 << 10
+						buf := make([]byte, size)
+						buf = buf[:runtime.Stack(buf, false)]
+						if e, ok := r.(error); ok {
+							err = e
+						} else {
+							err = fmt.Errorf("%v", r)
+						}
+						stack = "...\n" + string(buf)
+						panicType = fmt.Sprintf("%T", r)
 					}
-					stack := "...\n" + string(buf)
 
 					if config.logLevel == LogLevelInfo {
 						// Pass error as structured key-value for Info level
-						logger.Info("panic recovered", "error", err, "stack", stack)
+						logger.Info("panic recovered", "error", err, "panic_type", panicType, "stack", stack)
 					} else {
-						logger.Error(err, "panic", "stack", stack)
+						logger.Error(err, "panic", "panic_type", panicType, "stack", stack)
 					}
 				}
 			}()
@@ -274,6 +294,12 @@ func TimeoutWithContext(logger Logger, timeout time.Duration) JobWrapper {
 	}
 }
 
+// cleanupTimeout is the grace period for jobs to finish after context cancellation.
+// This prevents TimeoutWithContext from blocking indefinitely if a job ignores
+// the context. After this timeout, the wrapper returns and the job goroutine
+// is abandoned (same behavior as the non-context Timeout wrapper).
+const cleanupTimeout = 5 * time.Second
+
 // timeoutContextJob implements JobWithContext for the TimeoutWithContext wrapper.
 type timeoutContextJob struct {
 	inner   Job
@@ -315,11 +341,20 @@ func (t *timeoutContextJob) RunWithContext(ctx context.Context) {
 		if ctx.Err() == context.DeadlineExceeded {
 			t.logger.Error(fmt.Errorf("job exceeded timeout of %v", t.timeout), "timeout", "duration", t.timeout)
 		}
-		// Context canceled - job may still be running if it doesn't check context
-		// Wait for completion to avoid goroutine leaks if job respects context
-		<-done
-		if panicVal != nil {
-			panic(panicVal)
+		// Context canceled - give job a grace period to clean up.
+		// If it doesn't finish, abandon it (same as Timeout wrapper behavior).
+		cleanupTimer := time.NewTimer(cleanupTimeout)
+		defer cleanupTimer.Stop()
+
+		select {
+		case <-done:
+			// Job finished within grace period
+			if panicVal != nil {
+				panic(panicVal)
+			}
+		case <-cleanupTimer.C:
+			// Job didn't finish - abandon it to prevent indefinite blocking
+			t.logger.Info("job abandoned", "timeout", t.timeout, "cleanup_timeout", cleanupTimeout)
 		}
 	}
 }

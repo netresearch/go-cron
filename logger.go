@@ -19,42 +19,42 @@ var DiscardLogger = PrintfLogger(log.New(io.Discard, "", 0))
 // can be plugged in. It is a subset of the github.com/go-logr/logr interface.
 type Logger interface {
 	// Info logs routine messages about cron's operation.
-	Info(msg string, keysAndValues ...interface{})
+	Info(msg string, keysAndValues ...any)
 	// Error logs an error condition.
-	Error(err error, msg string, keysAndValues ...interface{})
+	Error(err error, msg string, keysAndValues ...any)
 }
 
 // PrintfLogger wraps a Printf-based logger (such as the standard library "log")
 // into an implementation of the Logger interface which logs errors only.
-func PrintfLogger(l interface{ Printf(string, ...interface{}) }) Logger {
+func PrintfLogger(l interface{ Printf(string, ...any) }) Logger {
 	return printfLogger{l, false}
 }
 
 // VerbosePrintfLogger wraps a Printf-based logger (such as the standard library
 // "log") into an implementation of the Logger interface which logs everything.
-func VerbosePrintfLogger(l interface{ Printf(string, ...interface{}) }) Logger {
+func VerbosePrintfLogger(l interface{ Printf(string, ...any) }) Logger {
 	return printfLogger{l, true}
 }
 
 type printfLogger struct {
-	logger  interface{ Printf(string, ...interface{}) }
+	logger  interface{ Printf(string, ...any) }
 	logInfo bool
 }
 
-func (pl printfLogger) Info(msg string, keysAndValues ...interface{}) {
+func (pl printfLogger) Info(msg string, keysAndValues ...any) {
 	if pl.logInfo {
 		keysAndValues = formatTimes(keysAndValues)
 		pl.logger.Printf(
 			formatString(len(keysAndValues)),
-			append([]interface{}{msg}, keysAndValues...)...)
+			append([]any{msg}, keysAndValues...)...)
 	}
 }
 
-func (pl printfLogger) Error(err error, msg string, keysAndValues ...interface{}) {
+func (pl printfLogger) Error(err error, msg string, keysAndValues ...any) {
 	keysAndValues = formatTimes(keysAndValues)
 	pl.logger.Printf(
 		formatString(len(keysAndValues)+2),
-		append([]interface{}{msg, "error", err}, keysAndValues...)...)
+		append([]any{msg, "error", err}, keysAndValues...)...)
 }
 
 // formatString returns a logfmt-like format string for the number of
@@ -75,8 +75,8 @@ func formatString(numKeysAndValues int) string {
 }
 
 // formatTimes formats any time.Time values as RFC3339.
-func formatTimes(keysAndValues []interface{}) []interface{} {
-	formattedArgs := make([]interface{}, 0, len(keysAndValues))
+func formatTimes(keysAndValues []any) []any {
+	formattedArgs := make([]any, 0, len(keysAndValues))
 	for _, arg := range keysAndValues {
 		if t, ok := arg.(time.Time); ok {
 			arg = t.Format(time.RFC3339)
@@ -102,11 +102,11 @@ func NewSlogLogger(l *slog.Logger) *SlogLogger {
 }
 
 // Info logs routine messages about cron's operation using slog.
-func (s *SlogLogger) Info(msg string, keysAndValues ...interface{}) {
+func (s *SlogLogger) Info(msg string, keysAndValues ...any) {
 	s.logger.Info(msg, keysAndValues...)
 }
 
 // Error logs an error condition using slog.
-func (s *SlogLogger) Error(err error, msg string, keysAndValues ...interface{}) {
-	s.logger.Error(msg, append([]interface{}{"error", err}, keysAndValues...)...)
+func (s *SlogLogger) Error(err error, msg string, keysAndValues ...any) {
+	s.logger.Error(msg, append([]any{"error", err}, keysAndValues...)...)
 }
