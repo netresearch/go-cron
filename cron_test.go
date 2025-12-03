@@ -1189,6 +1189,7 @@ func TestFakeClockSchedulerIntegration(t *testing.T) {
 
 		var count int
 		var mu sync.Mutex
+		ran := make(chan struct{}, 1)
 
 		cron := New(WithClock(fakeClock))
 		cron.Start()
@@ -1199,14 +1200,22 @@ func TestFakeClockSchedulerIntegration(t *testing.T) {
 			mu.Lock()
 			count++
 			mu.Unlock()
+			select {
+			case ran <- struct{}{}:
+			default:
+			}
 		}))
 
 		// Wait for timer
 		fakeClock.BlockUntil(1)
 
-		// Advance and check
+		// Advance and wait for job to complete via channel
 		fakeClock.Advance(time.Second)
-		time.Sleep(10 * time.Millisecond)
+		select {
+		case <-ran:
+		case <-time.After(time.Second):
+			t.Fatal("timeout waiting for job to run")
+		}
 
 		mu.Lock()
 		if count != 1 {
@@ -1221,12 +1230,17 @@ func TestFakeClockSchedulerIntegration(t *testing.T) {
 
 		var count int
 		var mu sync.Mutex
+		ran := make(chan struct{}, 1)
 
 		cron := New(WithClock(fakeClock))
 		id := cron.Schedule(Every(time.Second), FuncJob(func() {
 			mu.Lock()
 			count++
 			mu.Unlock()
+			select {
+			case ran <- struct{}{}:
+			default:
+			}
 		}))
 
 		cron.Start()
@@ -1234,7 +1248,11 @@ func TestFakeClockSchedulerIntegration(t *testing.T) {
 
 		fakeClock.BlockUntil(1)
 		fakeClock.Advance(time.Second)
-		time.Sleep(10 * time.Millisecond)
+		select {
+		case <-ran:
+		case <-time.After(time.Second):
+			t.Fatal("timeout waiting for job to run")
+		}
 
 		mu.Lock()
 		if count != 1 {
@@ -1244,11 +1262,11 @@ func TestFakeClockSchedulerIntegration(t *testing.T) {
 
 		// Remove the job
 		cron.Remove(id)
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond) // Allow remove to process
 
 		// Advance more time - job should not run
 		fakeClock.Advance(5 * time.Second)
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond) // Give time for any incorrect runs
 
 		mu.Lock()
 		if count != 1 {
