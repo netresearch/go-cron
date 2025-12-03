@@ -13,6 +13,13 @@ features, bug fixes, and modernization improvements.
 ### Planned for v2
 - Context-aware Job interface with graceful shutdown support
 
+## [0.6.1] - 2025-12-03
+
+### Changed
+- **Go toolchain**: Updated from go1.25.0 to go1.25.5
+- **CodeQL action**: Upgraded from v3.28.0 to v4.31.6
+- **CodeQL workflow**: Added explicit workflow file for shields.io badge compatibility
+
 ## [0.6.0] - 2025-12-03
 
 ### Breaking Changes
@@ -150,6 +157,7 @@ This fork includes all features from robfig/cron v3 plus:
    _, err := cron.ParseStandard("*/60 * * * *") // Error: step (60) must be less than range size (60)
    ```
 
-[Unreleased]: https://github.com/netresearch/go-cron/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/netresearch/go-cron/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/netresearch/go-cron/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/netresearch/go-cron/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/netresearch/go-cron/releases/tag/v0.5.0
