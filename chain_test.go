@@ -260,28 +260,69 @@ func TestChainSkipIfStillRunning(t *testing.T) {
 	})
 
 	t.Run("second run skipped if first not done", func(t *testing.T) {
-		var j countJob
-		j.delay = 10 * time.Millisecond
-		wrappedJob := NewChain(SkipIfStillRunning(DiscardLogger)).Then(&j)
-		go func() {
-			go wrappedJob.Run()
-			time.Sleep(time.Millisecond)
-			go wrappedJob.Run()
-		}()
+		// Use channels for proper synchronization instead of timing
+		jobStarted := make(chan struct{})
+		jobCanFinish := make(chan struct{})
+		jobDone := make(chan struct{})
 
-		// After 5ms, the first job is still in progress, and the second job was
-		// aleady skipped.
-		time.Sleep(5 * time.Millisecond)
-		started, done := j.Started(), j.Done()
-		if started != 1 || done != 0 {
-			t.Error("expected first job started, but not finished, got", started, done)
+		var started, done int32
+		var startedOnce, doneOnce sync.Once
+
+		job := FuncJob(func() {
+			atomic.AddInt32(&started, 1)
+			startedOnce.Do(func() { close(jobStarted) })
+			<-jobCanFinish
+			atomic.AddInt32(&done, 1)
+			doneOnce.Do(func() { close(jobDone) })
+		})
+
+		wrappedJob := NewChain(SkipIfStillRunning(DiscardLogger)).Then(job)
+
+		// Start first job
+		go wrappedJob.Run()
+
+		// Wait for first job to actually start
+		select {
+		case <-jobStarted:
+			// Job started, proceed
+		case <-time.After(5 * time.Second):
+			t.Fatal("timeout waiting for job to start")
 		}
 
-		// Verify that the first job completes and second does not run.
-		time.Sleep(25 * time.Millisecond)
-		started, done = j.Started(), j.Done()
-		if started != 1 || done != 1 {
-			t.Error("expected second job skipped, got", started, done)
+		// Now start second job while first is still running
+		secondJobDone := make(chan struct{})
+		go func() {
+			wrappedJob.Run() // Should be skipped immediately
+			close(secondJobDone)
+		}()
+
+		// Wait for second job to return (should be skipped immediately)
+		select {
+		case <-secondJobDone:
+			// Second job was skipped, good
+		case <-time.After(5 * time.Second):
+			t.Fatal("timeout waiting for second job to be skipped")
+		}
+
+		// Verify first job still running, second was skipped (inner job ran only once)
+		if s, d := atomic.LoadInt32(&started), atomic.LoadInt32(&done); s != 1 || d != 0 {
+			t.Errorf("expected first job started but not done, got started=%d done=%d", s, d)
+		}
+
+		// Allow first job to finish
+		close(jobCanFinish)
+
+		// Wait for first job to complete
+		select {
+		case <-jobDone:
+			// Job finished
+		case <-time.After(5 * time.Second):
+			t.Fatal("timeout waiting for job to finish")
+		}
+
+		// Verify only first job ran
+		if s, d := atomic.LoadInt32(&started), atomic.LoadInt32(&done); s != 1 || d != 1 {
+			t.Errorf("expected only first job to have run, got started=%d done=%d", s, d)
 		}
 	})
 
