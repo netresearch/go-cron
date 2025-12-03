@@ -13,7 +13,7 @@ features, bug fixes, and modernization improvements.
 ### Planned for v2
 - Context-aware Job interface with graceful shutdown support
 
-## [1.0.0] - 2025-12-01
+## [0.6.0] - 2025-12-03
 
 ### Breaking Changes
 - **RetryWithBackoff semantics**: `maxRetries=0` now means "no retries" (execute once, fail on panic).
@@ -33,6 +33,16 @@ features, bug fixes, and modernization improvements.
 - **EveryWithMin function**: Create constant delay schedules with custom minimum interval
 - **Parser.WithMinEveryInterval**: Configure minimum interval on parser level
 - **StandardParser function**: Get a copy of the standard parser for customization
+- **StopWithTimeout**: Graceful shutdown with configurable timeout
+- **StopAndWait**: Convenience method for blocking until all jobs complete
+- **Context support**: `JobWithContext` interface and `WithContext` option
+- **Job metadata**: `WithName` and `WithTags` options for job identification
+- **RetryWithBackoff wrapper**: Exponential backoff retry for transient failures
+- **CircuitBreaker wrapper**: Prevent cascading failures with automatic recovery
+- **WithMaxEntries option**: Limit maximum entries to prevent memory exhaustion
+- **Observability hooks**: `WithObservability` option for metrics integration
+- **TryNewParser/MustNewParser**: Safe and panic-on-error parser constructors
+- **Timeout callback**: Optional callback when job times out
 - **Benchmark suite**: Comprehensive benchmark tests for parser, scheduler, and job operations
 - **CI benchmarks**: CI job to run benchmarks and upload results as artifacts
 - **Input validation**: Maximum spec length limit (1024 chars) to prevent DoS
@@ -40,19 +50,33 @@ features, bug fixes, and modernization improvements.
 - **slog adapter**: `SlogLogger` for structured logging with Go 1.21+ slog
 - **Multi-platform CI**: Windows, macOS, and Linux testing
 - **ExampleTimeout_withContext**: Demonstrates idiomatic context-based cancellation pattern
+- **Fuzz tests**: Fuzz testing for parser and scheduler robustness
+- **Enterprise security**: SLSA provenance, gosec, govulncheck, gitleaks, trivy scanning
 
 ### Fixed
 - **Panic on NewParser with no fields**: Returns error instead of panicking
+- **Entry limit race condition**: Use atomic CAS for thread-safe limit checking
+- **Flaky tests**: Fixed timing-sensitive tests with channel synchronization
+  - `TestChainSkipIfStillRunning`
+  - `TestStopAndWait`
+  - `TestTimeoutWithContext`
+  - `TestFakeClockSchedulerIntegration` subtests
+- **Heap corruption**: Prevent stale heapIndex in Update operations
+- **Time backwards handling**: Scheduler iterates over copy when time goes backwards
+- **EntryID overflow**: Skip EntryID 0 on uint64 overflow
 
 ### Changed
 - **EntryID uint64**: Changed from `int` to `uint64` for larger job capacity
 - **slices package**: Uses Go 1.21+ `slices.SortFunc` and `slices.DeleteFunc`
 - **Linting**: Uses golangci-lint v2.6.1 with modern rule set
 - **Timeout wrapper logging**: Enhanced message clarifies "goroutine still running in background"
+- **Parser complexity reduction**: Extracted helpers for better maintainability
+- **safeExecute consolidation**: Unified panic recovery across codebase
 
 ### Security
 - **Timezone validation**: Character and length restrictions for timezone strings to prevent DoS
 - **RetryWithBackoff DoS prevention**: Zero-value is now safe default (no retries vs unlimited)
+- **Enterprise-grade CI**: GitHub Actions hardened with SHA pinning and SLSA
 
 ## [0.5.0] - 2025-11-25
 
@@ -126,6 +150,6 @@ This fork includes all features from robfig/cron v3 plus:
    _, err := cron.ParseStandard("*/60 * * * *") // Error: step (60) must be less than range size (60)
    ```
 
-[Unreleased]: https://github.com/netresearch/go-cron/compare/v1.0.0...HEAD
-[1.0.0]: https://github.com/netresearch/go-cron/compare/v0.5.0...v1.0.0
+[Unreleased]: https://github.com/netresearch/go-cron/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/netresearch/go-cron/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/netresearch/go-cron/releases/tag/v0.5.0
