@@ -139,7 +139,6 @@ func extractPanicValueAndStack(p any) (value any, stack string) {
 	return p, ""
 }
 
-
 // logErrorWithOptionalStack logs an error with optional stack trace.
 func logErrorWithOptionalStack(logger Logger, err error, msg, stack string, keysAndValues ...any) {
 	if stack != "" {
