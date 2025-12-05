@@ -1,6 +1,7 @@
 package cron
 
 import (
+	"context"
 	"io"
 	"log"
 	"reflect"
@@ -522,4 +523,163 @@ func TestChainTimeout(t *testing.T) {
 			t.Errorf("expected callback not to be called, got %d calls", c)
 		}
 	})
+}
+
+// TestTimeoutWithContextCancellation tests that onTimeout callback is NOT called
+// when context is canceled (vs when it times out). This kills the mutation at
+// chain.go:418 where ctx.Err() == context.DeadlineExceeded could be negated.
+func TestTimeoutWithContextCancellation(t *testing.T) {
+	t.Run("callback not invoked on context cancellation", func(t *testing.T) {
+		var callbackCalled int32
+		var errorLogged int32
+
+		callback := func(timeout time.Duration) {
+			atomic.AddInt32(&callbackCalled, 1)
+		}
+
+		logger := &testLogCapture{}
+
+		// Create a long-running job
+		jobStarted := make(chan struct{})
+		jobCanFinish := make(chan struct{})
+		job := FuncJob(func() {
+			close(jobStarted)
+			<-jobCanFinish
+		})
+
+		// Use TimeoutWithContext with a long timeout
+		wrapper := TimeoutWithContext(logger, 10*time.Second, WithTimeoutCallback(callback))
+		wrappedJob := wrapper(job)
+
+		// Get the timeoutContextJob to call RunWithContext
+		tcj := wrappedJob.(*timeoutContextJob)
+
+		// Create a cancellable context (NOT a timeout context)
+		ctx, cancel := context.WithCancel(context.Background())
+
+		done := make(chan struct{})
+		go func() {
+			tcj.RunWithContext(ctx)
+			close(done)
+		}()
+
+		// Wait for job to start
+		<-jobStarted
+
+		// Cancel the context (simulates parent cancellation, NOT timeout)
+		cancel()
+
+		// Allow job to finish
+		close(jobCanFinish)
+
+		// Wait for wrapper to complete
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Fatal("timeout waiting for job wrapper to complete")
+		}
+
+		// Callback should NOT be called because context was canceled, not timed out
+		if c := atomic.LoadInt32(&callbackCalled); c != 0 {
+			t.Errorf("expected callback NOT called on cancellation, got %d calls", c)
+		}
+
+		// Error log should NOT be called (only called on DeadlineExceeded)
+		if c := logger.ErrorCount(); c != 0 {
+			t.Errorf("expected no error log on cancellation, got %d", c)
+		}
+
+		_ = errorLogged // silence unused variable
+	})
+
+	t.Run("callback invoked on actual timeout", func(t *testing.T) {
+		var callbackCalled int32
+
+		callback := func(timeout time.Duration) {
+			atomic.AddInt32(&callbackCalled, 1)
+		}
+
+		logger := &testLogCapture{}
+
+		// Create a job that takes longer than timeout
+		job := FuncJob(func() {
+			time.Sleep(100 * time.Millisecond)
+		})
+
+		wrapper := TimeoutWithContext(logger, 10*time.Millisecond, WithTimeoutCallback(callback))
+		wrappedJob := wrapper(job)
+
+		wrappedJob.Run()
+
+		// Wait for any cleanup
+		time.Sleep(50 * time.Millisecond)
+
+		// Callback SHOULD be called because job actually timed out
+		if c := atomic.LoadInt32(&callbackCalled); c != 1 {
+			t.Errorf("expected callback called once on timeout, got %d calls", c)
+		}
+
+		// Error log SHOULD be called
+		if c := logger.ErrorCount(); c != 1 {
+			t.Errorf("expected error log on timeout, got %d", c)
+		}
+	})
+}
+
+// TestTimeoutZeroBoundary tests the boundary condition at chain.go:361
+// where timeout <= 0 returns the original job unchanged.
+// This kills mutations that change <= to < (boundary mutation).
+func TestTimeoutZeroBoundary(t *testing.T) {
+	tests := []struct {
+		name            string
+		timeout         time.Duration
+		shouldBeWrapped bool
+	}{
+		{"negative timeout returns original", -1 * time.Second, false},
+		{"zero timeout returns original", 0, false},
+		{"positive timeout wraps job", 1 * time.Millisecond, true},
+	}
+
+	// Test Timeout wrapper using a marker job to detect wrapping
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			originalJob := FuncJob(func() {})
+
+			wrapper := Timeout(DiscardLogger, tt.timeout)
+			result := wrapper(originalJob)
+
+			// For FuncJob, we can't easily detect wrapping by type.
+			// Instead, check that when timeout <= 0, the returned job
+			// is literally the same FuncJob (reflect.ValueOf comparison)
+			originalVal := reflect.ValueOf(originalJob)
+			resultVal := reflect.ValueOf(result)
+
+			// If not wrapped, the pointers should be equal
+			// If wrapped, the result is a new FuncJob
+			isSameJob := originalVal.Pointer() == resultVal.Pointer()
+			isWrapped := !isSameJob
+
+			if isWrapped != tt.shouldBeWrapped {
+				t.Errorf("Timeout(%v): wrapped=%v, want wrapped=%v",
+					tt.timeout, isWrapped, tt.shouldBeWrapped)
+			}
+		})
+	}
+
+	// Test TimeoutWithContext wrapper
+	for _, tt := range tests {
+		t.Run("WithContext_"+tt.name, func(t *testing.T) {
+			originalJob := FuncJob(func() {})
+			wrapper := TimeoutWithContext(DiscardLogger, tt.timeout)
+			result := wrapper(originalJob)
+
+			// TimeoutWithContext returns *timeoutContextJob when wrapping
+			_, isWrapped := result.(*timeoutContextJob)
+
+			if isWrapped != tt.shouldBeWrapped {
+				t.Errorf("TimeoutWithContext(%v): wrapped=%v, want wrapped=%v",
+					tt.timeout, isWrapped, tt.shouldBeWrapped)
+			}
+		})
+	}
 }

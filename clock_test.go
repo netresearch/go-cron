@@ -355,3 +355,302 @@ func TestFakeClockConcurrency(t *testing.T) {
 		t.Errorf("After advancing, TimerCount() = %d, want 0", clock.TimerCount())
 	}
 }
+
+// TestFakeTimerZeroDurationNotInHeap verifies that immediate timers (d <= 0)
+// are NOT added to the timer heap. This kills the mutation at clock.go:96
+// where heapIndex = -1 could be changed to 0 or 1.
+func TestFakeTimerZeroDurationNotInHeap(t *testing.T) {
+	start := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	clock := NewFakeClock(start)
+
+	// Create an immediate timer (zero duration)
+	timer := clock.NewTimer(0)
+
+	// Timer should fire immediately
+	select {
+	case <-timer.C():
+		// Expected
+	default:
+		t.Error("zero duration timer should fire immediately")
+	}
+
+	// Timer count should be 0 - immediate timers don't enter the heap
+	if clock.TimerCount() != 0 {
+		t.Errorf("TimerCount() = %d, want 0 for immediate timer", clock.TimerCount())
+	}
+
+	// Test negative duration as well
+	timer2 := clock.NewTimer(-1 * time.Second)
+	select {
+	case <-timer2.C():
+		// Expected - negative duration also fires immediately
+	default:
+		t.Error("negative duration timer should fire immediately")
+	}
+
+	if clock.TimerCount() != 0 {
+		t.Errorf("TimerCount() = %d, want 0 for negative duration timer", clock.TimerCount())
+	}
+}
+
+// TestFakeTimerResetZeroDuration verifies that Reset(0) fires the timer
+// immediately. This kills the mutation at clock.go:234 where d <= 0
+// could be changed to d < 0.
+func TestFakeTimerResetZeroDuration(t *testing.T) {
+	start := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	clock := NewFakeClock(start)
+
+	// Create a normal timer
+	timer := clock.NewTimer(time.Hour)
+
+	// Reset to zero duration
+	timer.Reset(0)
+
+	// Timer should fire immediately after Reset(0)
+	select {
+	case <-timer.C():
+		// Expected
+	default:
+		t.Error("Reset(0) should fire timer immediately")
+	}
+
+	// Timer should not be in heap anymore
+	if clock.TimerCount() != 0 {
+		t.Errorf("After Reset(0), TimerCount() = %d, want 0", clock.TimerCount())
+	}
+}
+
+// TestFakeTimerResetNegativeDuration verifies that Reset with negative duration
+// also fires immediately. This tests the boundary at clock.go:234.
+func TestFakeTimerResetNegativeDuration(t *testing.T) {
+	start := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	clock := NewFakeClock(start)
+
+	timer := clock.NewTimer(time.Hour)
+	timer.Reset(-1 * time.Second)
+
+	select {
+	case <-timer.C():
+		// Expected
+	default:
+		t.Error("Reset(-1s) should fire timer immediately")
+	}
+}
+
+// TestFakeTimerRemovalFromHeap tests that timers are properly removed from heap
+// when they fire, ensuring heapIndex is correctly maintained.
+// This helps kill mutations at clock.go:274.
+func TestFakeTimerRemovalFromHeap(t *testing.T) {
+	start := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	clock := NewFakeClock(start)
+
+	// Create multiple timers
+	t1 := clock.NewTimer(1 * time.Minute)
+	t2 := clock.NewTimer(2 * time.Minute)
+	t3 := clock.NewTimer(3 * time.Minute)
+
+	if clock.TimerCount() != 3 {
+		t.Errorf("TimerCount() = %d, want 3", clock.TimerCount())
+	}
+
+	// Fire first timer
+	clock.Advance(1 * time.Minute)
+	<-t1.C()
+
+	if clock.TimerCount() != 2 {
+		t.Errorf("After first fire, TimerCount() = %d, want 2", clock.TimerCount())
+	}
+
+	// Stop second timer (should remove it from heap)
+	t2.Stop()
+
+	if clock.TimerCount() != 1 {
+		t.Errorf("After stop, TimerCount() = %d, want 1", clock.TimerCount())
+	}
+
+	// Fire third timer
+	clock.Advance(2 * time.Minute)
+	<-t3.C()
+
+	if clock.TimerCount() != 0 {
+		t.Errorf("After all fired/stopped, TimerCount() = %d, want 0", clock.TimerCount())
+	}
+}
+
+// TestImmediateTimerHeapIndexSentinel verifies that immediate timers (d<=0)
+// have heapIndex=-1 and cannot be incorrectly found in the heap.
+// This kills mutations at clock.go:96 where heapIndex: -1 could become 0 or 1.
+func TestImmediateTimerHeapIndexSentinel(t *testing.T) {
+	start := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	clock := NewFakeClock(start)
+
+	// Create a normal timer first (this will be at index 0)
+	normalTimer := clock.NewTimer(1 * time.Hour)
+	if clock.TimerCount() != 1 {
+		t.Fatalf("TimerCount() = %d, want 1", clock.TimerCount())
+	}
+
+	// Create an immediate timer (d=0) - this should NOT be in heap
+	immediateTimer := clock.NewTimer(0)
+	<-immediateTimer.C() // Consume the immediate fire
+
+	// Timer count should still be 1 (immediate timer never entered heap)
+	if clock.TimerCount() != 1 {
+		t.Errorf("After immediate timer, TimerCount() = %d, want 1", clock.TimerCount())
+	}
+
+	// Stopping the immediate timer should return false (not in heap)
+	// If heapIndex were 0 instead of -1, this would try to stop the normalTimer!
+	wasActive := immediateTimer.Stop()
+	if wasActive {
+		t.Error("Stop() on immediate timer should return false (not active)")
+	}
+
+	// Verify the normal timer is still in the heap and working
+	if clock.TimerCount() != 1 {
+		t.Errorf("After stopping immediate, TimerCount() = %d, want 1", clock.TimerCount())
+	}
+
+	// Stop the normal timer - should work
+	wasActive = normalTimer.Stop()
+	if !wasActive {
+		t.Error("Stop() on normal timer should return true")
+	}
+
+	if clock.TimerCount() != 0 {
+		t.Errorf("After stopping normal, TimerCount() = %d, want 0", clock.TimerCount())
+	}
+}
+
+// TestTimerCannotBeRemovedTwice verifies that after a timer is popped/stopped,
+// its heapIndex is reset to -1 and it cannot be removed again.
+// This kills mutations at clock.go:274 where t.heapIndex = -1 could become 0.
+func TestTimerCannotBeRemovedTwice(t *testing.T) {
+	start := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	clock := NewFakeClock(start)
+
+	// Add two timers
+	timer1 := clock.NewTimer(1 * time.Minute)
+	timer2 := clock.NewTimer(2 * time.Minute)
+
+	if clock.TimerCount() != 2 {
+		t.Fatalf("TimerCount() = %d, want 2", clock.TimerCount())
+	}
+
+	// Fire first timer (removes it from heap, sets heapIndex to -1)
+	clock.Advance(1 * time.Minute)
+	<-timer1.C()
+
+	if clock.TimerCount() != 1 {
+		t.Errorf("After first fire, TimerCount() = %d, want 1", clock.TimerCount())
+	}
+
+	// Try to stop the already-fired timer
+	// If heapIndex were 0 instead of -1, this would remove timer2!
+	wasActive := timer1.Stop()
+	if wasActive {
+		t.Error("Stop() on already-fired timer should return false")
+	}
+
+	// Verify timer2 is still in the heap
+	if clock.TimerCount() != 1 {
+		t.Errorf("After double-stop attempt, TimerCount() = %d, want 1", clock.TimerCount())
+	}
+
+	// Timer2 should still work
+	clock.Advance(1 * time.Minute)
+	select {
+	case <-timer2.C():
+		// Expected
+	default:
+		t.Error("timer2 should have fired")
+	}
+}
+
+// TestRemoveTimerBoundaryCondition tests the idx >= len(*h) check in RemoveTimer.
+// This kills the mutation at clock.go:284 where >= could become >.
+func TestRemoveTimerBoundaryCondition(t *testing.T) {
+	start := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	clock := NewFakeClock(start)
+
+	// Create exactly 2 timers
+	t1 := clock.NewTimer(1 * time.Hour)
+	t2 := clock.NewTimer(2 * time.Hour)
+
+	if clock.TimerCount() != 2 {
+		t.Fatalf("TimerCount() = %d, want 2", clock.TimerCount())
+	}
+
+	// Stop first timer - after this, only 1 timer remains (at index 0)
+	t1.Stop()
+
+	if clock.TimerCount() != 1 {
+		t.Errorf("After stop, TimerCount() = %d, want 1", clock.TimerCount())
+	}
+
+	// The stopped timer now has a stale heapIndex that's >= current heap length
+	// If the mutation (>= becomes >) were present, this could cause issues
+	// Try to stop the already-stopped timer again
+	wasActive := t1.Stop()
+	if wasActive {
+		t.Error("Second Stop() should return false")
+	}
+
+	// Heap should still be intact
+	if clock.TimerCount() != 1 {
+		t.Errorf("After second stop attempt, TimerCount() = %d, want 1", clock.TimerCount())
+	}
+
+	// Clean up
+	t2.Stop()
+	if clock.TimerCount() != 0 {
+		t.Errorf("After all stops, TimerCount() = %d, want 0", clock.TimerCount())
+	}
+}
+
+// TestMultipleImmediateTimersWithNormalTimers verifies heap integrity when
+// mixing immediate timers (heapIndex=-1) with normal timers.
+func TestMultipleImmediateTimersWithNormalTimers(t *testing.T) {
+	start := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	clock := NewFakeClock(start)
+
+	// Create alternating immediate and normal timers
+	immediate1 := clock.NewTimer(0)
+	normal1 := clock.NewTimer(1 * time.Hour)
+	immediate2 := clock.NewTimer(-1 * time.Second)
+	normal2 := clock.NewTimer(2 * time.Hour)
+	immediate3 := clock.NewTimer(0)
+
+	// Consume immediate timers
+	<-immediate1.C()
+	<-immediate2.C()
+	<-immediate3.C()
+
+	// Only normal timers should be in heap
+	if clock.TimerCount() != 2 {
+		t.Errorf("TimerCount() = %d, want 2 (only normal timers)", clock.TimerCount())
+	}
+
+	// Stopping immediate timers should all return false and not affect heap
+	for i, timer := range []Timer{immediate1, immediate2, immediate3} {
+		if timer.Stop() {
+			t.Errorf("Stop() on immediate timer %d should return false", i+1)
+		}
+	}
+
+	// Heap should still have exactly 2 timers
+	if clock.TimerCount() != 2 {
+		t.Errorf("After stopping immediates, TimerCount() = %d, want 2", clock.TimerCount())
+	}
+
+	// Normal timers should still work
+	normal1.Stop()
+	if clock.TimerCount() != 1 {
+		t.Errorf("After stopping normal1, TimerCount() = %d, want 1", clock.TimerCount())
+	}
+
+	normal2.Stop()
+	if clock.TimerCount() != 0 {
+		t.Errorf("After stopping normal2, TimerCount() = %d, want 0", clock.TimerCount())
+	}
+}
