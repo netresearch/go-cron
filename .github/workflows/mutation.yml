@@ -4,11 +4,6 @@ on:
   schedule:
     - cron: '0 4 * * 0' # Weekly on Sunday at 4 AM UTC
   workflow_dispatch: # Allow manual trigger
-  pull_request:
-    paths:
-      - '**.go'
-      - 'go.mod'
-      - 'go.sum'
 
 permissions:
   contents: read
