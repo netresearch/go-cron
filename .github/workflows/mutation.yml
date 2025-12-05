@@ -37,8 +37,7 @@ jobs:
       - name: Run Mutation Tests
         run: |
           # Use 2 workers to reduce memory pressure on GitHub Actions runner
-          # Set per-mutation timeout to prevent hanging mutations
-          gremlins unleash --tags="" --workers=2 --timeout=30s --output=mutation-report.json 2>&1 | tee mutation-output.txt
+          gremlins unleash --tags="" --workers=2 --output=mutation-report.json 2>&1 | tee mutation-output.txt
         continue-on-error: true
         timeout-minutes: 45
 
