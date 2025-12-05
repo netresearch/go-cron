@@ -160,3 +160,219 @@ func TestEveryBackwardCompatibility(t *testing.T) {
 		}
 	}
 }
+
+// TestEveryWithMinBoundaryConditions tests boundary conditions to kill mutations
+// at constantdelay.go:40 where `minInterval > 0` and `duration < minInterval`
+// could be mutated.
+func TestEveryWithMinBoundaryConditions(t *testing.T) {
+	t.Run("minInterval=0 boundary - no rounding applied", func(t *testing.T) {
+		// This kills mutation at line 40:17 where `minInterval > 0` could become `>= 0`
+		// If mutated to >=, minInterval=0 would wrongly trigger rounding
+		sched := EveryWithMin(500*time.Millisecond, 0)
+		if sched.Delay != 500*time.Millisecond {
+			t.Errorf("EveryWithMin(500ms, 0).Delay = %v, want 500ms (no rounding)", sched.Delay)
+		}
+	})
+
+	t.Run("minInterval=1ns boundary - rounding applied", func(t *testing.T) {
+		// minInterval=1ns is > 0, so rounding should be applied
+		sched := EveryWithMin(500*time.Millisecond, 1*time.Nanosecond)
+		// 500ms < 1ns is false, so no minimum rounding
+		// But truncation logic depends on whether minInterval >= time.Second
+		if sched.Delay != 500*time.Millisecond {
+			t.Errorf("EveryWithMin(500ms, 1ns).Delay = %v, want 500ms", sched.Delay)
+		}
+	})
+
+	t.Run("duration=minInterval boundary - no rounding", func(t *testing.T) {
+		// This kills mutation at line 40:33 where `duration < minInterval`
+		// could become `duration <= minInterval`
+		// If mutated to <=, duration == minInterval would wrongly round up
+		sched := EveryWithMin(time.Second, time.Second)
+		if sched.Delay != time.Second {
+			t.Errorf("EveryWithMin(1s, 1s).Delay = %v, want 1s (exact match)", sched.Delay)
+		}
+
+		// Also test with different equal values
+		sched2 := EveryWithMin(5*time.Second, 5*time.Second)
+		if sched2.Delay != 5*time.Second {
+			t.Errorf("EveryWithMin(5s, 5s).Delay = %v, want 5s", sched2.Delay)
+		}
+	})
+
+	t.Run("duration just below minInterval - rounds up", func(t *testing.T) {
+		// duration < minInterval should round up
+		sched := EveryWithMin(time.Second-1, time.Second)
+		if sched.Delay != time.Second {
+			t.Errorf("EveryWithMin(999999999ns, 1s).Delay = %v, want 1s", sched.Delay)
+		}
+	})
+
+	t.Run("duration just above minInterval - no rounding", func(t *testing.T) {
+		// duration > minInterval should not round
+		sched := EveryWithMin(time.Second+1, time.Second)
+		// The +1 nanosecond gets truncated by sub-second truncation
+		if sched.Delay != time.Second {
+			t.Errorf("EveryWithMin(1s+1ns, 1s).Delay = %v, want 1s (truncated)", sched.Delay)
+		}
+
+		// More meaningful: duration clearly above
+		sched2 := EveryWithMin(2*time.Second, time.Second)
+		if sched2.Delay != 2*time.Second {
+			t.Errorf("EveryWithMin(2s, 1s).Delay = %v, want 2s", sched2.Delay)
+		}
+	})
+}
+
+// TestEveryWithMinTruncationBoundaries tests the complex truncation condition
+// at constantdelay.go:45 to kill mutations.
+func TestEveryWithMinTruncationBoundaries(t *testing.T) {
+	t.Run("minInterval >= time.Second - truncates sub-second", func(t *testing.T) {
+		// When minInterval >= 1s, sub-second parts are truncated
+		sched := EveryWithMin(5*time.Second+500*time.Millisecond, time.Second)
+		if sched.Delay != 5*time.Second {
+			t.Errorf("got %v, want 5s (sub-second truncated)", sched.Delay)
+		}
+	})
+
+	t.Run("minInterval < time.Second and > 0 - preserves sub-second", func(t *testing.T) {
+		// This kills mutations at line 45:47, 45:64
+		// When 0 < minInterval < 1s, sub-second parts are preserved
+		sched := EveryWithMin(500*time.Millisecond, 100*time.Millisecond)
+		if sched.Delay != 500*time.Millisecond {
+			t.Errorf("got %v, want 500ms (sub-second preserved)", sched.Delay)
+		}
+
+		// Also test with duration having sub-second parts
+		sched2 := EveryWithMin(1*time.Second+500*time.Millisecond, 100*time.Millisecond)
+		if sched2.Delay != 1*time.Second+500*time.Millisecond {
+			t.Errorf("got %v, want 1.5s (sub-second preserved)", sched2.Delay)
+		}
+	})
+
+	t.Run("minInterval <= 0 with duration >= 1s - truncates", func(t *testing.T) {
+		// When minInterval <= 0 AND duration >= 1s, should truncate
+		sched := EveryWithMin(5*time.Second+500*time.Millisecond, 0)
+		if sched.Delay != 5*time.Second {
+			t.Errorf("got %v, want 5s (truncated when duration >= 1s)", sched.Delay)
+		}
+
+		sched2 := EveryWithMin(5*time.Second+500*time.Millisecond, -time.Second)
+		if sched2.Delay != 5*time.Second {
+			t.Errorf("got %v, want 5s (truncated when minInterval < 0)", sched2.Delay)
+		}
+	})
+
+	t.Run("minInterval <= 0 with duration < 1s - preserves", func(t *testing.T) {
+		// When minInterval <= 0 AND duration < 1s, should preserve sub-second
+		sched := EveryWithMin(500*time.Millisecond, 0)
+		if sched.Delay != 500*time.Millisecond {
+			t.Errorf("got %v, want 500ms (preserved sub-second)", sched.Delay)
+		}
+	})
+
+	t.Run("minInterval = time.Second exactly - truncates", func(t *testing.T) {
+		// Boundary: exactly 1 second should truncate sub-second parts
+		sched := EveryWithMin(2*time.Second+100*time.Millisecond, time.Second)
+		if sched.Delay != 2*time.Second {
+			t.Errorf("got %v, want 2s (truncated at exact 1s boundary)", sched.Delay)
+		}
+	})
+
+	t.Run("minInterval = time.Second-1 - preserves", func(t *testing.T) {
+		// Just below 1 second - should preserve sub-second
+		sched := EveryWithMin(2*time.Second+100*time.Millisecond, time.Second-1)
+		if sched.Delay != 2*time.Second+100*time.Millisecond {
+			t.Errorf("got %v, want 2.1s (preserved below 1s boundary)", sched.Delay)
+		}
+	})
+}
+
+// TestConstantDelayNextBoundaries tests the Next() method boundaries
+// to kill mutations at constantdelay.go:62 and :66.
+func TestConstantDelayNextBoundaries(t *testing.T) {
+	baseTime := time.Date(2024, 1, 1, 12, 0, 0, 500_000_000, time.UTC) // Has 500ms nanoseconds
+
+	t.Run("Delay=0 returns t+1s fallback", func(t *testing.T) {
+		// This kills mutation at line 62:20 where `Delay <= 0`
+		// could become `Delay < 0` (missing zero case)
+		sched := ConstantDelaySchedule{Delay: 0}
+		next := sched.Next(baseTime)
+		expected := baseTime.Add(time.Second)
+		if !next.Equal(expected) {
+			t.Errorf("Next() with Delay=0: got %v, want %v (1s fallback)", next, expected)
+		}
+	})
+
+	t.Run("Delay=-1 returns t+1s fallback", func(t *testing.T) {
+		// Negative delay should also trigger fallback
+		sched := ConstantDelaySchedule{Delay: -1 * time.Nanosecond}
+		next := sched.Next(baseTime)
+		expected := baseTime.Add(time.Second)
+		if !next.Equal(expected) {
+			t.Errorf("Next() with Delay=-1ns: got %v, want %v", next, expected)
+		}
+	})
+
+	t.Run("Delay=-1s returns t+1s fallback", func(t *testing.T) {
+		sched := ConstantDelaySchedule{Delay: -1 * time.Second}
+		next := sched.Next(baseTime)
+		expected := baseTime.Add(time.Second)
+		if !next.Equal(expected) {
+			t.Errorf("Next() with Delay=-1s: got %v, want %v", next, expected)
+		}
+	})
+
+	t.Run("Delay=1ns uses sub-second path", func(t *testing.T) {
+		// Delay > 0 but < 1s should not trigger fallback and use sub-second path
+		sched := ConstantDelaySchedule{Delay: 1 * time.Nanosecond}
+		next := sched.Next(baseTime)
+		expected := baseTime.Add(1 * time.Nanosecond)
+		if !next.Equal(expected) {
+			t.Errorf("Next() with Delay=1ns: got %v, want %v", next, expected)
+		}
+	})
+
+	t.Run("Delay < 1s - no rounding", func(t *testing.T) {
+		// This kills mutation at line 66:20 where `Delay < time.Second`
+		// could become `Delay <= time.Second`
+		sched := ConstantDelaySchedule{Delay: 500 * time.Millisecond}
+		next := sched.Next(baseTime)
+		// Sub-second: no rounding, just add delay
+		expected := baseTime.Add(500 * time.Millisecond)
+		if !next.Equal(expected) {
+			t.Errorf("Next() with Delay=500ms: got %v, want %v (no rounding)", next, expected)
+		}
+	})
+
+	t.Run("Delay = 1s exactly - rounds to second", func(t *testing.T) {
+		// Exactly 1 second should round (removes nanoseconds from result)
+		sched := ConstantDelaySchedule{Delay: time.Second}
+		next := sched.Next(baseTime)
+		// Should add 1s minus the nanosecond offset
+		expected := time.Date(2024, 1, 1, 12, 0, 1, 0, time.UTC)
+		if !next.Equal(expected) {
+			t.Errorf("Next() with Delay=1s: got %v, want %v (rounded to second)", next, expected)
+		}
+	})
+
+	t.Run("Delay = 1s-1ns - no rounding (sub-second path)", func(t *testing.T) {
+		// Just below 1 second should use sub-second path (no rounding)
+		sched := ConstantDelaySchedule{Delay: time.Second - 1}
+		next := sched.Next(baseTime)
+		expected := baseTime.Add(time.Second - 1)
+		if !next.Equal(expected) {
+			t.Errorf("Next() with Delay=999999999ns: got %v, want %v (no rounding)", next, expected)
+		}
+	})
+
+	t.Run("Delay > 1s - rounds to second", func(t *testing.T) {
+		sched := ConstantDelaySchedule{Delay: 5 * time.Second}
+		next := sched.Next(baseTime)
+		// Should add 5s and round to second boundary
+		expected := time.Date(2024, 1, 1, 12, 0, 5, 0, time.UTC)
+		if !next.Equal(expected) {
+			t.Errorf("Next() with Delay=5s: got %v, want %v (rounded)", next, expected)
+		}
+	})
+}

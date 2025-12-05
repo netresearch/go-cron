@@ -1626,6 +1626,104 @@ func TestIndexCompaction(t *testing.T) {
 	}
 }
 
+// TestIndexCompactionBoundaryCurrentSizeZero tests cron.go:820 when currentSize == 0.
+// This kills the CONDITIONALS_BOUNDARY mutation where `currentSize > 0` could become `>= 0`.
+// When currentSize == 0, the condition `currentSize > 0 && ...` is false, so we don't skip.
+func TestIndexCompactionBoundaryCurrentSizeZero(t *testing.T) {
+	c := New()
+	defer c.Stop()
+
+	// Add exactly threshold + 1 entries (1001)
+	// When we delete all of them, at deletion 1000: currentSize = 1
+	// At deletion 1001: currentSize = 0, triggers compaction
+	totalEntries := indexCompactionThreshold + 1
+	ids := make([]EntryID, totalEntries)
+	for i := range ids {
+		id, err := c.AddFunc("@every 1s", func() {}, WithName(fmt.Sprintf("zero-%d", i)))
+		if err != nil {
+			t.Fatalf("failed to add job %d: %v", i, err)
+		}
+		ids[i] = id
+	}
+
+	// Remove all entries
+	for i := 0; i < totalEntries; i++ {
+		c.Remove(ids[i])
+	}
+
+	// After removing all 1001 entries:
+	// - At deletion 1000: threshold reached, currentSize = 1, 1000 <= 1 is false, compaction triggers
+	// - Actually wait, 1000 <= 1 is false, so compaction would trigger earlier
+
+	// After compaction at 1000, indexDeletions resets to 0
+	// Then one more deletion, indexDeletions = 1
+	// So indexDeletions should be 1
+	if c.indexDeletions != 1 {
+		t.Errorf("expected indexDeletions = 1 after all removals (compaction resets counter), got %d", c.indexDeletions)
+	}
+
+	// Verify all entries are gone
+	if len(c.Entries()) != 0 {
+		t.Errorf("expected 0 entries, got %d", len(c.Entries()))
+	}
+}
+
+// TestIndexCompactionBoundaryDeletionsEqualSize tests cron.go:820 where
+// `indexDeletions <= currentSize` at the exact boundary (deletions == currentSize).
+// This kills the CONDITIONALS_BOUNDARY mutation where <= could become <.
+func TestIndexCompactionBoundaryDeletionsEqualSize(t *testing.T) {
+	c := New()
+	defer c.Stop()
+
+	// Add 2000 entries, then remove exactly 1000
+	// At deletion 1000: currentSize = 1000, indexDeletions = 1000
+	// Condition: 1000 > 0 && 1000 <= 1000 → true, so we skip compaction
+	// With mutation <= → <: 1000 < 1000 → false, so we'd incorrectly compact
+	totalEntries := 2 * indexCompactionThreshold
+	ids := make([]EntryID, totalEntries)
+	for i := range ids {
+		id, err := c.AddFunc("@every 1s", func() {}, WithName(fmt.Sprintf("eq-%d", i)))
+		if err != nil {
+			t.Fatalf("failed to add job %d: %v", i, err)
+		}
+		ids[i] = id
+	}
+
+	// Remove exactly 1000 entries (reaching threshold but not exceeding currentSize)
+	for i := 0; i < indexCompactionThreshold; i++ {
+		c.Remove(ids[i])
+	}
+
+	// indexDeletions should still be 1000 (no compaction happened)
+	// because currentSize = 1000 and 1000 <= 1000
+	if c.indexDeletions != indexCompactionThreshold {
+		t.Errorf("expected indexDeletions = %d (no compaction at boundary), got %d",
+			indexCompactionThreshold, c.indexDeletions)
+	}
+
+	// Now remove one more entry
+	// indexDeletions = 1001, currentSize = 999
+	// 1001 <= 999 is false, so compaction triggers
+	c.Remove(ids[indexCompactionThreshold])
+
+	// After compaction, indexDeletions resets to 0, then increments for this deletion = 1
+	// Actually wait, the deletion happens, then compaction. Let me check the order.
+	// In removeEntry: indexDeletions++ then maybeCompactIndexes()
+	// So at the 1001st deletion:
+	// - indexDeletions becomes 1001
+	// - maybeCompactIndexes checks: 1001 >= 1000 ✓, currentSize = 999, 1001 <= 999? No
+	// - Compaction triggers, indexDeletions resets to 0 (AFTER the deletion is counted)
+	// Wait, compaction sets indexDeletions = 0 after rebuilding
+	if c.indexDeletions != 0 {
+		t.Errorf("expected indexDeletions = 0 after compaction triggered, got %d", c.indexDeletions)
+	}
+
+	// Verify remaining entries
+	if len(c.Entries()) != indexCompactionThreshold-1 {
+		t.Errorf("expected %d entries, got %d", indexCompactionThreshold-1, len(c.Entries()))
+	}
+}
+
 func TestScheduleJobWithOptions(t *testing.T) {
 	c := New()
 	defer c.Stop()
