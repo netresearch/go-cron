@@ -42,6 +42,7 @@ jobs:
         timeout-minutes: 45
 
       - name: Upload Mutation Report
+        if: always()
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: mutation-report
@@ -49,8 +50,10 @@ jobs:
             mutation-report.json
             mutation-output.txt
           retention-days: 30
+          if-no-files-found: warn
 
       - name: Summary
+        if: always()
         run: |
           echo "## Mutation Testing Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
