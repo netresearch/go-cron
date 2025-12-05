@@ -17,6 +17,7 @@ jobs:
   mutation:
     name: Gremlins Mutation Testing
     runs-on: ubuntu-latest
+    timeout-minutes: 60
 
     steps:
       - name: Harden Runner
@@ -40,8 +41,9 @@ jobs:
 
       - name: Run Mutation Tests
         run: |
-          gremlins unleash --tags="" --output=mutation-report.json 2>&1 | tee mutation-output.txt
+          gremlins unleash --tags="" --workers=4 --output=mutation-report.json 2>&1 | tee mutation-output.txt
         continue-on-error: true
+        timeout-minutes: 45
 
       - name: Upload Mutation Report
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
