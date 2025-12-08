@@ -1724,7 +1724,6 @@ func TestIndexCompactionBoundaryDeletionsEqualSize(t *testing.T) {
 	}
 }
 
-
 // TestIndexCompactionBoundaryDeletionsEqualSizeExplicit is a focused test for cron.go:820.
 // This explicitly tests the exact boundary where indexDeletions == currentSize.
 // The mutation `<=` → `<` would incorrectly trigger compaction at this boundary.

@@ -473,7 +473,6 @@ func TestCircuitBreaker_IntegrationWithCron(t *testing.T) {
 	}
 }
 
-
 // TestCircuitBreaker_BoundaryThresholdExact tests retry.go:267 (isHalfOpen) boundary condition.
 // This kills CONDITIONALS_BOUNDARY mutation where `>= threshold` could become `> threshold`.
 // When failures == threshold exactly, isHalfOpen should return true.
