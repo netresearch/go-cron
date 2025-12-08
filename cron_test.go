@@ -1724,6 +1724,81 @@ func TestIndexCompactionBoundaryDeletionsEqualSize(t *testing.T) {
 	}
 }
 
+
+// TestIndexCompactionBoundaryDeletionsEqualSizeExplicit is a focused test for cron.go:820.
+// This explicitly tests the exact boundary where indexDeletions == currentSize.
+// The mutation `<=` → `<` would incorrectly trigger compaction at this boundary.
+func TestIndexCompactionBoundaryDeletionsEqualSizeExplicit(t *testing.T) {
+	c := New()
+	defer c.Stop()
+
+	// Strategy: Create a state where after threshold deletions,
+	// indexDeletions == currentSize exactly.
+	//
+	// We need: total entries = threshold + X, delete threshold entries
+	// After threshold deletions: currentSize = X, indexDeletions = threshold
+	// For indexDeletions == currentSize, we need X = threshold
+	// So total = 2 * threshold
+
+	total := 2 * indexCompactionThreshold
+	ids := make([]EntryID, total)
+
+	for i := 0; i < total; i++ {
+		id, err := c.AddFunc("@every 1s", func() {}, WithName(fmt.Sprintf("explicit-%d", i)))
+		if err != nil {
+			t.Fatalf("failed to add job %d: %v", i, err)
+		}
+		ids[i] = id
+	}
+
+	// Verify starting state
+	if len(c.entryIndex) != total {
+		t.Fatalf("expected %d entries, got %d", total, len(c.entryIndex))
+	}
+	if c.indexDeletions != 0 {
+		t.Fatalf("expected indexDeletions = 0, got %d", c.indexDeletions)
+	}
+
+	// Delete exactly threshold entries
+	for i := 0; i < indexCompactionThreshold; i++ {
+		c.Remove(ids[i])
+	}
+
+	// After threshold deletions:
+	// - currentSize = total - threshold = threshold (1000)
+	// - indexDeletions = threshold (1000)
+	// - Condition: threshold >= threshold (true) && currentSize > 0 (true) && deletions <= size (1000 <= 1000 = true)
+	// - With <= true: return early, no compaction
+	// - With mutation < false: don't return, do compact, reset indexDeletions to 0
+
+	currentSize := len(c.entryIndex)
+	if currentSize != indexCompactionThreshold {
+		t.Errorf("expected currentSize = %d, got %d", indexCompactionThreshold, currentSize)
+	}
+
+	// CRITICAL ASSERTION: indexDeletions should equal threshold (no compaction)
+	// With mutation, it would be 0 (after compaction)
+	if c.indexDeletions != indexCompactionThreshold {
+		t.Errorf("MUTATION DETECTED: indexDeletions should be %d (no compaction at equality boundary), got %d. "+
+			"If this is 0, the `<=` was mutated to `<` at cron.go:820",
+			indexCompactionThreshold, c.indexDeletions)
+	}
+
+	// Additional verification: deleting one more should trigger compaction
+	c.Remove(ids[indexCompactionThreshold])
+
+	// After one more deletion:
+	// - currentSize = threshold - 1 (999)
+	// - indexDeletions would be threshold + 1 (1001) before compaction check
+	// - Condition: 1001 >= 1000 (true) && 999 > 0 (true) && 1001 <= 999 (false)
+	// - Since condition is false, compaction triggers, indexDeletions resets to 0
+
+	if c.indexDeletions != 0 {
+		t.Errorf("expected indexDeletions = 0 after exceeding boundary (compaction should trigger), got %d",
+			c.indexDeletions)
+	}
+}
+
 func TestScheduleJobWithOptions(t *testing.T) {
 	c := New()
 	defer c.Stop()

@@ -1,6 +1,7 @@
 package cron
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -308,5 +309,155 @@ func TestSlash0NoHang(t *testing.T) {
 	_, err := ParseStandard(schedule)
 	if err == nil {
 		t.Error("expected an error on 0 increment")
+	}
+}
+
+
+// TestNormalizeDSTDay_Hour12Boundary tests spec.go:128 boundary condition.
+// This kills CONDITIONALS_BOUNDARY mutation where `> 12` could become `>= 12`.
+// Hour 12 should be adjusted backward to midnight, not forward.
+func TestNormalizeDSTDay_Hour12Boundary(t *testing.T) {
+	// Test times in a neutral timezone to isolate the function behavior
+	loc := time.UTC
+
+	tests := []struct {
+		name     string
+		input    time.Time
+		expected time.Time
+	}{
+		{
+			name:     "hour 0 unchanged",
+			input:    time.Date(2024, 3, 10, 0, 0, 0, 0, loc),
+			expected: time.Date(2024, 3, 10, 0, 0, 0, 0, loc),
+		},
+		{
+			name:     "hour 1 adjusted to midnight",
+			input:    time.Date(2024, 3, 10, 1, 0, 0, 0, loc),
+			expected: time.Date(2024, 3, 10, 0, 0, 0, 0, loc),
+		},
+		{
+			name:     "hour 11 adjusted to midnight",
+			input:    time.Date(2024, 3, 10, 11, 0, 0, 0, loc),
+			expected: time.Date(2024, 3, 10, 0, 0, 0, 0, loc),
+		},
+		{
+			// CRITICAL: This tests the boundary at hour == 12
+			// Original: hour > 12 is false, so we go to else: t.Add(-12h) = midnight
+			// Mutant:   hour >= 12 is true, so we go to if: t.Add(12h) = noon next day (WRONG)
+			name:     "hour 12 BOUNDARY - must adjust backward to midnight",
+			input:    time.Date(2024, 3, 10, 12, 0, 0, 0, loc),
+			expected: time.Date(2024, 3, 10, 0, 0, 0, 0, loc),
+		},
+		{
+			name:     "hour 13 adjusted forward to midnight",
+			input:    time.Date(2024, 3, 10, 13, 0, 0, 0, loc),
+			expected: time.Date(2024, 3, 11, 0, 0, 0, 0, loc),
+		},
+		{
+			name:     "hour 23 adjusted forward to midnight",
+			input:    time.Date(2024, 3, 10, 23, 0, 0, 0, loc),
+			expected: time.Date(2024, 3, 11, 0, 0, 0, 0, loc),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := normalizeDSTDay(tt.input)
+			if !got.Equal(tt.expected) {
+				t.Errorf("normalizeDSTDay(%v) = %v, want %v", tt.input, got, tt.expected)
+			}
+			// Additional check: result hour should always be 0 (midnight)
+			if got.Hour() != 0 {
+				t.Errorf("normalizeDSTDay(%v) resulted in hour %d, want 0 (midnight)",
+					tt.input, got.Hour())
+			}
+		})
+	}
+}
+
+// TestNormalizeDSTDay_Arithmetic tests spec.go:131 arithmetic operations.
+// This kills ARITHMETIC_BASE mutations in the hour adjustment calculations.
+func TestNormalizeDSTDay_Arithmetic(t *testing.T) {
+	loc := time.UTC
+
+	// Test a range of hours to ensure arithmetic is correct
+	for hour := 1; hour <= 23; hour++ {
+		t.Run(fmt.Sprintf("hour_%d", hour), func(t *testing.T) {
+			input := time.Date(2024, 6, 15, hour, 30, 45, 123, loc)
+			got := normalizeDSTDay(input)
+
+			// Result should always be at midnight
+			if got.Hour() != 0 {
+				t.Errorf("hour %d: got hour %d, want 0", hour, got.Hour())
+			}
+
+			// Verify the date is correct based on which branch was taken
+			if hour > 12 {
+				// Should advance to next day's midnight
+				expectedDate := time.Date(2024, 6, 16, 0, 0, 0, 0, loc)
+				if got.Year() != expectedDate.Year() || got.Month() != expectedDate.Month() ||
+					got.Day() != expectedDate.Day() {
+					t.Errorf("hour %d: expected date %v, got %v", hour, expectedDate, got)
+				}
+			} else {
+				// Should go back to same day's midnight
+				expectedDate := time.Date(2024, 6, 15, 0, 0, 0, 0, loc)
+				if got.Year() != expectedDate.Year() || got.Month() != expectedDate.Month() ||
+					got.Day() != expectedDate.Day() {
+					t.Errorf("hour %d: expected date %v, got %v", hour, expectedDate, got)
+				}
+			}
+		})
+	}
+}
+
+// TestCheckHourDSTSkip_Boundary tests spec.go:142 for DST skip detection.
+// This ensures the hour bit check correctly identifies skipped hours.
+func TestCheckHourDSTSkip_Boundary(t *testing.T) {
+	tests := []struct {
+		name     string
+		prev     time.Time
+		curr     time.Time
+		hourBits uint64
+		expected bool
+	}{
+		{
+			name:     "no DST skip (1 hour diff)",
+			prev:     time.Date(2024, 3, 10, 1, 0, 0, 0, time.UTC),
+			curr:     time.Date(2024, 3, 10, 2, 0, 0, 0, time.UTC),
+			hourBits: 0xFFFFFF, // all hours
+			expected: false,
+		},
+		{
+			name:     "DST skip (2 hour diff) - skipped hour in schedule",
+			prev:     time.Date(2024, 3, 10, 1, 0, 0, 0, time.UTC),
+			curr:     time.Date(2024, 3, 10, 3, 0, 0, 0, time.UTC),
+			hourBits: 1 << 2, // hour 2 scheduled (the skipped hour)
+			expected: true,
+		},
+		{
+			name:     "DST skip (2 hour diff) - skipped hour NOT in schedule",
+			prev:     time.Date(2024, 3, 10, 1, 0, 0, 0, time.UTC),
+			curr:     time.Date(2024, 3, 10, 3, 0, 0, 0, time.UTC),
+			hourBits: 1 << 5, // hour 5 scheduled (not the skipped hour)
+			expected: false,
+		},
+		{
+			name:     "3 hour diff - not a DST skip",
+			prev:     time.Date(2024, 3, 10, 1, 0, 0, 0, time.UTC),
+			curr:     time.Date(2024, 3, 10, 4, 0, 0, 0, time.UTC),
+			hourBits: 0xFFFFFF,
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := checkHourDSTSkip(tt.prev, tt.curr, tt.hourBits)
+			if got != tt.expected {
+				t.Errorf("checkHourDSTSkip(%v, %v, %x) = %v, want %v",
+					tt.prev, tt.curr, tt.hourBits, got, tt.expected)
+			}
+		})
 	}
 }

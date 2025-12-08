@@ -472,3 +472,159 @@ func TestCircuitBreaker_IntegrationWithCron(t *testing.T) {
 		t.Errorf("expected 2 executions (circuit should open), got %d", got)
 	}
 }
+
+
+// TestCircuitBreaker_BoundaryThresholdExact tests retry.go:267 (isHalfOpen) boundary condition.
+// This kills CONDITIONALS_BOUNDARY mutation where `>= threshold` could become `> threshold`.
+// When failures == threshold exactly, isHalfOpen should return true.
+func TestCircuitBreaker_BoundaryThresholdExact(t *testing.T) {
+	var executions int32
+	threshold := 2 // Use small threshold for clarity
+
+	wrapped := CircuitBreaker(DiscardLogger, threshold, time.Hour)(
+		FuncJob(func() {
+			atomic.AddInt32(&executions, 1)
+			panic("always fails")
+		}),
+	)
+
+	// Fail exactly `threshold` times (2 times)
+	for i := 0; i < threshold; i++ {
+		func() {
+			defer func() { recover() }()
+			wrapped.Run()
+		}()
+	}
+
+	// At this point: failures == threshold (2 == 2)
+	// Circuit should be OPEN (isHalfOpen returns true for failures >= threshold)
+	// With mutation >= → >: isHalfOpen would return false (2 > 2 is false)
+	// and circuit would incorrectly allow execution
+
+	execsBefore := atomic.LoadInt32(&executions)
+
+	// This run should be SKIPPED if circuit is correctly open
+	wrapped.Run()
+
+	execsAfter := atomic.LoadInt32(&executions)
+
+	// If circuit is correctly open, executions should NOT increase
+	if execsAfter != execsBefore {
+		t.Errorf("circuit should be open at exact threshold: failures=%d, threshold=%d, "+
+			"expected executions to stay at %d, got %d",
+			threshold, threshold, execsBefore, execsAfter)
+	}
+
+	// Verify we had exactly threshold executions before circuit opened
+	if execsBefore != int32(threshold) {
+		t.Errorf("expected %d executions before circuit opened, got %d", threshold, execsBefore)
+	}
+}
+
+// TestCircuitBreaker_ResetOnSuccessBoundary tests retry.go:282 (resetOnSuccess) boundary condition.
+// This kills CONDITIONALS_BOUNDARY mutation where `>= threshold` could become `> threshold`.
+// When failures == threshold, wasOpen should return true on successful reset.
+func TestCircuitBreaker_ResetOnSuccessBoundary(t *testing.T) {
+	var executions int32
+	var shouldFail atomic.Bool
+	threshold := 2
+	cooldown := 50 * time.Millisecond
+
+	shouldFail.Store(true)
+
+	wrapped := CircuitBreaker(DiscardLogger, threshold, cooldown)(
+		FuncJob(func() {
+			atomic.AddInt32(&executions, 1)
+			if shouldFail.Load() {
+				panic("controlled failure")
+			}
+		}),
+	)
+
+	// Fail exactly threshold times to open circuit
+	for i := 0; i < threshold; i++ {
+		func() {
+			defer func() { recover() }()
+			wrapped.Run()
+		}()
+	}
+
+	// At this point: failures == threshold (circuit open)
+	// Wait for cooldown to allow half-open state
+	time.Sleep(cooldown + 10*time.Millisecond)
+
+	// Set up to succeed
+	shouldFail.Store(false)
+
+	execsBefore := atomic.LoadInt32(&executions)
+
+	// Execute in half-open state - should succeed and reset circuit
+	wrapped.Run()
+
+	execsAfter := atomic.LoadInt32(&executions)
+
+	// Execution should have happened (half-open allows one attempt)
+	if execsAfter != execsBefore+1 {
+		t.Errorf("half-open state should allow execution: expected %d, got %d",
+			execsBefore+1, execsAfter)
+	}
+
+	// Now circuit should be closed, run again to verify
+	wrapped.Run()
+
+	execsFinal := atomic.LoadInt32(&executions)
+	if execsFinal != execsAfter+1 {
+		t.Errorf("circuit should be closed after successful reset: expected %d, got %d",
+			execsAfter+1, execsFinal)
+	}
+}
+
+// TestCircuitBreaker_IsOpenBoundary tests retry.go:259 (isOpen) at exact threshold.
+// Combined with cooldown to verify open state detection at boundary.
+func TestCircuitBreaker_IsOpenBoundary(t *testing.T) {
+	var executions int32
+	threshold := 3
+	cooldown := 100 * time.Millisecond
+
+	wrapped := CircuitBreaker(DiscardLogger, threshold, cooldown)(
+		FuncJob(func() {
+			atomic.AddInt32(&executions, 1)
+			panic("always fails")
+		}),
+	)
+
+	// Fail exactly threshold times
+	for i := 0; i < threshold; i++ {
+		func() {
+			defer func() { recover() }()
+			wrapped.Run()
+		}()
+	}
+
+	// Verify exactly threshold executions happened
+	if got := atomic.LoadInt32(&executions); got != int32(threshold) {
+		t.Fatalf("expected %d executions, got %d", threshold, got)
+	}
+
+	// Circuit should be open - next call should be skipped (within cooldown)
+	wrapped.Run()
+
+	if got := atomic.LoadInt32(&executions); got != int32(threshold) {
+		t.Errorf("circuit should be open at exact threshold, executions should stay at %d, got %d",
+			threshold, got)
+	}
+
+	// Wait past cooldown - half-open state should allow one execution
+	time.Sleep(cooldown + 20*time.Millisecond)
+
+	func() {
+		defer func() { recover() }()
+		wrapped.Run()
+	}()
+
+	// Should have one more execution (half-open attempt)
+	if got := atomic.LoadInt32(&executions); got != int32(threshold)+1 {
+		t.Errorf("half-open state should allow execution, expected %d, got %d",
+			threshold+1, got)
+	}
+}
