@@ -62,8 +62,7 @@ lint-fix:
 # Format code
 fmt:
 	@echo "==> Formatting code..."
-	@gofmt -w .
-	@goimports -w .
+	@golangci-lint fmt ./...
 
 # Tidy modules
 tidy:
@@ -112,9 +111,7 @@ dev-setup:
 	@echo "🔧 Setting up development environment..."
 	@echo "📦 Installing required tools..."
 	@go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
-	@echo "✅ golangci-lint v2 installed"
-	@go install golang.org/x/tools/cmd/goimports@latest
-	@echo "✅ goimports installed"
+	@echo "✅ golangci-lint v2 installed (includes gci, gofumpt formatters)"
 	@go install github.com/evilmartians/lefthook@latest
 	@echo "✅ lefthook installed"
 	@lefthook install

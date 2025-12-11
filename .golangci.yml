@@ -122,10 +122,9 @@ linters:
       - examples$
 formatters:
   enable:
-    - gci
-    - gofmt
-    - gofumpt
-    - goimports
+    - gci       # Import grouping (standard → external → local)
+    - gofumpt   # Stricter gofmt (includes gofmt, no need for both)
+    # Note: goimports not needed - gci handles import ordering
   settings:
     gci:
       sections:
