@@ -133,7 +133,6 @@ linters:
     goconst:
       min-len: 3          # Minimum string length to consider
       min-occurrences: 3  # Minimum occurrences before suggesting constant
-      ignore-tests: true
     godot:
       scope: toplevel     # Only check top-level comments (not inline)
       period: true
