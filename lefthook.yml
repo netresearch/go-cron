@@ -8,8 +8,14 @@ pre-commit:
   parallel: true
   jobs:
     - name: tidy
-      run: go mod tidy && git diff --exit-code go.mod go.sum
-      stage_fixed: true
+      run: |
+        if ! go mod tidy -diff >/dev/null 2>&1; then
+          echo "❌ go.mod is not tidy. Differences:"
+          go mod tidy -diff
+          echo ""
+          echo "Run 'go mod tidy' and commit the changes."
+          exit 1
+        fi
 
     - name: fmt
       glob: "*.go"
@@ -37,10 +43,10 @@ pre-push:
   parallel: true
   jobs:
     - name: test
-      run: go test -race -short ./...
+      run: CGO_ENABLED=1 go test -race -short ./...
 
     - name: lint-full
-      run: golangci-lint run ./...
+      run: golangci-lint run --timeout=3m ./...
 
     - name: vulncheck
       run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...

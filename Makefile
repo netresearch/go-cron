@@ -1,7 +1,7 @@
 # go-cron Makefile
 # Build automation for development and CI
 
-.PHONY: all build test test-race test-coverage lint lint-fix fmt clean help
+.PHONY: all build test test-race test-coverage lint lint-fix fmt clean help setup dev-setup dev-check precommit
 
 # Build flags for reproducible, optimized binaries
 LDFLAGS := -s -w
@@ -104,6 +104,32 @@ ci: tidy lint test-coverage security gosec
 audit: security gosec gitleaks
 	@echo "==> Security audit complete!"
 
+# Development environment setup
+setup: dev-setup
+	@echo "🎉 Setup complete! You're ready to develop."
+
+dev-setup:
+	@echo "🔧 Setting up development environment..."
+	@echo "📦 Installing required tools..."
+	@go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+	@echo "✅ golangci-lint v2 installed"
+	@go install golang.org/x/tools/cmd/goimports@latest
+	@echo "✅ goimports installed"
+	@go install github.com/evilmartians/lefthook@latest
+	@echo "✅ lefthook installed"
+	@lefthook install
+	@echo "✅ Git hooks installed via lefthook"
+	@echo ""
+	@echo "🛡️ All commits will now be automatically validated!"
+
+# Run all development checks (same as pre-commit)
+dev-check: tidy fmt lint test-race
+	@echo "🎉 All development checks passed! Ready to commit."
+
+# Pre-commit validation
+precommit: dev-check
+	@echo "✅ Pre-commit checks complete - your code is ready!"
+
 # Help
 help:
 	@echo "Available targets:"
@@ -126,4 +152,8 @@ help:
 	@echo "  verify        - Run all checks before commit"
 	@echo "  ci            - Run CI checks"
 	@echo "  audit         - Run full security audit"
+	@echo "  setup         - Set up development environment with git hooks"
+	@echo "  dev-setup     - Install tools and configure lefthook"
+	@echo "  dev-check     - Run all development checks"
+	@echo "  precommit     - Run pre-commit validation"
 	@echo "  help          - Show this help"
