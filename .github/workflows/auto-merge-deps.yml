@@ -4,13 +4,14 @@ on:
   pull_request_target:
     types: [opened, synchronize, reopened]
 
-permissions:
-  contents: write
-  pull-requests: write
+permissions: read-all
 
 jobs:
   auto-merge:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
     # Only run for bot accounts
     if: github.actor == 'dependabot[bot]' || github.actor == 'renovate[bot]'
     steps:

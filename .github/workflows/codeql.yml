@@ -9,15 +9,16 @@ on:
     - cron: '0 6 * * 1' # Weekly on Monday at 6 AM UTC
   workflow_dispatch: # Allow manual trigger
 
-permissions:
-  contents: read
-  security-events: write
-  actions: read
+permissions: read-all
 
 jobs:
   analyze:
     name: Analyze
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
 
     steps:
       - name: Harden Runner
