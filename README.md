@@ -65,9 +65,9 @@ import (
 func main() {
     c := cron.New()
 
-    // Run every minute
+    // Run every second
     c.AddFunc("* * * * *", func() {
-        fmt.Println("Every minute:", time.Now())
+        fmt.Println("Every second:", time.Now())
     })
 
     // Run at specific times
