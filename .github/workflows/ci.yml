@@ -46,7 +46,7 @@ jobs:
           git diff --exit-code -- go.mod go.sum
 
       - name: Install gotestsum
-        run: go install gotest.tools/gotestsum@latest
+        run: go install gotest.tools/gotestsum@v1.13.0
 
       - name: Unit tests
         shell: bash
@@ -129,7 +129,7 @@ jobs:
         run: |
           set +e
           TMP_OUT=$(mktemp)
-          go run golang.org/x/vuln/cmd/govulncheck@latest ./... | tee "$TMP_OUT"
+          go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./... | tee "$TMP_OUT"
           set -e
           if grep -E "^\s*Fixed in:\s+" "$TMP_OUT" | grep -v "Fixed in: N/A" >/dev/null; then
             echo "govulncheck: vulnerabilities with available fixes detected"
@@ -158,7 +158,7 @@ jobs:
           go-version-file: go.mod
 
       - name: Install gosec
-        run: go install github.com/securego/gosec/v2/cmd/gosec@latest
+        run: go install github.com/securego/gosec/v2/cmd/gosec@v2.22.11
 
       - name: Run gosec
         run: |
@@ -346,7 +346,7 @@ jobs:
           go-version-file: go.mod
 
       - name: Install go-licenses
-        run: go install github.com/google/go-licenses@latest
+        run: go install github.com/google/go-licenses@v1.6.0
 
       - name: Check license compliance
         run: |
