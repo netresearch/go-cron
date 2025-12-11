@@ -1,6 +1,7 @@
 package cron
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"strconv"
@@ -61,10 +62,10 @@ type cacheEntry struct {
 }
 
 // ErrNoFields is returned when no fields or Descriptor are configured.
-var ErrNoFields = fmt.Errorf("at least one field or Descriptor must be configured")
+var ErrNoFields = errors.New("at least one field or Descriptor must be configured")
 
 // ErrMultipleOptionals is returned when more than one optional field is configured.
-var ErrMultipleOptionals = fmt.Errorf("multiple optionals may not be configured")
+var ErrMultipleOptionals = errors.New("multiple optionals may not be configured")
 
 // TryNewParser creates a Parser with custom options, returning an error if the
 // configuration is invalid. This is the safe alternative to NewParser for cases
@@ -311,7 +312,7 @@ func (p Parser) Parse(spec string) (Schedule, error) {
 // parse is the internal parsing logic, called by Parse.
 func (p Parser) parse(spec string) (Schedule, error) {
 	if len(spec) == 0 {
-		return nil, fmt.Errorf("empty spec string")
+		return nil, errors.New("empty spec string")
 	}
 	if len(spec) > MaxSpecLength {
 		return nil, fmt.Errorf("spec too long: %d > %d", len(spec), MaxSpecLength)
@@ -391,7 +392,7 @@ func processOptionalFlags(options ParseOption) (ParseOption, int, error) {
 		optionals++
 	}
 	if optionals > 1 {
-		return 0, 0, fmt.Errorf("multiple optionals may not be configured")
+		return 0, 0, errors.New("multiple optionals may not be configured")
 	}
 	return options, optionals, nil
 }
@@ -432,7 +433,7 @@ func normalizeFields(fields []string, options ParseOption) ([]string, error) {
 		case options&SecondOptional > 0:
 			fields = append([]string{defaults[0]}, fields...)
 		default:
-			return nil, fmt.Errorf("unknown optional field")
+			return nil, errors.New("unknown optional field")
 		}
 	}
 
@@ -617,7 +618,7 @@ func isValidTimezoneChar(r rune) bool {
 func validateTimezone(tz string) error {
 	const maxTimezoneLen = 64 // IANA timezone names are well under this limit
 	if len(tz) == 0 {
-		return fmt.Errorf("empty timezone string")
+		return errors.New("empty timezone string")
 	}
 	if len(tz) > maxTimezoneLen {
 		return fmt.Errorf("timezone string too long (max %d chars)", maxTimezoneLen)
@@ -658,7 +659,7 @@ func getBits(low, high, step uint) uint64 {
 	return bits
 }
 
-// all returns all bits within the given bounds.  (plus the star bit)
+// all returns all bits within the given bounds (plus the star bit).
 func all(r bounds) uint64 {
 	return getBits(r.min, r.max, 1) | starBit
 }

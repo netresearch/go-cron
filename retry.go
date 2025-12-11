@@ -62,35 +62,32 @@ const jitterFraction = 0.1
 // simultaneously. Attempt 1 has no delay (first execution), attempt 2 uses initialDelay,
 // and subsequent attempts grow exponentially.
 func calculateBackoffDelay(attempt int, initialDelay, maxDelay time.Duration, multiplier float64) time.Duration {
-	delay := time.Duration(float64(initialDelay) * math.Pow(multiplier, float64(attempt-2)))
-	if delay > maxDelay {
-		delay = maxDelay
-	}
+	delay := min(time.Duration(float64(initialDelay)*math.Pow(multiplier, float64(attempt-2))), maxDelay)
 	// Apply jitter: ±10% randomization to prevent thundering herd
 	// #nosec G404 -- math/rand is appropriate for jitter; cryptographic randomness not needed
 	jitter := time.Duration(float64(delay) * jitterFraction * (2*rand.Float64() - 1))
 	return delay + jitter
 }
 
-// PanicWithStack wraps a panic value with the stack trace at the point of panic.
+// PanicError wraps a panic value with the stack trace at the point of panic.
 // This allows re-panicking to preserve the original stack trace for debugging.
-type PanicWithStack struct {
+type PanicError struct {
 	Value any    // The original panic value
 	Stack []byte // Stack trace at point of panic
 }
 
-// Error implements the error interface for PanicWithStack.
-func (p *PanicWithStack) Error() string {
+// Error implements the error interface for PanicError.
+func (p *PanicError) Error() string {
 	return fmt.Sprintf("panic: %v", p.Value)
 }
 
 // String returns a detailed representation including the stack trace.
-func (p *PanicWithStack) String() string {
+func (p *PanicError) String() string {
 	return fmt.Sprintf("panic: %v\nstack:\n%s", p.Value, p.Stack)
 }
 
 // Unwrap returns the original panic value if it was an error.
-func (p *PanicWithStack) Unwrap() error {
+func (p *PanicError) Unwrap() error {
 	if err, ok := p.Value.(error); ok {
 		return err
 	}
@@ -98,10 +95,10 @@ func (p *PanicWithStack) Unwrap() error {
 }
 
 // safeExecute runs the given function and captures any panic value with stack trace.
-// Returns nil if the function completes successfully, or a *PanicWithStack otherwise.
+// Returns nil if the function completes successfully, or a *PanicError otherwise.
 // This is a generic helper for panic-safe execution used throughout the library.
 //
-// The returned *PanicWithStack preserves the original stack trace, which is critical
+// The returned *PanicError preserves the original stack trace, which is critical
 // for debugging when panics are re-thrown by wrappers like RetryWithBackoff.
 //
 // Example usage:
@@ -115,7 +112,7 @@ func safeExecute(fn func()) (panicValue any) {
 			const size = 64 << 10 // 64KB buffer for stack trace
 			buf := make([]byte, size)
 			buf = buf[:runtime.Stack(buf, false)]
-			panicValue = &PanicWithStack{Value: r, Stack: buf}
+			panicValue = &PanicError{Value: r, Stack: buf}
 		}
 	}()
 	fn()
@@ -130,10 +127,10 @@ func runWithRecovery(j Job) any {
 	return safeExecute(j.Run)
 }
 
-// extractPanicValueAndStack extracts the original panic value and stack from a PanicWithStack.
-// If the value is not a PanicWithStack, returns the value directly with empty stack.
+// extractPanicValueAndStack extracts the original panic value and stack from a PanicError.
+// If the value is not a PanicError, returns the value directly with empty stack.
 func extractPanicValueAndStack(p any) (value any, stack string) {
-	if pws, ok := p.(*PanicWithStack); ok {
+	if pws, ok := p.(*PanicError); ok {
 		return pws.Value, string(pws.Stack)
 	}
 	return p, ""

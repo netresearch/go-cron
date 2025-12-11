@@ -167,7 +167,7 @@ func (f *FakeClock) TimerCount() int {
 // Must be called with f.mu held.
 func (f *FakeClock) fireExpiredTimers() {
 	for len(f.timers) > 0 && !f.timers[0].deadline.After(f.now) {
-		t := heap.Pop(&f.timers).(*fakeTimer) //nolint:errcheck // heap.Interface contract guarantees type
+		t := heap.Pop(&f.timers).(*fakeTimer) //nolint:forcetypeassert,errcheck // heap.Interface contract guarantees type
 		if !t.stopped {
 			select {
 			case t.ch <- f.now:
@@ -260,7 +260,7 @@ func (h timerHeap) Swap(i, j int) {
 
 // Push adds a timer to the heap and sets its heap index.
 func (h *timerHeap) Push(x any) {
-	t := x.(*fakeTimer) //nolint:errcheck // heap.Interface contract guarantees type
+	t := x.(*fakeTimer) //nolint:forcetypeassert,errcheck // heap.Interface contract guarantees type
 	t.heapIndex = len(*h)
 	*h = append(*h, t)
 }

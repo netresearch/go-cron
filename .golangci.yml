@@ -13,10 +13,23 @@ linters:
     - noctx           # HTTP requests without context
     - rowserrcheck    # SQL rows.Err() checks
     - sqlclosecheck   # SQL rows/statements close
+    - durationcheck   # Detects time.Second * time.Second bugs (critical for cron!)
+    - nilerr          # Catches return nil when err != nil
+    - nilnesserr      # Checks err != nil but returns different nil
+    - fatcontext      # Detects nested contexts in loops
+    - contextcheck    # Non-inherited context usage
+    - copyloopvar     # Loop variable copy issues (Go 1.22+)
+    - forcetypeassert # Unchecked type assertions (panic risk)
+    - makezero        # Slice with non-zero initial length bugs
+    - reassign        # Package variable reassignment
+    - bidichk         # Dangerous unicode sequences (trojan source)
+    - asasalint       # []any as any in variadic funcs
 
     # Performance
     - prealloc        # Slice preallocation suggestions
     - unconvert       # Unnecessary type conversions
+    - perfsprint      # Faster sprintf alternatives
+    - mirror          # Wrong bytes/strings usage patterns
 
     # Style & maintainability
     - gocyclo         # Cyclomatic complexity
@@ -29,6 +42,33 @@ linters:
     - misspell        # Spelling mistakes
     - revive          # Fast, configurable linter (replaces golint)
     - gocritic        # Opinionated linter with many checks
+    - unparam         # Unused function parameters
+    - wastedassign    # Wasted assignments
+    - dupword         # Duplicate words in comments "the the"
+    - whitespace      # Unnecessary newlines
+    - dogsled         # Too many blank identifiers x, _, _, _ := f()
+    - errname         # Error naming conventions ErrFoo, FooError
+    - goconst         # Repeated strings should be constants
+    - predeclared     # Shadows predeclared identifiers (true, nil)
+    - recvcheck       # Receiver type consistency
+    - nakedret        # Long functions with naked returns
+
+    # Modernization (Go 1.21+)
+    - intrange        # Use for range n instead of for i := 0; i < n; i++
+    - usestdlibvars   # Use http.StatusOK instead of 200
+    - exptostd        # Replace x/exp with stdlib equivalents
+    - modernize       # Modern Go features and idioms
+
+    # Testing quality
+    - thelper         # Test helpers should call t.Helper()
+    - tparallel       # Correct t.Parallel() usage
+    - testableexamples # Examples need expected output
+
+    # Documentation & hygiene
+    - nolintlint      # Validates //nolint directives
+    - gocheckcompilerdirectives # Valid //go: directives
+    - godot           # Comments end with period
+    - godoclint       # Godoc best practices
 
     # Security (complements gosec)
     - gosec           # Security issues
@@ -88,6 +128,19 @@ linters:
     gosec:
       excludes:
         - G104  # Audit errors not checked (too noisy for this codebase)
+    nakedret:
+      max-func-lines: 30  # Allow naked returns in short functions
+    goconst:
+      min-len: 3          # Minimum string length to consider
+      min-occurrences: 3  # Minimum occurrences before suggesting constant
+      ignore-tests: true
+    godot:
+      scope: toplevel     # Only check top-level comments (not inline)
+      period: true
+    godoclint:
+      require-start: false # Don't require "FuncName ..." start pattern
+    unparam:
+      check-exported: false # Don't check exported functions (API stability)
   exclusions:
     generated: lax
     presets:
@@ -99,13 +152,24 @@ linters:
       - linters:
           - gocyclo
           - gocognit
-          - funlen     # Test functions are often long table-driven tests
-          - cyclop     # Test complexity is expected
-          - nestif     # Test conditionals are often complex
+          - funlen          # Test functions are often long table-driven tests
+          - cyclop          # Test complexity is expected
+          - nestif          # Test conditionals are often complex
           - gocritic
-          - prealloc   # Test setup often doesn't benefit from prealloc
-          - gosec      # G115 int conversion in tests is safe
-          - gci        # Test import order less critical
+          - prealloc        # Test setup often doesn't benefit from prealloc
+          - gosec           # G115 int conversion in tests is safe
+          - gci             # Test import order less critical
+          - unparam         # Test helpers often have unused params for interface compliance
+          - tparallel       # Not all tests should be parallel
+          - thelper         # Some test helpers are intentionally not marked
+          - dupword         # Test descriptions may repeat words intentionally
+          - goconst         # Test strings don't need constants
+          - forcetypeassert # Test assertions are often intentionally unchecked
+          - contextcheck    # Test context usage is different
+          - godot           # Test comments don't need periods
+          - godoclint       # Test documentation is less formal
+          - intrange        # Benchmark b.N loops use classic syntax
+          - modernize       # Test code prioritizes clarity over modern syntax
         path: _test\.go
       - linters:
           - errcheck
@@ -116,6 +180,35 @@ linters:
           - revive
         path: _test\.go
         text: "time-naming"  # Test duration constants use descriptive names
+
+      # heap.Interface requires mixed pointer/non-pointer receivers by Go design
+      - linters:
+          - recvcheck
+        path: (heap|clock)\.go
+        text: "use pointer receiver"
+
+      # False positive: "return" appearing twice in code example is not a duplicate word
+      - linters:
+          - dupword
+        path: chain\.go
+        text: "return"
+
+      # False positive: "FakeClock" in doc.go godoc is followed by exported identifier reference
+      - linters:
+          - dupword
+        path: doc\.go
+        text: "FakeClock"
+
+      # wg.Go requires "function must not panic" but cron re-panics by design
+      - linters:
+          - modernize
+        path: cron\.go
+        text: "waitgroup"
+
+      # Context in test is used for verification, not passed to other functions
+      - linters:
+          - fatcontext
+        path: _test\.go
     paths:
       - third_party$
       - builtin$

@@ -65,7 +65,7 @@ func formatString(numKeysAndValues int) string {
 	if numKeysAndValues > 0 {
 		sb.WriteString(", ")
 	}
-	for i := 0; i < numKeysAndValues/2; i++ {
+	for i := range numKeysAndValues / 2 {
 		if i > 0 {
 			sb.WriteString(", ")
 		}

@@ -4,6 +4,8 @@ import (
 	"container/heap"
 	"context"
 	"errors"
+	"maps"
+	"slices"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -61,7 +63,7 @@ type Cron struct {
 	indexDeletions int
 }
 
-// ScheduleParser is an interface for schedule spec parsers that return a Schedule
+// ScheduleParser is an interface for schedule spec parsers that return a Schedule.
 type ScheduleParser interface {
 	Parse(spec string) (Schedule, error)
 }
@@ -221,7 +223,7 @@ func New(opts ...Option) *Cron {
 	return c
 }
 
-// FuncJob is a wrapper that turns a func() into a cron.Job
+// FuncJob is a wrapper that turns a func() into a cron.Job.
 type FuncJob func()
 
 // Run calls the wrapped function.
@@ -421,7 +423,7 @@ func (c *Cron) Entries() []Entry {
 	return c.entrySnapshot()
 }
 
-// Location gets the time zone location
+// Location gets the time zone location.
 func (c *Cron) Location() *time.Location {
 	return c.location
 }
@@ -823,9 +825,7 @@ func (c *Cron) maybeCompactIndexes() {
 
 	// Rebuild entryIndex
 	newEntryIndex := make(map[EntryID]*Entry, currentSize)
-	for k, v := range c.entryIndex {
-		newEntryIndex[k] = v
-	}
+	maps.Copy(newEntryIndex, c.entryIndex)
 	c.entryIndex = newEntryIndex
 
 	// Rebuild nameIndex with proper synchronization
@@ -833,9 +833,7 @@ func (c *Cron) maybeCompactIndexes() {
 		c.runningMu.Lock()
 	}
 	newNameIndex := make(map[string]*Entry, len(c.nameIndex))
-	for k, v := range c.nameIndex {
-		newNameIndex[k] = v
-	}
+	maps.Copy(newNameIndex, c.nameIndex)
 	c.nameIndex = newNameIndex
 	if c.running {
 		c.runningMu.Unlock()
@@ -871,11 +869,8 @@ func (c *Cron) EntryByName(name string) Entry {
 func (c *Cron) EntriesByTag(tag string) []Entry {
 	var result []Entry
 	for _, entry := range c.Entries() {
-		for _, t := range entry.Tags {
-			if t == tag {
-				result = append(result, entry)
-				break
-			}
+		if slices.Contains(entry.Tags, tag) {
+			result = append(result, entry)
 		}
 	}
 	return result

@@ -174,9 +174,9 @@ func WithMaxSearchYears(years int) Option {
 //	        break
 //	    }
 //	}
-func WithMaxEntries(max int) Option {
+func WithMaxEntries(maxEntries int) Option {
 	return func(c *Cron) {
-		c.maxEntries = max
+		c.maxEntries = maxEntries
 	}
 }
 

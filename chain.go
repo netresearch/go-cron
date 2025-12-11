@@ -79,10 +79,10 @@ type panicInfo struct {
 }
 
 // extractPanicInfo extracts error, stack trace, and type information from a panic value.
-// It handles both PanicWithStack (from safeExecute) and direct panic values.
+// It handles both PanicError (from safeExecute) and direct panic values.
 func extractPanicInfo(r any) panicInfo {
-	// Handle PanicWithStack from safeExecute (preserves original stack)
-	if pws, ok := r.(*PanicWithStack); ok {
+	// Handle PanicError from safeExecute (preserves original stack)
+	if pws, ok := r.(*PanicError); ok {
 		err := toError(pws.Value)
 		return panicInfo{
 			err:       err,
