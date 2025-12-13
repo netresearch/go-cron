@@ -456,6 +456,140 @@ func TestIsRunningConcurrent(t *testing.T) {
 	wg.Wait()
 }
 
+func TestWithPrev(t *testing.T) {
+	cron := New()
+	defer cron.Stop()
+
+	// Set a specific previous execution time
+	prevTime := time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC)
+	id, err := cron.AddFunc("@hourly", func() {}, WithPrev(prevTime))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	entry := cron.Entry(id)
+	if !entry.Prev.Equal(prevTime) {
+		t.Errorf("expected Prev=%v, got %v", prevTime, entry.Prev)
+	}
+}
+
+func TestWithPrevPreservesAcrossCycles(t *testing.T) {
+	// Using a fake clock to control time precisely
+	fakeClock := NewFakeClock(time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC))
+	cron := New(WithClock(fakeClock), WithParser(secondParser))
+	defer cron.Stop()
+
+	prevTime := time.Date(2025, 1, 1, 9, 30, 0, 0, time.UTC)
+	var runs int32
+	id, _ := cron.AddFunc("* * * * * *", func() { atomic.AddInt32(&runs, 1) }, WithPrev(prevTime))
+
+	// Before start, Prev should be set
+	entry := cron.Entry(id)
+	if !entry.Prev.Equal(prevTime) {
+		t.Errorf("before start: expected Prev=%v, got %v", prevTime, entry.Prev)
+	}
+
+	cron.Start()
+	// Wait for scheduler to register timers
+	fakeClock.BlockUntil(1)
+	// Advance time to trigger the first execution
+	fakeClock.Advance(1 * time.Second)
+	time.Sleep(50 * time.Millisecond) // Allow job to run
+
+	// After first run, Prev should be updated
+	entry = cron.Entry(id)
+	if entry.Prev.Equal(prevTime) {
+		t.Error("after run: Prev should have been updated to the new execution time")
+	}
+	if atomic.LoadInt32(&runs) != 1 {
+		t.Errorf("expected 1 run, got %d", runs)
+	}
+}
+
+func TestWithRunImmediately(t *testing.T) {
+	fakeClock := NewFakeClock(time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC))
+	cron := New(WithClock(fakeClock))
+	defer cron.Stop()
+
+	var runs int32
+	cron.AddFunc("@hourly", func() { atomic.AddInt32(&runs, 1) }, WithRunImmediately())
+
+	cron.Start()
+	// Allow the immediate run to execute
+	time.Sleep(50 * time.Millisecond)
+
+	if atomic.LoadInt32(&runs) != 1 {
+		t.Errorf("expected job to run immediately, but runs=%d", runs)
+	}
+}
+
+func TestWithRunImmediatelyWhileRunning(t *testing.T) {
+	fakeClock := NewFakeClock(time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC))
+	cron := New(WithClock(fakeClock))
+	cron.Start()
+	defer cron.Stop()
+
+	var runs int32
+	cron.AddFunc("@hourly", func() { atomic.AddInt32(&runs, 1) }, WithRunImmediately())
+
+	// Allow the immediate run to execute
+	time.Sleep(50 * time.Millisecond)
+
+	if atomic.LoadInt32(&runs) != 1 {
+		t.Errorf("expected job to run immediately when added while running, but runs=%d", runs)
+	}
+}
+
+func TestWithRunImmediatelyThenSchedule(t *testing.T) {
+	fakeClock := NewFakeClock(time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC))
+	cron := New(WithClock(fakeClock), WithParser(secondParser))
+	defer cron.Stop()
+
+	var runs int32
+	cron.AddFunc("* * * * * *", func() { atomic.AddInt32(&runs, 1) }, WithRunImmediately())
+
+	cron.Start()
+	// Allow immediate run
+	time.Sleep(50 * time.Millisecond)
+
+	if atomic.LoadInt32(&runs) != 1 {
+		t.Errorf("expected immediate run, got runs=%d", runs)
+	}
+
+	// Advance time to trigger scheduled run
+	fakeClock.Advance(1 * time.Second)
+	time.Sleep(50 * time.Millisecond)
+
+	if atomic.LoadInt32(&runs) != 2 {
+		t.Errorf("expected scheduled run after immediate, got runs=%d", runs)
+	}
+}
+
+func TestWithPrevAndWithRunImmediately(t *testing.T) {
+	fakeClock := NewFakeClock(time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC))
+	cron := New(WithClock(fakeClock))
+	defer cron.Stop()
+
+	prevTime := time.Date(2025, 1, 1, 9, 0, 0, 0, time.UTC)
+	var runs int32
+	id, _ := cron.AddFunc("@hourly", func() { atomic.AddInt32(&runs, 1) },
+		WithPrev(prevTime),
+		WithRunImmediately(),
+	)
+
+	entry := cron.Entry(id)
+	if !entry.Prev.Equal(prevTime) {
+		t.Errorf("expected Prev=%v, got %v", prevTime, entry.Prev)
+	}
+
+	cron.Start()
+	time.Sleep(50 * time.Millisecond)
+
+	if atomic.LoadInt32(&runs) != 1 {
+		t.Errorf("expected job to run immediately despite WithPrev, but runs=%d", runs)
+	}
+}
+
 type testJob struct {
 	wg   *sync.WaitGroup
 	name string

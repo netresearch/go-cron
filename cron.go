@@ -162,6 +162,10 @@ type Entry struct {
 	// heapIndex is the entry's index in the scheduler's min-heap.
 	// It is maintained by the heap implementation and used for efficient updates.
 	heapIndex int
+
+	// runImmediately is an internal flag set by WithRunImmediately().
+	// When true, the entry will be scheduled to run immediately upon registration.
+	runImmediately bool
 }
 
 // Valid returns true if this is not the zero entry.
@@ -283,6 +287,40 @@ func WithName(name string) JobOption {
 func WithTags(tags ...string) JobOption {
 	return func(e *Entry) {
 		e.Tags = tags
+	}
+}
+
+// WithPrev sets the previous execution time for an entry.
+// This is useful for:
+//   - Schedule migration: preserving execution history when moving jobs between schedulers
+//   - Missed execution detection: combined with schedule analysis to detect missed runs
+//   - Process restarts: preserving interval-based job continuity across restarts
+//
+// Example:
+//
+//	// Migrate job with preserved history
+//	lastRun := loadLastRunFromDB()
+//	c.AddFunc("@every 1h", cleanup, cron.WithPrev(lastRun))
+func WithPrev(prev time.Time) JobOption {
+	return func(e *Entry) {
+		e.Prev = prev
+	}
+}
+
+// WithRunImmediately causes the job to run immediately upon registration,
+// then follow the normal schedule thereafter.
+// This is useful for:
+//   - Initial sync: running a sync job once at startup before regular schedule
+//   - Health checks: ensuring service connectivity is verified immediately
+//   - Cache warming: populating caches before the first scheduled refresh
+//
+// Example:
+//
+//	// Run immediately, then every hour
+//	c.AddFunc("@every 1h", syncData, cron.WithRunImmediately())
+func WithRunImmediately() JobOption {
+	return func(e *Entry) {
+		e.runImmediately = true
 	}
 }
 
@@ -485,6 +523,17 @@ func (c *Cron) Run() {
 // run the scheduler.. this is private just due to the need to synchronize
 // access to the 'running' state variable.
 
+// scheduleEntryNext calculates and sets the next run time for an entry.
+// If runImmediately is set, the entry runs at 'now'; otherwise it uses the schedule.
+func (c *Cron) scheduleEntryNext(entry *Entry, now time.Time) {
+	if entry.runImmediately {
+		entry.Next = now
+		entry.runImmediately = false // Clear flag after use
+	} else {
+		entry.Next = entry.Schedule.Next(now)
+	}
+}
+
 // handleTimeBackwards reschedules entries when system time moves backwards.
 // This can happen due to NTP correction or VM snapshot restore.
 func (c *Cron) handleTimeBackwards(now time.Time) {
@@ -525,7 +574,7 @@ func (c *Cron) run() {
 	// Figure out the next activation times for each entry and initialize heap.
 	now := c.now()
 	for _, entry := range c.entries {
-		entry.Next = entry.Schedule.Next(now)
+		c.scheduleEntryNext(entry, now)
 		c.hooks.callOnSchedule(entry.ID, entry.Job, entry.Next)
 		c.logger.Info("schedule", "now", now, "entry", entry.ID, "next", entry.Next)
 	}
@@ -558,7 +607,7 @@ func (c *Cron) run() {
 			case newEntry := <-c.add:
 				timer.Stop()
 				now = c.now()
-				newEntry.Next = newEntry.Schedule.Next(now)
+				c.scheduleEntryNext(newEntry, now)
 				heap.Push(&c.entries, newEntry)
 				c.entryIndex[newEntry.ID] = newEntry
 				// Note: nameIndex and entryCount already updated by ScheduleJob
