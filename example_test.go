@@ -187,6 +187,21 @@ func ExampleNewChain() {
 	// Output:
 }
 
+// This example demonstrates checking if the scheduler is running.
+func ExampleCron_IsRunning() {
+	c := cron.New()
+
+	fmt.Printf("Before Start: %v\n", c.IsRunning())
+	c.Start()
+	fmt.Printf("After Start: %v\n", c.IsRunning())
+	c.Stop()
+	fmt.Printf("After Stop: %v\n", c.IsRunning())
+	// Output:
+	// Before Start: false
+	// After Start: true
+	// After Stop: false
+}
+
 // This example demonstrates retrieving all scheduled entries.
 func ExampleCron_Entries() {
 	c := cron.New()

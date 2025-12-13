@@ -418,6 +418,44 @@ func TestStopWithoutStart(t *testing.T) {
 	cron.Stop()
 }
 
+func TestIsRunning(t *testing.T) {
+	cron := New()
+
+	// Initially not running
+	if cron.IsRunning() {
+		t.Error("expected IsRunning() to be false before Start()")
+	}
+
+	// After Start(), should be running
+	cron.Start()
+	if !cron.IsRunning() {
+		t.Error("expected IsRunning() to be true after Start()")
+	}
+
+	// After Stop(), should not be running
+	cron.Stop()
+	if cron.IsRunning() {
+		t.Error("expected IsRunning() to be false after Stop()")
+	}
+}
+
+func TestIsRunningConcurrent(t *testing.T) {
+	cron := New()
+	cron.Start()
+	defer cron.Stop()
+
+	// Concurrent reads should be safe
+	var wg sync.WaitGroup
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = cron.IsRunning()
+		}()
+	}
+	wg.Wait()
+}
+
 type testJob struct {
 	wg   *sync.WaitGroup
 	name string
