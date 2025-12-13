@@ -202,6 +202,72 @@ func ExampleCron_IsRunning() {
 	// After Stop: false
 }
 
+// This example demonstrates WithPrev to preserve previous execution time.
+// This is useful for schedule migration or detecting missed executions.
+func ExampleWithPrev() {
+	c := cron.New()
+	defer c.Stop()
+
+	// Simulate migrating a job from another scheduler
+	// Set the previous execution time to preserve history
+	lastRun := time.Date(2025, 1, 1, 9, 0, 0, 0, time.UTC)
+	id, _ := c.AddFunc("@hourly", func() {
+		fmt.Println("Running hourly job")
+	}, cron.WithPrev(lastRun))
+
+	entry := c.Entry(id)
+	fmt.Printf("Previous run preserved: %v\n", entry.Prev.Equal(lastRun))
+	// Output: Previous run preserved: true
+}
+
+// This example demonstrates WithRunImmediately to run a job once at registration.
+// The job runs immediately, then follows the normal schedule.
+func ExampleWithRunImmediately() {
+	c := cron.New()
+
+	done := make(chan struct{})
+	c.AddFunc("@hourly", func() {
+		fmt.Println("Job executed immediately")
+		close(done)
+	}, cron.WithRunImmediately())
+
+	c.Start()
+	<-done // Wait for job to complete
+	c.Stop()
+
+	fmt.Println("Done")
+	// Output:
+	// Job executed immediately
+	// Done
+}
+
+// This example demonstrates combining WithPrev and WithRunImmediately.
+// This is useful for process restarts where you want to preserve history
+// but also ensure the job runs immediately after restart.
+func ExampleWithPrev_combinedWithRunImmediately() {
+	c := cron.New()
+
+	lastRun := time.Date(2025, 1, 1, 9, 0, 0, 0, time.UTC)
+	done := make(chan struct{})
+	id, _ := c.AddFunc("@hourly", func() {
+		fmt.Println("Job ran")
+		close(done)
+	}, cron.WithPrev(lastRun), cron.WithRunImmediately())
+
+	entry := c.Entry(id)
+	fmt.Printf("Prev preserved: %v\n", entry.Prev.Equal(lastRun))
+
+	c.Start()
+	<-done // Wait for job to complete
+	c.Stop()
+
+	fmt.Println("Both options work together")
+	// Output:
+	// Prev preserved: true
+	// Job ran
+	// Both options work together
+}
+
 // This example demonstrates retrieving all scheduled entries.
 func ExampleCron_Entries() {
 	c := cron.New()
