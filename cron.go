@@ -672,6 +672,14 @@ func (c *Cron) Stop() context.Context {
 	return ctx
 }
 
+// IsRunning returns true if the cron scheduler is currently running.
+// This can be used for health checks, conditional starts, or debugging.
+func (c *Cron) IsRunning() bool {
+	c.runningMu.Lock()
+	defer c.runningMu.Unlock()
+	return c.running
+}
+
 // StopAndWait stops the cron scheduler and blocks until all running jobs complete.
 // This is a convenience method equivalent to:
 //
