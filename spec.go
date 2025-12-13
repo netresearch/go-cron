@@ -42,7 +42,7 @@ var (
 		"nov": 11,
 		"dec": 12,
 	}}
-	dow = bounds{0, 6, map[string]uint{
+	dow = bounds{0, 7, map[string]uint{
 		"sun": 0,
 		"mon": 1,
 		"tue": 2,
@@ -60,12 +60,26 @@ const (
 	// months 1-12, weekdays 0-6. All are well below bit 63.
 	starBit = 1 << 63
 
+	// dowBit7 represents Sunday specified as 7 (alternative to 0).
+	// This bit is normalized to bit 0 after parsing.
+	dowBit7 = 1 << 7
+
 	// defaultSearchYears is the default limit for how many years into the future
 	// Next() will search before giving up. This prevents infinite loops for
 	// unsatisfiable schedules (e.g., Feb 30). Users can override this via
 	// Parser.WithMaxSearchYears() or the WithMaxSearchYears() cron option.
 	defaultSearchYears = 5
 )
+
+// NormalizeDOW normalizes the day-of-week bitmask by mapping bit 7 (Sunday as 7)
+// to bit 0 (Sunday as 0). This allows both "0" and "7" to represent Sunday,
+// matching the behavior of many cron implementations.
+func NormalizeDOW(bits uint64) uint64 {
+	if bits&dowBit7 != 0 {
+		bits = (bits | 1) &^ dowBit7 // Set bit 0, clear bit 7
+	}
+	return bits
+}
 
 // advanceMinute advances time until the minute field matches the schedule bitmask.
 // It returns the updated time, an 'added' flag indicating if time was modified,

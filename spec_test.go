@@ -460,3 +460,52 @@ func TestCheckHourDSTSkip_Boundary(t *testing.T) {
 		})
 	}
 }
+
+// TestNormalizeDOW tests the NormalizeDOW function that maps bit 7 to bit 0.
+func TestNormalizeDOW(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    uint64
+		expected uint64
+	}{
+		{
+			name:     "no bit 7 - unchanged",
+			input:    0b01111111, // bits 0-6 set
+			expected: 0b01111111,
+		},
+		{
+			name:     "only bit 7 - becomes bit 0",
+			input:    1 << 7,
+			expected: 1,
+		},
+		{
+			name:     "bit 7 and bit 0 both set - remains bit 0",
+			input:    (1 << 7) | 1,
+			expected: 1,
+		},
+		{
+			name:     "bit 7 with other bits - normalized",
+			input:    (1 << 7) | (1 << 3) | (1 << 5), // Sun(7), Wed, Fri
+			expected: 1 | (1 << 3) | (1 << 5),        // Sun(0), Wed, Fri
+		},
+		{
+			name:     "starBit preserved",
+			input:    starBit | (1 << 7),
+			expected: starBit | 1,
+		},
+		{
+			name:     "zero input",
+			input:    0,
+			expected: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := NormalizeDOW(tt.input)
+			if got != tt.expected {
+				t.Errorf("NormalizeDOW(%b) = %b, want %b", tt.input, got, tt.expected)
+			}
+		})
+	}
+}

@@ -99,7 +99,7 @@ func TestAll(t *testing.T) {
 		{hours, 0xffffff},            // 0-23: 24 ones
 		{dom, 0xfffffffe},            // 1-31: 31 ones, 1 zero
 		{months, 0x1ffe},             // 1-12: 12 ones, 1 zero
-		{dow, 0x7f},                  // 0-6: 7 ones
+		{dow, 0xff},                  // 0-7: 8 ones (7 normalized to 0 by parser)
 	}
 
 	for _, c := range allBits {
@@ -210,7 +210,7 @@ func TestParseSchedule(t *testing.T) {
 				Hour:     all(hours),
 				Dom:      all(dom),
 				Month:    all(months),
-				Dow:      all(dow),
+				Dow:      allDowNormalized(),
 				Location: time.Local,
 			},
 		},
@@ -366,7 +366,7 @@ func TestStandardSpecSchedule(t *testing.T) {
 	}{
 		{
 			expr:     "5 * * * *",
-			expected: &SpecSchedule{1 << seconds.min, 1 << 5, all(hours), all(dom), all(months), all(dow), time.Local, 0},
+			expected: &SpecSchedule{1 << seconds.min, 1 << 5, all(hours), all(dom), all(months), allDowNormalized(), time.Local, 0},
 		},
 		{
 			expr:     "@every 5m",
@@ -591,16 +591,22 @@ func TestParserWithCache(t *testing.T) {
 	})
 }
 
+// allDowNormalized returns all DOW bits after normalization (bit 7 mapped to bit 0).
+// This matches what the parser produces for wildcard DOW fields.
+func allDowNormalized() uint64 {
+	return NormalizeDOW(all(dow))
+}
+
 func every5min(loc *time.Location) *SpecSchedule {
-	return &SpecSchedule{1 << 0, 1 << 5, all(hours), all(dom), all(months), all(dow), loc, 0}
+	return &SpecSchedule{1 << 0, 1 << 5, all(hours), all(dom), all(months), allDowNormalized(), loc, 0}
 }
 
 func every5min5s(loc *time.Location) *SpecSchedule {
-	return &SpecSchedule{1 << 5, 1 << 5, all(hours), all(dom), all(months), all(dow), loc, 0}
+	return &SpecSchedule{1 << 5, 1 << 5, all(hours), all(dom), all(months), allDowNormalized(), loc, 0}
 }
 
 func midnight(loc *time.Location) *SpecSchedule {
-	return &SpecSchedule{1, 1, 1, all(dom), all(months), all(dow), loc, 0}
+	return &SpecSchedule{1, 1, 1, all(dom), all(months), allDowNormalized(), loc, 0}
 }
 
 func annual(loc *time.Location) *SpecSchedule {
@@ -610,7 +616,7 @@ func annual(loc *time.Location) *SpecSchedule {
 		Hour:     1 << hours.min,
 		Dom:      1 << dom.min,
 		Month:    1 << months.min,
-		Dow:      all(dow),
+		Dow:      allDowNormalized(),
 		Location: loc,
 	}
 }
@@ -829,5 +835,87 @@ func TestParserWithMaxSearchYears(t *testing.T) {
 	// Verify it's Jan 1st of 2025 (next occurrence after Jan 1, 2024)
 	if next.Month() != time.January || next.Day() != 1 || next.Year() != 2025 {
 		t.Errorf("Long parser: Expected Jan 1, 2025, got %v", next)
+	}
+}
+
+// TestSundayAs7 tests that 7 is accepted as an alias for Sunday (0) in DOW field.
+func TestSundayAs7(t *testing.T) {
+	parser := NewParser(Minute | Hour | Dom | Month | Dow)
+
+	tests := []struct {
+		name string
+		spec string
+	}{
+		{"Sunday as 0", "0 0 * * 0"},
+		{"Sunday as 7", "0 0 * * 7"},
+		{"Range ending with 7", "0 0 * * 5-7"},
+		{"Range 0-7 (all week)", "0 0 * * 0-7"},
+		{"List with 7", "0 0 * * 1,3,7"},
+		{"Only 7", "0 0 * * 7"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sched, err := parser.Parse(tt.spec)
+			if err != nil {
+				t.Fatalf("Parse(%q) unexpected error: %v", tt.spec, err)
+			}
+			if sched == nil {
+				t.Fatalf("Parse(%q) returned nil schedule", tt.spec)
+			}
+		})
+	}
+
+	// Verify Sunday as 0 and Sunday as 7 produce equivalent schedules
+	sched0, _ := parser.Parse("0 0 * * 0")
+	sched7, _ := parser.Parse("0 0 * * 7")
+
+	spec0 := sched0.(*SpecSchedule)
+	spec7 := sched7.(*SpecSchedule)
+
+	if spec0.Dow != spec7.Dow {
+		t.Errorf("Sunday as 0 and 7 should produce same DOW bits: 0=%b, 7=%b", spec0.Dow, spec7.Dow)
+	}
+
+	// Both should match Sunday
+	saturday := time.Date(2024, 1, 6, 0, 0, 0, 0, time.UTC) // Jan 6, 2024 is Saturday
+
+	next0 := sched0.Next(saturday)
+	next7 := sched7.Next(saturday)
+
+	if !next0.Equal(next7) {
+		t.Errorf("Schedules should find same next Sunday: 0=%v, 7=%v", next0, next7)
+	}
+	if next0.Weekday() != time.Sunday {
+		t.Errorf("Expected Sunday, got %v", next0.Weekday())
+	}
+}
+
+// TestSundayAs7Range tests that ranges involving 7 work correctly.
+func TestSundayAs7Range(t *testing.T) {
+	parser := NewParser(Minute | Hour | Dom | Month | Dow)
+
+	// "5-7" should match Fri, Sat, Sun
+	sched, err := parser.Parse("0 0 * * 5-7")
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+
+	spec := sched.(*SpecSchedule)
+
+	// Should have bits for Fri(5), Sat(6), Sun(0)
+	expectedBits := uint64(1<<5 | 1<<6 | 1) // Fri, Sat, Sun(normalized to 0)
+	// Also need to account for starBit if using wildcard in other fields
+	actualDowBits := spec.Dow &^ starBit // Remove starBit for comparison
+
+	if actualDowBits != expectedBits {
+		t.Errorf("5-7 should set bits for Fri,Sat,Sun(0): got %b, want %b", actualDowBits, expectedBits)
+	}
+
+	// Test actual scheduling
+	thursday := time.Date(2024, 1, 4, 0, 0, 0, 0, time.UTC) // Thursday
+	next := sched.Next(thursday)
+	if next.Weekday() != time.Friday {
+		t.Errorf("Next after Thursday should be Friday, got %v", next.Weekday())
 	}
 }

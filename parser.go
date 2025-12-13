@@ -381,7 +381,7 @@ func (p Parser) parse(spec string) (Schedule, error) {
 		hour       = field(fields[2], hours)
 		dayofmonth = field(fields[3], dom)
 		month      = field(fields[4], months)
-		dayofweek  = field(fields[5], dow)
+		dayofweek  = NormalizeDOW(field(fields[5], dow))
 	)
 	if err != nil {
 		return nil, err
@@ -708,17 +708,19 @@ func newDescriptorSchedule(hour, dom, month, dow uint64, loc *time.Location, max
 }
 
 func parseDescriptor(descriptor string, loc *time.Location, minEveryInterval time.Duration, maxSearchYears int) (Schedule, error) {
+	// Normalize DOW bits so that both Sunday=0 and Sunday=7 are handled consistently
+	allDow := NormalizeDOW(all(dow))
 	switch descriptor {
 	case "@yearly", "@annually":
-		return newDescriptorSchedule(1<<hours.min, 1<<dom.min, 1<<months.min, all(dow), loc, maxSearchYears), nil
+		return newDescriptorSchedule(1<<hours.min, 1<<dom.min, 1<<months.min, allDow, loc, maxSearchYears), nil
 	case "@monthly":
-		return newDescriptorSchedule(1<<hours.min, 1<<dom.min, all(months), all(dow), loc, maxSearchYears), nil
+		return newDescriptorSchedule(1<<hours.min, 1<<dom.min, all(months), allDow, loc, maxSearchYears), nil
 	case "@weekly":
 		return newDescriptorSchedule(1<<hours.min, all(dom), all(months), 1<<dow.min, loc, maxSearchYears), nil
 	case "@daily", "@midnight":
-		return newDescriptorSchedule(1<<hours.min, all(dom), all(months), all(dow), loc, maxSearchYears), nil
+		return newDescriptorSchedule(1<<hours.min, all(dom), all(months), allDow, loc, maxSearchYears), nil
 	case "@hourly":
-		return newDescriptorSchedule(all(hours), all(dom), all(months), all(dow), loc, maxSearchYears), nil
+		return newDescriptorSchedule(all(hours), all(dom), all(months), allDow, loc, maxSearchYears), nil
 	}
 
 	const every = "@every "
