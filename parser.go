@@ -247,6 +247,32 @@ func (p Parser) WithCache() Parser {
 	return p
 }
 
+// WithSecondOptional returns a new Parser configured to accept an optional seconds
+// field as the first field. This allows the parser to accept both 5-field (standard)
+// and 6-field (with seconds) expressions.
+//
+// When 5 fields are provided, the seconds field defaults to 0.
+// When 6 fields are provided, the first field is interpreted as seconds.
+//
+// This method enables composable parser configuration when you need both
+// SecondOptional and other parser customizations (like WithMinEveryInterval or
+// WithMaxSearchYears).
+//
+// Example:
+//
+//	// Parser accepting optional seconds with custom minimum @every interval
+//	p := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor).
+//	    WithSecondOptional().
+//	    WithMinEveryInterval(100 * time.Millisecond)
+//
+//	// Both expressions are valid:
+//	sched1, _ := p.Parse("* * * * *")       // 5 fields, seconds=0
+//	sched2, _ := p.Parse("30 * * * * *")    // 6 fields, seconds=30
+func (p Parser) WithSecondOptional() Parser {
+	p.options |= SecondOptional | Minute | Hour | Dom | Month | Dow
+	return p
+}
+
 // MaxSpecLength is the maximum allowed length for a cron spec string.
 // This limit prevents potential resource exhaustion from extremely long inputs.
 const MaxSpecLength = 1024
