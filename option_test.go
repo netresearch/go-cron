@@ -254,6 +254,162 @@ func TestStandardParser(t *testing.T) {
 	}
 }
 
+func TestWithSecondOptional(t *testing.T) {
+	c := New(WithSecondOptional())
+
+	// Test 5-field expression (standard) - seconds defaults to 0
+	id1, err := c.AddFunc("* * * * *", func() {})
+	if err != nil {
+		t.Fatalf("AddFunc() with 5 fields failed: %v", err)
+	}
+	entry1 := c.Entry(id1)
+	if entry1.Schedule == nil {
+		t.Fatal("Expected schedule for 5-field expression")
+	}
+
+	// Verify seconds defaults to 0 for 5-field expression
+	now := time.Date(2024, 1, 1, 12, 30, 15, 0, time.UTC)
+	next := entry1.Schedule.Next(now)
+	if next.Second() != 0 {
+		t.Errorf("Expected 5-field expression to have seconds=0, got %d", next.Second())
+	}
+
+	// Test 6-field expression (with seconds)
+	id2, err := c.AddFunc("30 * * * * *", func() {})
+	if err != nil {
+		t.Fatalf("AddFunc() with 6 fields failed: %v", err)
+	}
+	entry2 := c.Entry(id2)
+	if entry2.Schedule == nil {
+		t.Fatal("Expected schedule for 6-field expression")
+	}
+
+	// Verify seconds is 30 for 6-field expression
+	next2 := entry2.Schedule.Next(now)
+	if next2.Second() != 30 {
+		t.Errorf("Expected 6-field expression to have seconds=30, got %d", next2.Second())
+	}
+
+	// Test 6-field expression with seconds range
+	id3, err := c.AddFunc("*/10 * * * * *", func() {})
+	if err != nil {
+		t.Fatalf("AddFunc() with 6 fields (range) failed: %v", err)
+	}
+	entry3 := c.Entry(id3)
+	if entry3.Schedule == nil {
+		t.Fatal("Expected schedule for 6-field expression with range")
+	}
+}
+
+func TestWithSecondOptionalDescriptors(t *testing.T) {
+	c := New(WithSecondOptional())
+
+	// Descriptors should still work
+	_, err := c.AddFunc("@every 1s", func() {})
+	if err != nil {
+		t.Errorf("@every descriptor should work: %v", err)
+	}
+
+	_, err = c.AddFunc("@hourly", func() {})
+	if err != nil {
+		t.Errorf("@hourly descriptor should work: %v", err)
+	}
+}
+
+func TestWithSecondOptionalWithTimezone(t *testing.T) {
+	c := New(WithSecondOptional())
+
+	// 5-field with timezone
+	_, err := c.AddFunc("TZ=UTC * * * * *", func() {})
+	if err != nil {
+		t.Errorf("5-field with TZ should work: %v", err)
+	}
+
+	// 6-field with timezone
+	_, err = c.AddFunc("TZ=UTC 30 * * * * *", func() {})
+	if err != nil {
+		t.Errorf("6-field with TZ should work: %v", err)
+	}
+
+	// CRON_TZ prefix variant
+	_, err = c.AddFunc("CRON_TZ=America/New_York * * * * *", func() {})
+	if err != nil {
+		t.Errorf("5-field with CRON_TZ should work: %v", err)
+	}
+}
+
+func TestParserWithSecondOptional(t *testing.T) {
+	// Test Parser.WithSecondOptional() builder method
+	p := NewParser(Minute | Hour | Dom | Month | Dow | Descriptor).
+		WithSecondOptional()
+
+	// Should accept 5 fields
+	sched1, err := p.Parse("* * * * *")
+	if err != nil {
+		t.Errorf("5-field expression should be accepted: %v", err)
+	}
+	if sched1 == nil {
+		t.Error("Expected non-nil schedule for 5-field expression")
+	}
+
+	// Should accept 6 fields
+	sched2, err := p.Parse("30 * * * * *")
+	if err != nil {
+		t.Errorf("6-field expression should be accepted: %v", err)
+	}
+	if sched2 == nil {
+		t.Error("Expected non-nil schedule for 6-field expression")
+	}
+
+	// Verify the schedules are different
+	now := time.Date(2024, 1, 1, 12, 30, 15, 0, time.UTC)
+	next1 := sched1.Next(now)
+	next2 := sched2.Next(now)
+
+	if next1.Second() != 0 {
+		t.Errorf("5-field schedule should have seconds=0, got %d", next1.Second())
+	}
+	if next2.Second() != 30 {
+		t.Errorf("6-field schedule should have seconds=30, got %d", next2.Second())
+	}
+}
+
+func TestParserWithSecondOptionalChained(t *testing.T) {
+	// Test chaining WithSecondOptional with other builder methods
+	p := NewParser(Minute | Hour | Dom | Month | Dow | Descriptor).
+		WithSecondOptional().
+		WithMinEveryInterval(0).
+		WithMaxSearchYears(10)
+
+	// Should accept optional seconds
+	_, err := p.Parse("* * * * *")
+	if err != nil {
+		t.Errorf("5-field expression should be accepted: %v", err)
+	}
+
+	// Should allow sub-second @every
+	_, err = p.Parse("@every 100ms")
+	if err != nil {
+		t.Errorf("sub-second @every should be allowed: %v", err)
+	}
+}
+
+func TestWithSecondOptionalInvalidFieldCount(t *testing.T) {
+	c := New(WithSecondOptional())
+
+	// Too few fields (4)
+	_, err := c.AddFunc("* * * *", func() {})
+	if err == nil {
+		t.Error("4-field expression should be rejected")
+	}
+
+	// Too many fields (7)
+	_, err = c.AddFunc("* * * * * * *", func() {})
+	if err == nil {
+		t.Error("7-field expression should be rejected")
+	}
+}
+
 func TestWithMaxSearchYears(t *testing.T) {
 	// Test that WithMaxSearchYears creates a cron with the configured parser
 	c := New(WithMaxSearchYears(10))

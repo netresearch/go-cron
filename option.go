@@ -23,6 +23,26 @@ func WithSeconds() Option {
 	))
 }
 
+// WithSecondOptional overrides the parser used for interpreting job schedules to
+// accept an optional seconds field as the first one. When provided, expressions can
+// have either 5 fields (standard) or 6 fields (with seconds). If 5 fields are given,
+// the seconds field defaults to 0.
+//
+// This is useful when you want to support both standard 5-field cron expressions
+// and extended 6-field expressions with seconds precision in the same cron instance.
+//
+// Examples:
+//
+//	c := cron.New(cron.WithSecondOptional())
+//	c.AddFunc("* * * * *", job)        // 5 fields: runs every minute at :00 seconds
+//	c.AddFunc("30 * * * * *", job)     // 6 fields: runs every minute at :30 seconds
+//	c.AddFunc("*/10 * * * * *", job)   // 6 fields: runs every 10 seconds
+func WithSecondOptional() Option {
+	return WithParser(NewParser(
+		SecondOptional | Minute | Hour | Dom | Month | Dow | Descriptor,
+	))
+}
+
 // WithParser overrides the parser used for interpreting job schedules.
 func WithParser(p ScheduleParser) Option {
 	return func(c *Cron) {
