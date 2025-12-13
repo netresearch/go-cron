@@ -268,6 +268,52 @@ func ExampleParseStandard() {
 	// Output: Next run: Wed 09:00
 }
 
+// This example demonstrates that Sunday can be specified as either 0 or 7
+// in the day-of-week field, matching traditional cron behavior.
+func ExampleParseStandard_sundayFormats() {
+	// Both "0" and "7" represent Sunday
+	schedSun0, _ := cron.ParseStandard("0 9 * * 0") // Sunday as 0
+	schedSun7, _ := cron.ParseStandard("0 9 * * 7") // Sunday as 7
+
+	// Start from Saturday
+	saturday := time.Date(2025, 1, 4, 0, 0, 0, 0, time.UTC) // Saturday
+
+	// Both find the same Sunday
+	next0 := schedSun0.Next(saturday)
+	next7 := schedSun7.Next(saturday)
+
+	fmt.Printf("Using 0: %s\n", next0.Format("Mon Jan 2"))
+	fmt.Printf("Using 7: %s\n", next7.Format("Mon Jan 2"))
+	fmt.Printf("Same day: %v\n", next0.Equal(next7))
+	// Output:
+	// Using 0: Sun Jan 5
+	// Using 7: Sun Jan 5
+	// Same day: true
+}
+
+// This example demonstrates using 7 in day-of-week ranges.
+// The range "5-7" means Friday through Sunday.
+func ExampleParseStandard_weekendRange() {
+	// "5-7" covers Friday(5), Saturday(6), Sunday(7->0)
+	schedule, _ := cron.ParseStandard("0 10 * * 5-7")
+
+	// Start from Wednesday
+	wednesday := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	next := schedule.Next(wednesday)
+	fmt.Printf("Next after Wed: %s\n", next.Format("Mon"))
+
+	next = schedule.Next(next)
+	fmt.Printf("Then: %s\n", next.Format("Mon"))
+
+	next = schedule.Next(next)
+	fmt.Printf("Then: %s\n", next.Format("Mon"))
+	// Output:
+	// Next after Wed: Fri
+	// Then: Sat
+	// Then: Sun
+}
+
 // This example demonstrates verbose logging for debugging.
 func ExampleVerbosePrintfLogger() {
 	logger := cron.VerbosePrintfLogger(log.Default())
