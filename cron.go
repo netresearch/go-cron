@@ -171,6 +171,10 @@ type Entry struct {
 	// runImmediately is an internal flag set by WithRunImmediately().
 	// When true, the entry will be scheduled to run immediately upon registration.
 	runImmediately bool
+
+	// runOnce is an internal flag set by WithRunOnce().
+	// When true, the entry will be automatically removed after its first execution.
+	runOnce bool
 }
 
 // Valid returns true if this is not the zero entry.
@@ -329,6 +333,37 @@ func WithRunImmediately() JobOption {
 	}
 }
 
+// WithRunOnce causes the job to be automatically removed after its first execution.
+// This is useful for:
+//   - One-time scheduled tasks: "send reminder in 24 hours"
+//   - Deferred execution: schedule a task for later without manual cleanup
+//   - Temporary events: schedule something for a specific time, then forget it
+//
+// The job is removed from the scheduler after it is dispatched, regardless of
+// whether the job succeeds or fails. The job's goroutine continues to run
+// independently after the entry is removed.
+//
+// WithRunOnce works correctly with job wrappers like Recover and RetryWithBackoff:
+// the entry is removed after dispatch, but retries happen within the job's goroutine.
+//
+// Can be combined with WithRunImmediately to run once immediately:
+//
+//	// Run once right now
+//	c.AddFunc("@every 1h", task, cron.WithRunOnce(), cron.WithRunImmediately())
+//
+// Example:
+//
+//	// Send reminder in 24 hours, then remove from scheduler
+//	c.AddFunc("@in 24h", sendReminder, cron.WithRunOnce())
+//
+//	// Run at specific time, then remove
+//	c.AddFunc("0 9 25 12 *", sendChristmasGreeting, cron.WithRunOnce())
+func WithRunOnce() JobOption {
+	return func(e *Entry) {
+		e.runOnce = true
+	}
+}
+
 // AddFunc adds a func to the Cron to be run on the given schedule.
 // The spec is parsed using the time zone of this Cron instance as the default.
 // An opaque ID is returned that can be used to later remove it.
@@ -340,6 +375,32 @@ func WithRunImmediately() JobOption {
 // Returns ErrDuplicateName if a name is provided and already exists.
 func (c *Cron) AddFunc(spec string, cmd func(), opts ...JobOption) (EntryID, error) {
 	return c.AddJob(spec, FuncJob(cmd), opts...)
+}
+
+// AddOnceFunc adds a func to run once on the given schedule, then automatically remove itself.
+// This is a convenience wrapper that combines AddFunc with WithRunOnce().
+//
+// Example:
+//
+//	// Send reminder in 24 hours
+//	c.AddOnceFunc("@in 24h", sendReminder)
+//
+//	// Run at specific time
+//	c.AddOnceFunc("0 9 25 12 *", sendChristmasGreeting, cron.WithName("christmas"))
+func (c *Cron) AddOnceFunc(spec string, cmd func(), opts ...JobOption) (EntryID, error) {
+	opts = append(opts, WithRunOnce())
+	return c.AddFunc(spec, cmd, opts...)
+}
+
+// AddOnceJob adds a Job to run once on the given schedule, then automatically remove itself.
+// This is a convenience wrapper that combines AddJob with WithRunOnce().
+//
+// Example:
+//
+//	c.AddOnceJob("@in 1h", myJob, cron.WithName("one-time-task"))
+func (c *Cron) AddOnceJob(spec string, cmd Job, opts ...JobOption) (EntryID, error) {
+	opts = append(opts, WithRunOnce())
+	return c.AddJob(spec, cmd, opts...)
 }
 
 // AddJob adds a Job to the Cron to be run on the given schedule.
@@ -383,6 +444,19 @@ func (c *Cron) Schedule(schedule Schedule, cmd Job) EntryID {
 		return 0
 	}
 	return id
+}
+
+// ScheduleOnceJob adds a Job to run once on the given schedule, then automatically remove itself.
+// This is a convenience wrapper that combines ScheduleJob with WithRunOnce().
+//
+// Example:
+//
+//	// Run once at a specific time
+//	schedule := cron.Every(24 * time.Hour)
+//	c.ScheduleOnceJob(schedule, myJob, cron.WithName("one-time"))
+func (c *Cron) ScheduleOnceJob(schedule Schedule, cmd Job, opts ...JobOption) (EntryID, error) {
+	opts = append(opts, WithRunOnce())
+	return c.ScheduleJob(schedule, cmd, opts...)
 }
 
 // ScheduleJob adds a Job to the Cron to be run on the given schedule.
@@ -557,6 +631,7 @@ func (c *Cron) handleTimeBackwards(now time.Time) {
 
 // processDueEntries runs all entries whose scheduled time has passed.
 // Entries are processed in order from the heap and rescheduled for their next run.
+// Run-once entries are removed after being dispatched.
 func (c *Cron) processDueEntries(now time.Time) {
 	for c.entries.Peek() != nil {
 		e := c.entries.Peek()
@@ -566,10 +641,18 @@ func (c *Cron) processDueEntries(now time.Time) {
 		scheduledTime := e.Next
 		c.startJob(e.ID, e.Job, e.WrappedJob, scheduledTime)
 		e.Prev = e.Next
-		e.Next = e.Schedule.Next(now)
-		c.hooks.callOnSchedule(e.ID, e.Job, e.Next)
-		c.entries.Update(e) // Re-heapify after updating Next time
-		c.logger.Info("run", "now", now, "entry", e.ID, "next", e.Next)
+
+		if e.runOnce {
+			// Remove run-once entries after dispatching the job.
+			// The job continues running in its own goroutine.
+			c.removeEntry(e.ID)
+			c.logger.Info("run-once", "now", now, "entry", e.ID, "removed", true)
+		} else {
+			e.Next = e.Schedule.Next(now)
+			c.hooks.callOnSchedule(e.ID, e.Job, e.Next)
+			c.entries.Update(e) // Re-heapify after updating Next time
+			c.logger.Info("run", "now", now, "entry", e.ID, "next", e.Next)
+		}
 	}
 }
 

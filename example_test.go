@@ -1039,3 +1039,106 @@ func ExampleParser_WithHashKey() {
 	// Output:
 	// Next at minute: 16
 }
+
+// This example demonstrates WithRunOnce for single-execution jobs.
+// Run-once jobs execute at their scheduled time and are automatically
+// removed from the scheduler after execution.
+func ExampleWithRunOnce() {
+	c := cron.New()
+
+	executed := make(chan struct{})
+
+	// Add a job that will only run once, then auto-remove
+	id, _ := c.AddFunc("@every 1s", func() {
+		fmt.Println("Job executed")
+		close(executed)
+	}, cron.WithRunOnce())
+
+	c.Start()
+	<-executed // Wait for job to run
+
+	// Give scheduler time to remove the entry
+	time.Sleep(10 * time.Millisecond)
+
+	// The entry no longer exists
+	entry := c.Entry(id)
+	fmt.Printf("Entry exists after execution: %v\n", entry.ID != 0)
+
+	c.Stop()
+	// Output:
+	// Job executed
+	// Entry exists after execution: false
+}
+
+// This example demonstrates AddOnceFunc as a convenience method.
+// It's equivalent to AddFunc with WithRunOnce().
+func ExampleCron_AddOnceFunc() {
+	c := cron.New()
+
+	done := make(chan struct{})
+
+	// AddOnceFunc is shorthand for AddFunc(..., WithRunOnce())
+	c.AddOnceFunc("@every 1s", func() {
+		fmt.Println("One-time job executed")
+		close(done)
+	})
+
+	c.Start()
+	<-done
+	c.Stop()
+
+	fmt.Println("Job completed and removed")
+	// Output:
+	// One-time job executed
+	// Job completed and removed
+}
+
+// This example demonstrates combining WithRunOnce with WithRunImmediately.
+// The job runs immediately when added and is then removed from the scheduler.
+func ExampleWithRunOnce_withRunImmediately() {
+	c := cron.New()
+
+	done := make(chan struct{})
+
+	// Run immediately AND only once - useful for deferred tasks
+	c.AddFunc("@hourly", func() {
+		fmt.Println("Immediate one-time execution")
+		close(done)
+	}, cron.WithRunOnce(), cron.WithRunImmediately())
+
+	c.Start()
+	<-done
+	c.Stop()
+
+	fmt.Println("Job ran immediately and was removed")
+	// Output:
+	// Immediate one-time execution
+	// Job ran immediately and was removed
+}
+
+// This example demonstrates run-once jobs work correctly with Recover wrapper.
+// The entry is removed after dispatch, even if the job panics.
+func ExampleWithRunOnce_withRecover() {
+	c := cron.New(cron.WithChain(
+		cron.Recover(cron.DefaultLogger),
+	))
+
+	done := make(chan struct{})
+
+	id, _ := c.AddFunc("@every 1s", func() {
+		close(done)
+		panic("intentional panic")
+	}, cron.WithRunOnce())
+
+	c.Start()
+	<-done
+	time.Sleep(50 * time.Millisecond) // Wait for scheduler to process removal
+
+	// Entry is still removed even though job panicked
+	entry := c.Entry(id)
+	fmt.Printf("Entry removed after panic: %v\n", entry.ID == 0)
+
+	c.Stop()
+	// Output:
+	// Entry removed after panic: true
+}
