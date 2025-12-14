@@ -235,132 +235,135 @@ func TestChainDelayIfStillRunning(t *testing.T) {
 	})
 }
 
-func TestChainSkipIfStillRunning(t *testing.T) {
-	t.Run("runs immediately", func(t *testing.T) {
-		var j countJob
-		wrappedJob := NewChain(SkipIfStillRunning(DiscardLogger)).Then(&j)
+// TestSkipIfStillRunning_RunsImmediately tests that SkipIfStillRunning runs jobs immediately.
+func TestSkipIfStillRunning_RunsImmediately(t *testing.T) {
+	var j countJob
+	wrappedJob := NewChain(SkipIfStillRunning(DiscardLogger)).Then(&j)
+	go wrappedJob.Run()
+	time.Sleep(2 * time.Millisecond) // Give the job 2ms to complete.
+	if c := j.Done(); c != 1 {
+		t.Errorf("expected job run once, immediately, got %d", c)
+	}
+}
+
+// TestSkipIfStillRunning_SecondRunImmediateIfFirstDone tests sequential runs.
+func TestSkipIfStillRunning_SecondRunImmediateIfFirstDone(t *testing.T) {
+	var j countJob
+	wrappedJob := NewChain(SkipIfStillRunning(DiscardLogger)).Then(&j)
+	go func() {
 		go wrappedJob.Run()
-		time.Sleep(2 * time.Millisecond) // Give the job 2ms to complete.
-		if c := j.Done(); c != 1 {
-			t.Errorf("expected job run once, immediately, got %d", c)
-		}
-	})
-
-	t.Run("second run immediate if first done", func(t *testing.T) {
-		var j countJob
-		wrappedJob := NewChain(SkipIfStillRunning(DiscardLogger)).Then(&j)
-		go func() {
-			go wrappedJob.Run()
-			time.Sleep(time.Millisecond)
-			go wrappedJob.Run()
-		}()
-		time.Sleep(3 * time.Millisecond) // Give both jobs 3ms to complete.
-		if c := j.Done(); c != 2 {
-			t.Errorf("expected job run twice, immediately, got %d", c)
-		}
-	})
-
-	t.Run("second run skipped if first not done", func(t *testing.T) {
-		// Use channels for proper synchronization instead of timing
-		jobStarted := make(chan struct{})
-		jobCanFinish := make(chan struct{})
-		jobDone := make(chan struct{})
-
-		var started, done int32
-		var startedOnce, doneOnce sync.Once
-
-		job := FuncJob(func() {
-			atomic.AddInt32(&started, 1)
-			startedOnce.Do(func() { close(jobStarted) })
-			<-jobCanFinish
-			atomic.AddInt32(&done, 1)
-			doneOnce.Do(func() { close(jobDone) })
-		})
-
-		wrappedJob := NewChain(SkipIfStillRunning(DiscardLogger)).Then(job)
-
-		// Start first job
+		time.Sleep(time.Millisecond)
 		go wrappedJob.Run()
+	}()
+	time.Sleep(3 * time.Millisecond) // Give both jobs 3ms to complete.
+	if c := j.Done(); c != 2 {
+		t.Errorf("expected job run twice, immediately, got %d", c)
+	}
+}
 
-		// Wait for first job to actually start
-		select {
-		case <-jobStarted:
-			// Job started, proceed
-		case <-time.After(5 * time.Second):
-			t.Fatal("timeout waiting for job to start")
-		}
+// TestSkipIfStillRunning_SecondRunSkippedIfFirstNotDone tests skipping while running.
+func TestSkipIfStillRunning_SecondRunSkippedIfFirstNotDone(t *testing.T) {
+	// Use channels for proper synchronization instead of timing
+	jobStarted := make(chan struct{})
+	jobCanFinish := make(chan struct{})
+	jobDone := make(chan struct{})
 
-		// Now start second job while first is still running
-		secondJobDone := make(chan struct{})
-		go func() {
-			wrappedJob.Run() // Should be skipped immediately
-			close(secondJobDone)
-		}()
+	var started, done int32
+	var startedOnce, doneOnce sync.Once
 
-		// Wait for second job to return (should be skipped immediately)
-		select {
-		case <-secondJobDone:
-			// Second job was skipped, good
-		case <-time.After(5 * time.Second):
-			t.Fatal("timeout waiting for second job to be skipped")
-		}
-
-		// Verify first job still running, second was skipped (inner job ran only once)
-		if s, d := atomic.LoadInt32(&started), atomic.LoadInt32(&done); s != 1 || d != 0 {
-			t.Errorf("expected first job started but not done, got started=%d done=%d", s, d)
-		}
-
-		// Allow first job to finish
-		close(jobCanFinish)
-
-		// Wait for first job to complete
-		select {
-		case <-jobDone:
-			// Job finished
-		case <-time.After(5 * time.Second):
-			t.Fatal("timeout waiting for job to finish")
-		}
-
-		// Verify only first job ran
-		if s, d := atomic.LoadInt32(&started), atomic.LoadInt32(&done); s != 1 || d != 1 {
-			t.Errorf("expected only first job to have run, got started=%d done=%d", s, d)
-		}
+	job := FuncJob(func() {
+		atomic.AddInt32(&started, 1)
+		startedOnce.Do(func() { close(jobStarted) })
+		<-jobCanFinish
+		atomic.AddInt32(&done, 1)
+		doneOnce.Do(func() { close(jobDone) })
 	})
 
-	t.Run("skip 10 jobs on rapid fire", func(t *testing.T) {
-		var j countJob
-		j.delay = 10 * time.Millisecond
-		wrappedJob := NewChain(SkipIfStillRunning(DiscardLogger)).Then(&j)
-		for i := 0; i < 11; i++ {
-			go wrappedJob.Run()
-		}
-		time.Sleep(200 * time.Millisecond)
-		done := j.Done()
-		if done != 1 {
-			t.Error("expected 1 jobs executed, 10 jobs dropped, got", done)
-		}
-	})
+	wrappedJob := NewChain(SkipIfStillRunning(DiscardLogger)).Then(job)
 
-	t.Run("different jobs independent", func(t *testing.T) {
-		var j1, j2 countJob
-		j1.delay = 10 * time.Millisecond
-		j2.delay = 10 * time.Millisecond
-		chain := NewChain(SkipIfStillRunning(DiscardLogger))
-		wrappedJob1 := chain.Then(&j1)
-		wrappedJob2 := chain.Then(&j2)
-		for i := 0; i < 11; i++ {
-			go wrappedJob1.Run()
-			go wrappedJob2.Run()
-		}
-		time.Sleep(100 * time.Millisecond)
-		var (
-			done1 = j1.Done()
-			done2 = j2.Done()
-		)
-		if done1 != 1 || done2 != 1 {
-			t.Error("expected both jobs executed once, got", done1, "and", done2)
-		}
-	})
+	// Start first job
+	go wrappedJob.Run()
+
+	// Wait for first job to actually start
+	select {
+	case <-jobStarted:
+		// Job started, proceed
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for job to start")
+	}
+
+	// Now start second job while first is still running
+	secondJobDone := make(chan struct{})
+	go func() {
+		wrappedJob.Run() // Should be skipped immediately
+		close(secondJobDone)
+	}()
+
+	// Wait for second job to return (should be skipped immediately)
+	select {
+	case <-secondJobDone:
+		// Second job was skipped, good
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for second job to be skipped")
+	}
+
+	// Verify first job still running, second was skipped (inner job ran only once)
+	if s, d := atomic.LoadInt32(&started), atomic.LoadInt32(&done); s != 1 || d != 0 {
+		t.Errorf("expected first job started but not done, got started=%d done=%d", s, d)
+	}
+
+	// Allow first job to finish
+	close(jobCanFinish)
+
+	// Wait for first job to complete
+	select {
+	case <-jobDone:
+		// Job finished
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for job to finish")
+	}
+
+	// Verify only first job ran
+	if s, d := atomic.LoadInt32(&started), atomic.LoadInt32(&done); s != 1 || d != 1 {
+		t.Errorf("expected only first job to have run, got started=%d done=%d", s, d)
+	}
+}
+
+// TestSkipIfStillRunning_Skip10JobsOnRapidFire tests skipping multiple rapid-fire jobs.
+func TestSkipIfStillRunning_Skip10JobsOnRapidFire(t *testing.T) {
+	var j countJob
+	j.delay = 10 * time.Millisecond
+	wrappedJob := NewChain(SkipIfStillRunning(DiscardLogger)).Then(&j)
+	for i := 0; i < 11; i++ {
+		go wrappedJob.Run()
+	}
+	time.Sleep(200 * time.Millisecond)
+	done := j.Done()
+	if done != 1 {
+		t.Error("expected 1 jobs executed, 10 jobs dropped, got", done)
+	}
+}
+
+// TestSkipIfStillRunning_DifferentJobsIndependent tests that different jobs are independent.
+func TestSkipIfStillRunning_DifferentJobsIndependent(t *testing.T) {
+	var j1, j2 countJob
+	j1.delay = 10 * time.Millisecond
+	j2.delay = 10 * time.Millisecond
+	chain := NewChain(SkipIfStillRunning(DiscardLogger))
+	wrappedJob1 := chain.Then(&j1)
+	wrappedJob2 := chain.Then(&j2)
+	for i := 0; i < 11; i++ {
+		go wrappedJob1.Run()
+		go wrappedJob2.Run()
+	}
+	time.Sleep(100 * time.Millisecond)
+	var (
+		done1 = j1.Done()
+		done2 = j2.Done()
+	)
+	if done1 != 1 || done2 != 1 {
+		t.Error("expected both jobs executed once, got", done1, "and", done2)
+	}
 }
 
 func TestChainTimeout(t *testing.T) {
