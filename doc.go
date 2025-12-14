@@ -387,6 +387,51 @@ Activate it with a one-off logger as follows:
 		cron.WithLogger(
 			cron.VerbosePrintfLogger(log.New(os.Stdout, "cron: ", log.LstdFlags))))
 
+# Run-Once Jobs
+
+Run-once jobs execute exactly once at their scheduled time and are automatically
+removed from the scheduler after execution. This is useful for:
+
+  - One-time maintenance tasks (schema migrations, cleanup jobs)
+  - Deferred execution triggered by user actions
+  - Temporary scheduled events (promotions, time-limited features)
+  - Testing and debugging scheduled behavior
+
+Using the WithRunOnce option:
+
+	c := cron.New()
+	c.Start()
+
+	// Job runs at next matching time, then removes itself
+	c.AddFunc("0 3 * * *", migrateDatabase, cron.WithRunOnce())
+
+	// Combining with other options
+	c.AddFunc("@every 5m", sendReminder, cron.WithRunOnce(), cron.WithName("reminder"))
+
+Convenience methods for cleaner code:
+
+	// These are equivalent:
+	c.AddFunc("@hourly", task, cron.WithRunOnce())
+	c.AddOnceFunc("@hourly", task)
+
+	// For Job interface implementations:
+	c.AddOnceJob("@daily", myJob)
+
+	// For pre-parsed schedules:
+	c.ScheduleOnceJob(cron.Every(time.Hour), myJob)
+
+Run-once with immediate execution:
+
+	// Run immediately AND only once - useful for deferred tasks
+	c.AddFunc("@hourly", processOrder, cron.WithRunOnce(), cron.WithRunImmediately())
+
+Behavior notes:
+  - The entry is removed AFTER the job is dispatched (job continues in its goroutine)
+  - Works correctly with Recover, RetryWithBackoff, and other wrappers
+  - Entry removal is logged at Info level: "run-once", "entry", id, "removed", true
+  - Manual Remove() before execution prevents the job from running
+  - Entry count decrements immediately upon removal
+
 # Resource Management
 
 Use WithMaxEntries to limit the number of scheduled jobs and prevent resource exhaustion:
@@ -504,6 +549,7 @@ New features available after migration:
   - Named jobs: Unique job names with duplicate prevention
   - Tagged jobs: Categorization and bulk operations
   - Context support: Graceful shutdown via context cancellation
+  - Run-once jobs: Single-execution jobs that auto-remove after running
 
 All existing code will work unchanged. The migration is a drop-in replacement.
 

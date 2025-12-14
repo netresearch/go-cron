@@ -2369,3 +2369,454 @@ func TestTimeoutWithContext_PreservesJobWithContextInterface(t *testing.T) {
 		t.Error("TimeoutWithContext should return a JobWithContext")
 	}
 }
+
+// =============================================================================
+// Run-Once Tests
+// =============================================================================
+
+// TestRunOnce_BasicExecution verifies that a run-once job executes exactly once
+// and is removed from the scheduler after execution.
+func TestRunOnce_BasicExecution(t *testing.T) {
+	fc := NewFakeClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
+	c := New(WithClock(fc), WithParser(secondParser))
+
+	var executions int32
+	executed := make(chan struct{}, 1)
+
+	id, err := c.AddFunc("* * * * * *", func() {
+		atomic.AddInt32(&executions, 1)
+		select {
+		case executed <- struct{}{}:
+		default:
+		}
+	}, WithRunOnce())
+	if err != nil {
+		t.Fatalf("AddFunc failed: %v", err)
+	}
+
+	// Verify entry exists before start
+	if entry := c.Entry(id); entry.ID == 0 {
+		t.Fatal("entry should exist before start")
+	}
+
+	c.Start()
+	defer c.Stop()
+
+	// Wait for timer registration
+	fc.BlockUntil(1)
+
+	// Advance to trigger first execution
+	fc.Advance(time.Second)
+
+	// Wait for execution
+	select {
+	case <-executed:
+		// Good
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("job did not execute")
+	}
+
+	// Give scheduler time to remove the entry
+	time.Sleep(50 * time.Millisecond)
+
+	// Verify entry was removed
+	if entry := c.Entry(id); entry.ID != 0 {
+		t.Error("run-once entry should be removed after execution")
+	}
+
+	// Verify it's not in Entries() list
+	for _, e := range c.Entries() {
+		if e.ID == id {
+			t.Error("run-once entry should not appear in Entries()")
+		}
+	}
+
+	// Advance time again and verify no more executions
+	fc.Advance(2 * time.Second)
+	time.Sleep(50 * time.Millisecond)
+
+	if count := atomic.LoadInt32(&executions); count != 1 {
+		t.Errorf("expected exactly 1 execution, got %d", count)
+	}
+}
+
+// TestRunOnce_WithJobOption verifies WithRunOnce works via AddJob.
+func TestRunOnce_WithJobOption(t *testing.T) {
+	fc := NewFakeClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
+	c := New(WithClock(fc), WithParser(secondParser))
+
+	var executions int32
+	job := FuncJob(func() {
+		atomic.AddInt32(&executions, 1)
+	})
+
+	id, err := c.AddJob("* * * * * *", job, WithRunOnce())
+	if err != nil {
+		t.Fatalf("AddJob failed: %v", err)
+	}
+
+	c.Start()
+	defer c.Stop()
+
+	fc.BlockUntil(1)
+	fc.Advance(time.Second)
+	time.Sleep(50 * time.Millisecond)
+
+	// Entry should be removed
+	if entry := c.Entry(id); entry.ID != 0 {
+		t.Error("run-once entry should be removed after execution")
+	}
+
+	// Advance more time - no more executions
+	fc.Advance(3 * time.Second)
+	time.Sleep(50 * time.Millisecond)
+
+	if count := atomic.LoadInt32(&executions); count != 1 {
+		t.Errorf("expected 1 execution, got %d", count)
+	}
+}
+
+// TestRunOnce_WithRecover verifies run-once works with the Recover wrapper.
+// The job should be removed even if it panics.
+func TestRunOnce_WithRecover(t *testing.T) {
+	fc := NewFakeClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
+
+	var buf syncWriter
+	c := New(
+		WithClock(fc),
+		WithParser(secondParser),
+		WithChain(Recover(newBufLogger(&buf))),
+	)
+
+	executed := make(chan struct{})
+
+	id, _ := c.AddFunc("* * * * * *", func() {
+		close(executed)
+		panic("test panic")
+	}, WithRunOnce())
+
+	c.Start()
+	defer c.Stop()
+
+	fc.BlockUntil(1)
+	fc.Advance(time.Second)
+
+	// Wait for panic and recovery
+	select {
+	case <-executed:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("job did not execute")
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	// Verify entry was still removed despite panic
+	if entry := c.Entry(id); entry.ID != 0 {
+		t.Error("run-once entry should be removed even after panic")
+	}
+
+	// Verify panic was logged
+	if !strings.Contains(buf.String(), "test panic") {
+		t.Error("expected panic to be logged")
+	}
+}
+
+// TestRunOnce_WithRunImmediately verifies combining WithRunOnce and WithRunImmediately.
+// The job should run immediately and then be removed.
+func TestRunOnce_WithRunImmediately(t *testing.T) {
+	fc := NewFakeClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
+	c := New(WithClock(fc))
+
+	var executions int32
+	executed := make(chan struct{}, 1)
+
+	id, err := c.AddFunc("@hourly", func() {
+		atomic.AddInt32(&executions, 1)
+		select {
+		case executed <- struct{}{}:
+		default:
+		}
+	}, WithRunOnce(), WithRunImmediately())
+	if err != nil {
+		t.Fatalf("AddFunc failed: %v", err)
+	}
+
+	c.Start()
+	defer c.Stop()
+
+	// Should execute immediately without advancing time
+	select {
+	case <-executed:
+		// Good - ran immediately
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("job did not run immediately")
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	// Entry should be removed after immediate execution
+	if entry := c.Entry(id); entry.ID != 0 {
+		t.Error("run-once entry should be removed after immediate execution")
+	}
+
+	// Verify only one execution
+	if count := atomic.LoadInt32(&executions); count != 1 {
+		t.Errorf("expected 1 execution, got %d", count)
+	}
+}
+
+// TestAddOnceFunc tests the AddOnceFunc convenience method.
+func TestAddOnceFunc(t *testing.T) {
+	fc := NewFakeClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
+	c := New(WithClock(fc), WithParser(secondParser))
+
+	var executions int32
+	id, err := c.AddOnceFunc("* * * * * *", func() {
+		atomic.AddInt32(&executions, 1)
+	})
+	if err != nil {
+		t.Fatalf("AddOnceFunc failed: %v", err)
+	}
+
+	c.Start()
+	defer c.Stop()
+
+	fc.BlockUntil(1)
+	fc.Advance(time.Second)
+	time.Sleep(50 * time.Millisecond)
+
+	// Entry should be removed
+	if entry := c.Entry(id); entry.ID != 0 {
+		t.Error("AddOnceFunc entry should be removed after execution")
+	}
+
+	fc.Advance(2 * time.Second)
+	time.Sleep(50 * time.Millisecond)
+
+	if count := atomic.LoadInt32(&executions); count != 1 {
+		t.Errorf("expected 1 execution, got %d", count)
+	}
+}
+
+// TestAddOnceJob tests the AddOnceJob convenience method.
+func TestAddOnceJob(t *testing.T) {
+	fc := NewFakeClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
+	c := New(WithClock(fc), WithParser(secondParser))
+
+	var executions int32
+	job := FuncJob(func() {
+		atomic.AddInt32(&executions, 1)
+	})
+
+	id, err := c.AddOnceJob("* * * * * *", job)
+	if err != nil {
+		t.Fatalf("AddOnceJob failed: %v", err)
+	}
+
+	c.Start()
+	defer c.Stop()
+
+	fc.BlockUntil(1)
+	fc.Advance(time.Second)
+	time.Sleep(50 * time.Millisecond)
+
+	if entry := c.Entry(id); entry.ID != 0 {
+		t.Error("AddOnceJob entry should be removed after execution")
+	}
+
+	if count := atomic.LoadInt32(&executions); count != 1 {
+		t.Errorf("expected 1 execution, got %d", count)
+	}
+}
+
+// TestScheduleOnceJob tests the ScheduleOnceJob convenience method.
+func TestScheduleOnceJob(t *testing.T) {
+	fc := NewFakeClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
+	c := New(WithClock(fc))
+
+	var executions int32
+	job := FuncJob(func() {
+		atomic.AddInt32(&executions, 1)
+	})
+
+	id, err := c.ScheduleOnceJob(Every(time.Second), job)
+	if err != nil {
+		t.Fatalf("ScheduleOnceJob failed: %v", err)
+	}
+
+	c.Start()
+	defer c.Stop()
+
+	fc.BlockUntil(1)
+	fc.Advance(time.Second)
+	time.Sleep(50 * time.Millisecond)
+
+	if entry := c.Entry(id); entry.ID != 0 {
+		t.Error("ScheduleOnceJob entry should be removed after execution")
+	}
+
+	fc.Advance(3 * time.Second)
+	time.Sleep(50 * time.Millisecond)
+
+	if count := atomic.LoadInt32(&executions); count != 1 {
+		t.Errorf("expected 1 execution, got %d", count)
+	}
+}
+
+// TestRunOnce_MixedJobs verifies run-once and regular jobs coexist correctly.
+func TestRunOnce_MixedJobs(t *testing.T) {
+	fc := NewFakeClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
+	c := New(WithClock(fc), WithParser(secondParser))
+
+	var onceCount, regularCount int32
+
+	// Add a run-once job
+	onceID, _ := c.AddOnceFunc("* * * * * *", func() {
+		atomic.AddInt32(&onceCount, 1)
+	})
+
+	// Add a regular job
+	regularID, _ := c.AddFunc("* * * * * *", func() {
+		atomic.AddInt32(&regularCount, 1)
+	})
+
+	c.Start()
+	defer c.Stop()
+
+	fc.BlockUntil(1)
+
+	// First tick - both should run
+	fc.Advance(time.Second)
+	time.Sleep(50 * time.Millisecond)
+
+	if once := atomic.LoadInt32(&onceCount); once != 1 {
+		t.Errorf("run-once should execute once, got %d", once)
+	}
+	if regular := atomic.LoadInt32(&regularCount); regular != 1 {
+		t.Errorf("regular should execute once so far, got %d", regular)
+	}
+
+	// Run-once entry should be gone
+	if entry := c.Entry(onceID); entry.ID != 0 {
+		t.Error("run-once entry should be removed")
+	}
+	// Regular entry should still exist
+	if entry := c.Entry(regularID); entry.ID == 0 {
+		t.Error("regular entry should still exist")
+	}
+
+	fc.BlockUntil(1)
+
+	// Second tick - only regular should run
+	fc.Advance(time.Second)
+	time.Sleep(50 * time.Millisecond)
+
+	if once := atomic.LoadInt32(&onceCount); once != 1 {
+		t.Errorf("run-once should still be 1, got %d", once)
+	}
+	if regular := atomic.LoadInt32(&regularCount); regular != 2 {
+		t.Errorf("regular should execute twice now, got %d", regular)
+	}
+}
+
+// TestRunOnce_AddWhileRunning verifies run-once works when added to a running cron.
+func TestRunOnce_AddWhileRunning(t *testing.T) {
+	fc := NewFakeClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
+	c := New(WithClock(fc), WithParser(secondParser))
+
+	c.Start()
+	defer c.Stop()
+
+	var executions int32
+	executed := make(chan struct{})
+
+	id, _ := c.AddOnceFunc("* * * * * *", func() {
+		atomic.AddInt32(&executions, 1)
+		close(executed)
+	})
+
+	fc.BlockUntil(1)
+	fc.Advance(time.Second)
+
+	select {
+	case <-executed:
+		// Good
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("job did not execute")
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	if entry := c.Entry(id); entry.ID != 0 {
+		t.Error("run-once entry should be removed after execution")
+	}
+}
+
+// TestRunOnce_RemoveBeforeExecution verifies run-once jobs can be removed manually.
+func TestRunOnce_RemoveBeforeExecution(t *testing.T) {
+	fc := NewFakeClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
+	c := New(WithClock(fc), WithParser(secondParser))
+
+	var executions int32
+	id, _ := c.AddOnceFunc("* * * * * *", func() {
+		atomic.AddInt32(&executions, 1)
+	})
+
+	c.Start()
+	defer c.Stop()
+
+	// Remove before it can execute
+	c.Remove(id)
+
+	fc.BlockUntil(1)
+	fc.Advance(time.Second)
+	time.Sleep(50 * time.Millisecond)
+
+	if count := atomic.LoadInt32(&executions); count != 0 {
+		t.Errorf("removed run-once job should not execute, got %d executions", count)
+	}
+}
+
+// TestRunOnce_EntryCountDecrements verifies entry count decreases after run-once execution.
+func TestRunOnce_EntryCountDecrements(t *testing.T) {
+	fc := NewFakeClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
+	c := New(WithClock(fc), WithParser(secondParser))
+
+	executed := make(chan struct{})
+
+	// Add 3 entries: 2 run-once, 1 regular
+	c.AddOnceFunc("* * * * * *", func() {
+		select {
+		case executed <- struct{}{}:
+		default:
+		}
+	})
+	c.AddOnceFunc("* * * * * *", func() {
+		select {
+		case executed <- struct{}{}:
+		default:
+		}
+	})
+	c.AddFunc("* * * * * *", func() {})
+
+	c.Start()
+	defer c.Stop()
+
+	// Before execution: 3 entries
+	if count := len(c.Entries()); count != 3 {
+		t.Errorf("expected 3 entries before execution, got %d", count)
+	}
+
+	fc.BlockUntil(1)
+	fc.Advance(time.Second)
+
+	// Wait for both run-once jobs
+	<-executed
+	<-executed
+	time.Sleep(50 * time.Millisecond)
+
+	// After execution: only 1 regular entry remains
+	if count := len(c.Entries()); count != 1 {
+		t.Errorf("expected 1 entry after run-once execution, got %d", count)
+	}
+}
