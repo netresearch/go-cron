@@ -533,3 +533,168 @@ func TestValidateSpecConcurrent(t *testing.T) {
 		<-done
 	}
 }
+
+// TestValidateSpecs tests bulk validation of cron expressions.
+func TestValidateSpecs(t *testing.T) {
+	tests := []struct {
+		name           string
+		specs          []string
+		options        []ParseOption
+		wantErrIndices []int
+	}{
+		{
+			name:           "all valid",
+			specs:          []string{"* * * * *", "@hourly", "0 9 * * MON-FRI"},
+			wantErrIndices: nil,
+		},
+		{
+			name:           "all invalid",
+			specs:          []string{"invalid", "bad", "wrong"},
+			wantErrIndices: []int{0, 1, 2},
+		},
+		{
+			name:           "mixed valid and invalid",
+			specs:          []string{"* * * * *", "invalid", "0 9 * * MON-FRI", "bad"},
+			wantErrIndices: []int{1, 3},
+		},
+		{
+			name:           "empty slice",
+			specs:          []string{},
+			wantErrIndices: nil,
+		},
+		{
+			name:           "single valid",
+			specs:          []string{"@every 1h"},
+			wantErrIndices: nil,
+		},
+		{
+			name:           "single invalid",
+			specs:          []string{"not-a-cron"},
+			wantErrIndices: []int{0},
+		},
+		{
+			name:           "empty spec in list",
+			specs:          []string{"* * * * *", "", "0 0 * * *"},
+			wantErrIndices: []int{1},
+		},
+		{
+			name:           "invalid values",
+			specs:          []string{"60 * * * *", "0 25 * * *", "0 0 32 * *"},
+			wantErrIndices: []int{0, 1, 2},
+		},
+		{
+			name:           "with seconds option - valid",
+			specs:          []string{"0 * * * * *", "30 0 9 * * *"},
+			options:        []ParseOption{Second | Minute | Hour | Dom | Month | Dow},
+			wantErrIndices: nil,
+		},
+		{
+			name:           "with seconds option - mixed",
+			specs:          []string{"0 * * * * *", "* * * * *", "invalid"},
+			options:        []ParseOption{Second | Minute | Hour | Dom | Month | Dow},
+			wantErrIndices: []int{1, 2}, // 5-field fails when seconds required
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			errors := ValidateSpecs(tt.specs, tt.options...)
+
+			// Check we got errors at expected indices
+			if len(tt.wantErrIndices) == 0 {
+				if len(errors) != 0 {
+					t.Errorf("expected no errors, got %d: %v", len(errors), errors)
+				}
+				return
+			}
+
+			if len(errors) != len(tt.wantErrIndices) {
+				t.Errorf("expected %d errors, got %d: %v", len(tt.wantErrIndices), len(errors), errors)
+				return
+			}
+
+			for _, idx := range tt.wantErrIndices {
+				if _, ok := errors[idx]; !ok {
+					t.Errorf("expected error at index %d, but not found", idx)
+				}
+			}
+
+			// Verify no unexpected errors
+			for idx := range errors {
+				found := false
+				for _, wantIdx := range tt.wantErrIndices {
+					if idx == wantIdx {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("unexpected error at index %d: %v", idx, errors[idx])
+				}
+			}
+		})
+	}
+}
+
+// TestValidateSpecsReturnsEmptyMapNotNil verifies the function returns empty map, not nil.
+func TestValidateSpecsReturnsEmptyMapNotNil(t *testing.T) {
+	errors := ValidateSpecs([]string{"* * * * *", "@hourly"})
+	if errors == nil {
+		t.Error("expected empty map, got nil")
+	}
+	if len(errors) != 0 {
+		t.Errorf("expected empty map, got %d errors", len(errors))
+	}
+}
+
+// TestValidateSpecsErrorMessages verifies error messages are meaningful.
+func TestValidateSpecsErrorMessages(t *testing.T) {
+	specs := []string{
+		"60 * * * *", // invalid minute
+		"",           // empty
+		"not-a-cron", // invalid format
+	}
+
+	errors := ValidateSpecs(specs)
+
+	if len(errors) != 3 {
+		t.Fatalf("expected 3 errors, got %d", len(errors))
+	}
+
+	// Check error at index 0 mentions the value issue
+	if err, ok := errors[0]; ok {
+		if !strings.Contains(err.Error(), "above maximum") {
+			t.Errorf("expected 'above maximum' in error, got: %v", err)
+		}
+	}
+
+	// Check error at index 1 mentions empty
+	if err, ok := errors[1]; ok {
+		if !strings.Contains(err.Error(), "empty") {
+			t.Errorf("expected 'empty' in error, got: %v", err)
+		}
+	}
+}
+
+// TestValidateSpecsConcurrent tests concurrent use of ValidateSpecs.
+func TestValidateSpecsConcurrent(t *testing.T) {
+	specs := []string{"* * * * *", "invalid", "@hourly", "bad", "0 9 * * MON-FRI"}
+	done := make(chan bool)
+
+	for i := 0; i < 10; i++ {
+		go func() {
+			for j := 0; j < 100; j++ {
+				errors := ValidateSpecs(specs)
+				// Should always have exactly 2 errors (indices 1 and 3)
+				if len(errors) != 2 {
+					t.Errorf("expected 2 errors, got %d", len(errors))
+				}
+			}
+			done <- true
+		}()
+	}
+
+	for i := 0; i < 10; i++ {
+		<-done
+	}
+}

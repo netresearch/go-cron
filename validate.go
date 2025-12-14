@@ -63,6 +63,46 @@ func ValidateSpec(spec string, options ...ParseOption) error {
 	return err
 }
 
+// ValidateSpecs validates multiple cron expressions at once.
+// It returns a map of index to error for any invalid specs.
+// If all specs are valid, returns an empty map (not nil).
+//
+// This is useful for:
+//   - Validating configuration files before deployment
+//   - Bulk validation with detailed error reporting
+//   - Pre-flight checks before registering multiple jobs
+//
+// Example:
+//
+//	specs := []string{"* * * * *", "invalid", "0 9 * * MON-FRI", "bad"}
+//	errors := cron.ValidateSpecs(specs)
+//	if len(errors) > 0 {
+//	    for idx, err := range errors {
+//	        log.Printf("Spec %d is invalid: %v", idx, err)
+//	    }
+//	}
+//
+//	// For all-or-nothing validation:
+//	if len(errors) > 0 {
+//	    return fmt.Errorf("invalid specs: %v", errors)
+//	}
+//	// Now safe to add all specs
+//	for _, spec := range specs {
+//	    c.AddFunc(spec, handler)
+//	}
+func ValidateSpecs(specs []string, options ...ParseOption) map[int]error {
+	errors := make(map[int]error)
+	parser := getParserForOptions(options)
+
+	for i, spec := range specs {
+		if _, err := parser.Parse(spec); err != nil {
+			errors[i] = err
+		}
+	}
+
+	return errors
+}
+
 // AnalyzeSpec provides detailed analysis of a cron expression.
 // It returns a SpecAnalysis struct containing validation status,
 // next run time, parsed fields, and other metadata.
