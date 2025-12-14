@@ -2799,20 +2799,18 @@ func TestRunOnce_EntryCountDecrements(t *testing.T) {
 	fc := NewFakeClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
 	c := New(WithClock(fc), WithParser(secondParser))
 
-	executed := make(chan struct{})
+	// Use atomic counter since both jobs fire at same time
+	var execCount int32
+	executed := make(chan struct{}, 2) // Buffered for 2 jobs
 
 	// Add 3 entries: 2 run-once, 1 regular
 	c.AddOnceFunc("* * * * * *", func() {
-		select {
-		case executed <- struct{}{}:
-		default:
-		}
+		atomic.AddInt32(&execCount, 1)
+		executed <- struct{}{}
 	})
 	c.AddOnceFunc("* * * * * *", func() {
-		select {
-		case executed <- struct{}{}:
-		default:
-		}
+		atomic.AddInt32(&execCount, 1)
+		executed <- struct{}{}
 	})
 	c.AddFunc("* * * * * *", func() {})
 
@@ -2827,13 +2825,23 @@ func TestRunOnce_EntryCountDecrements(t *testing.T) {
 	fc.BlockUntil(1)
 	fc.Advance(time.Second)
 
-	// Wait for both run-once jobs
-	<-executed
-	<-executed
-	time.Sleep(50 * time.Millisecond)
+	// Wait for both run-once jobs with timeout
+	for i := 0; i < 2; i++ {
+		select {
+		case <-executed:
+		case <-time.After(time.Second):
+			t.Fatalf("timeout waiting for job %d", i+1)
+		}
+	}
+	time.Sleep(100 * time.Millisecond)
 
 	// After execution: only 1 regular entry remains
 	if count := len(c.Entries()); count != 1 {
 		t.Errorf("expected 1 entry after run-once execution, got %d", count)
+	}
+
+	// Verify both run-once jobs executed
+	if got := atomic.LoadInt32(&execCount); got != 2 {
+		t.Errorf("expected 2 run-once executions, got %d", got)
 	}
 }
