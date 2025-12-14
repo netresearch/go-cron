@@ -1,4 +1,4 @@
-<!-- Managed by agent: keep sections and order; edit content, not structure. Last updated: 2025-11-25 -->
+<!-- Managed by agent: keep sections and order; edit content, not structure. Last updated: 2025-12-14 -->
 
 # AGENTS.md
 
@@ -20,6 +20,27 @@ Maintained fork of robfig/cron - a cron spec parser and job scheduler for Go.
 - Panic fixes for TZ= parsing (issues #554, #555)
 - `Entry.Run()` method for proper chain decorator invocation (#551)
 - DST "spring forward" jobs run immediately (ISC cron behavior, PR #541)
+- Heap-based scheduling for O(log n) performance
+- FakeClock for deterministic testing
+- ObservabilityHooks for metrics integration
+
+## Architecture Decision Records (ADRs)
+
+**IMPORTANT:** Before making architectural changes, read the relevant ADRs in `docs/adr/`. These document key design decisions that MUST be respected.
+
+| ADR | Decision | Summary |
+|-----|----------|---------|
+| [ADR-001](docs/adr/ADR-001-heap-scheduling.md) | Min-Heap for Scheduling | O(log n) insert/remove, O(1) peek - do NOT revert to sorted slice |
+| [ADR-002](docs/adr/ADR-002-panic-for-failures.md) | Panic-Based Failures | Jobs signal failure via panic, caught by wrappers - do NOT add error returns to Job interface |
+| [ADR-003](docs/adr/ADR-003-async-observability.md) | Synchronous Hooks | Hooks are fast/sync, user buffers if needed - do NOT add channels/async dispatch |
+| [ADR-004](docs/adr/ADR-004-functional-options.md) | Functional Options | Use `WithX()` pattern for config - do NOT add config structs or setters |
+| [ADR-005](docs/adr/ADR-005-decorator-pattern.md) | Decorator/Chain Pattern | JobWrapper composition - do NOT change Job interface signature |
+| [ADR-006](docs/adr/ADR-006-sync-map-cache.md) | sync.Map for Cache | Lock-free reads for parser cache - do NOT use RWMutex |
+
+When proposing changes that conflict with an ADR, you MUST:
+1. Read the full ADR including alternatives considered
+2. Propose a new ADR that supersedes the old one
+3. Document why the original decision no longer applies
 
 ## Global rules
 
@@ -40,6 +61,9 @@ make build                     # Typecheck
 make lint                      # golangci-lint (gocyclo, govet, staticcheck, etc.)
 make test-race                 # Tests with race detection
 make test-coverage             # Tests with coverage report
+
+# Integration tests (real time, slower)
+go test -tags=integration -v -run "^TestRealTime"
 
 # Coverage threshold: 70% (CI enforced)
 ```
@@ -66,10 +90,11 @@ import (
 )
 ```
 
-### Patterns used
-- **Functional options**: `WithLocation()`, `WithSeconds()`, `WithChain()`
-- **Interface segregation**: `Job`, `Schedule`, `Logger` are minimal
-- **Chain pattern**: `JobWrapper` for cross-cutting concerns
+### Patterns used (per ADRs)
+- **Functional options**: `WithLocation()`, `WithSeconds()`, `WithChain()` (ADR-004)
+- **Interface segregation**: `Job`, `Schedule`, `Logger` are minimal (ADR-002)
+- **Chain/Decorator pattern**: `JobWrapper` for cross-cutting concerns (ADR-005)
+- **Heap-based scheduling**: Min-heap for entry management (ADR-001)
 
 ## Architecture overview
 
@@ -79,9 +104,23 @@ import (
 | `parser.go` | Cron expression parsing (standard + Quartz formats) |
 | `spec.go` | `SpecSchedule` - cron spec to next-time calculation |
 | `option.go` | Functional options for Cron configuration |
-| `chain.go` | Job wrappers: `Recover`, `SkipIfStillRunning`, `DelayIfStillRunning` |
+| `chain.go` | Job wrappers: `Recover`, `SkipIfStillRunning`, `Timeout`, etc. |
+| `retry.go` | `RetryWithBackoff`, `CircuitBreaker` wrappers |
 | `logger.go` | Logger interface compatible with go-logr/logr |
-| `constantdelay.go` | `@every` interval schedule implementation |
+| `clock.go` | Clock abstraction with `FakeClock` for testing |
+| `heap.go` | Min-heap implementation for entry scheduling |
+
+## Documentation index
+
+| Document | Purpose |
+|----------|---------|
+| `docs/ARCHITECTURE.md` | Internal design, data structures, algorithms |
+| `docs/COOKBOOK.md` | Practical recipes for common patterns |
+| `docs/MIGRATION.md` | Migration guide from robfig/cron |
+| `docs/API_REFERENCE.md` | Public API documentation |
+| `docs/DST_HANDLING.md` | Daylight saving time behavior |
+| `docs/TESTING_GUIDE.md` | Testing strategies and FakeClock usage |
+| `docs/adr/` | Architecture Decision Records (6 ADRs) |
 
 ## PR/commit checklist
 
@@ -91,35 +130,56 @@ import (
 - [ ] Test edge cases: DST transitions, timezone handling, panic recovery
 - [ ] Conventional commit message format used
 - [ ] PR template filled out completely
+- [ ] **ADRs reviewed** if touching architectural areas
 
 ## Good vs bad examples
 
-### Adding a new option
+### Adding a new option (per ADR-004)
 ```go
-// GOOD: Follows existing pattern
+// GOOD: Follows functional options pattern
 func WithCustomLogger(l Logger) Option {
     return func(c *Cron) {
         c.logger = l
     }
 }
 
-// BAD: Doesn't follow functional options pattern
+// BAD: Doesn't follow ADR-004
 func (c *Cron) SetCustomLogger(l Logger) {
     c.logger = l
 }
 ```
 
+### Adding a new wrapper (per ADR-005)
+```go
+// GOOD: Follows decorator pattern
+func MyWrapper(logger Logger) JobWrapper {
+    return func(j Job) Job {
+        return FuncJob(func() {
+            // wrapper logic
+            j.Run()
+        })
+    }
+}
+
+// BAD: Modifying Job interface (violates ADR-002, ADR-005)
+type JobWithError interface {
+    Run() error  // DON'T DO THIS
+}
+```
+
 ### Testing schedule edge cases
 ```go
-// GOOD: Tests DST transition explicitly
+// GOOD: Tests DST transition explicitly with FakeClock
 func TestDSTSpringForward(t *testing.T) {
     loc, _ := time.LoadLocation("America/New_York")
+    clock := NewFakeClock(time.Date(2024, 3, 10, 1, 59, 0, 0, loc))
+    c := New(WithClock(clock), WithLocation(loc))
     // Test job scheduled during non-existent hour
 }
 
 // BAD: Assumes local timezone behavior
 func TestSchedule(t *testing.T) {
-    // Uses time.Local implicitly
+    // Uses time.Local implicitly - non-deterministic
 }
 ```
 
@@ -132,12 +192,13 @@ func TestSchedule(t *testing.T) {
 
 ## When stuck
 
-1. **Contributing**: See `CONTRIBUTING.md` for development workflow
-2. **Cron expression syntax**: See `doc.go` for comprehensive documentation
-3. **DST behavior**: Check `spec.go` and related tests for edge cases
-4. **Original design**: https://github.com/robfig/cron (issues/PRs reference context)
-5. **Go scheduling**: https://pkg.go.dev/time#Timer
-6. **Security issues**: See `SECURITY.md` for reporting vulnerabilities
+1. **ADRs**: Check `docs/adr/` for design rationale before proposing changes
+2. **Cookbook**: See `docs/COOKBOOK.md` for practical recipes
+3. **Contributing**: See `CONTRIBUTING.md` for development workflow
+4. **Cron expression syntax**: See `doc.go` for comprehensive documentation
+5. **DST behavior**: Check `docs/DST_HANDLING.md` and `spec.go` tests
+6. **Original design**: https://github.com/robfig/cron (issues/PRs reference context)
+7. **Security issues**: See `SECURITY.md` for reporting vulnerabilities
 
 ## Index of scoped AGENTS.md
 
@@ -145,7 +206,8 @@ No scoped files needed - this is a flat library structure.
 
 ## When instructions conflict
 
-- Nearest `AGENTS.md` wins (this is the only one)
-- Explicit user prompts override file instructions
-- For Go idioms, defer to standard library conventions
-- For cron behavior, match ISC cron specification
+1. **ADRs take precedence** for architectural decisions
+2. Nearest `AGENTS.md` wins for operational guidance
+3. Explicit user prompts override file instructions
+4. For Go idioms, defer to standard library conventions
+5. For cron behavior, match ISC cron specification
