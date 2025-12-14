@@ -7,6 +7,11 @@ import "time"
 type SpecSchedule struct {
 	Second, Minute, Hour, Dom, Month, Dow uint64
 
+	// Year is a bitmask for valid years, stored as offsets from YearBase (1970).
+	// For example, year 2024 is stored as bit (2024-1970) = bit 54.
+	// If starBit is set, any year is valid.
+	Year uint64
+
 	// Override location for this schedule.
 	Location *time.Location
 
@@ -22,12 +27,22 @@ type bounds struct {
 	names    map[string]uint
 }
 
+// YearBase is the minimum valid year for the Year field.
+// Years are stored as offsets from this base year.
+const YearBase = 1970
+
+// YearMax is the maximum valid year for the Year field.
+// Years are stored as offsets from YearBase in a uint64 bitmask.
+// Since uint64 provides 64 bits (0-63), the maximum representable year is 1970+63=2033.
+const YearMax = 2033
+
 // The bounds for each field.
 var (
 	seconds = bounds{0, 59, nil}
 	minutes = bounds{0, 59, nil}
 	hours   = bounds{0, 23, nil}
 	dom     = bounds{1, 31, nil}
+	years   = bounds{YearBase, YearMax, nil}
 	months  = bounds{1, 12, map[string]uint{
 		"jan": 1,
 		"feb": 2,
@@ -165,6 +180,21 @@ func fieldMatches(value int, bits uint64) bool {
 	return 1<<uint(value)&bits != 0
 }
 
+// yearMatches checks if a year matches the year bitmask.
+// Years are stored as offsets from YearBase (1970).
+// If starBit is set in the bitmask, any year matches.
+func yearMatches(year int, bits uint64) bool {
+	if bits&starBit != 0 {
+		return true
+	}
+	offset := year - YearBase
+	if offset < 0 || offset > 63 {
+		return false
+	}
+	// #nosec G115 -- offset is bounded 0-63, safe for uint
+	return 1<<uint(offset)&bits != 0
+}
+
 // Next returns the next time this schedule is activated, greater than the given time.
 // If no time can be found to satisfy the schedule, returns the zero time.
 func (s *SpecSchedule) Next(t time.Time) time.Time {
@@ -186,6 +216,19 @@ func (s *SpecSchedule) Next(t time.Time) time.Time {
 WRAP:
 	if t.Year() > yearLimit {
 		return time.Time{}
+	}
+
+	// Check year constraint first (if Year field is not wildcard).
+	// Advance to next valid year if current year doesn't match.
+	for !yearMatches(t.Year(), s.Year) {
+		if !added {
+			added = true
+			t = time.Date(t.Year(), 1, 1, 0, 0, 0, 0, loc)
+		}
+		t = t.AddDate(1, 0, 0)
+		if t.Year() > yearLimit {
+			return time.Time{}
+		}
 	}
 
 	// Find the first applicable month.
@@ -347,6 +390,20 @@ func (s *SpecSchedule) Prev(t time.Time) time.Time {
 WRAP:
 	if t.Year() < yearLimit {
 		return time.Time{}
+	}
+
+	// Check year constraint first (if Year field is not wildcard).
+	// Retreat to previous valid year if current year doesn't match.
+	for !yearMatches(t.Year(), s.Year) {
+		if !added {
+			added = true
+			// Set to end of current year (Dec 31, 23:59:59)
+			t = time.Date(t.Year(), 12, 31, 23, 59, 59, 0, loc)
+		}
+		t = t.AddDate(-1, 0, 0)
+		if t.Year() < yearLimit {
+			return time.Time{}
+		}
 	}
 
 	// Find the last applicable month.

@@ -27,6 +27,7 @@ const (
 	Dow                                    // Day of week field, default *
 	DowOptional                            // Optional day of week field, default *
 	Descriptor                             // Allow descriptors such as @monthly, @weekly, etc.
+	Year                                   // Year field, default * (any year)
 )
 
 var places = []ParseOption{
@@ -36,6 +37,8 @@ var places = []ParseOption{
 	Dom,
 	Month,
 	Dow,
+	// Note: Year is NOT in places/defaults because it's handled separately
+	// in the parse() function with special offset-based bitmask logic.
 }
 
 var defaults = []string{
@@ -360,8 +363,38 @@ func (p Parser) parse(spec string) (Schedule, error) {
 	// Split on whitespace.
 	fields := strings.Fields(spec)
 
-	// Validate & fill in any omitted or optional fields
-	fields, err = normalizeFields(fields, p.options)
+	// Extract year field if Year option is enabled (it's always the last field)
+	var yearField string
+	if p.options&Year > 0 {
+		// When Year is enabled, it's required as the last field
+		// Count non-Year fields expected (Year is not in places array)
+		nonYearOptions := p.options &^ Year
+		maxNonYearFields := countConfiguredFields(nonYearOptions)
+		optionals := 0
+		if nonYearOptions&SecondOptional > 0 {
+			optionals++
+		}
+		if nonYearOptions&DowOptional > 0 {
+			optionals++
+		}
+		minNonYearFields := maxNonYearFields - optionals
+
+		// Year field is required when Year option is set
+		// Total fields = non-year fields + 1 (for year)
+		if len(fields) < minNonYearFields+1 || len(fields) > maxNonYearFields+1 {
+			return nil, fmt.Errorf("expected %d to %d fields with year, found %d: %s",
+				minNonYearFields+1, maxNonYearFields+1, len(fields), fields)
+		}
+
+		// Extract year (last field) and leave rest for normal processing
+		yearField = fields[len(fields)-1]
+		fields = fields[:len(fields)-1]
+	}
+
+	// Validate & fill in any omitted or optional fields (excluding Year)
+	// Use options without Year flag for normalizeFields since Year is handled separately
+	normalizeOptions := p.options &^ Year
+	fields, err = normalizeFields(fields, normalizeOptions)
 	if err != nil {
 		return nil, err
 	}
@@ -383,6 +416,16 @@ func (p Parser) parse(spec string) (Schedule, error) {
 		month      = field(fields[4], months)
 		dayofweek  = NormalizeDOW(field(fields[5], dow))
 	)
+
+	// Parse year field if Year option is enabled
+	var year uint64 = starBit // Default to wildcard (any year)
+	if p.options&Year > 0 && yearField != "" {
+		var yearErr error
+		year, yearErr = getYearField(yearField)
+		if yearErr != nil {
+			err = yearErr
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -394,6 +437,7 @@ func (p Parser) parse(spec string) (Schedule, error) {
 		Dom:            dayofmonth,
 		Month:          month,
 		Dow:            dayofweek,
+		Year:           year,
 		Location:       loc,
 		MaxSearchYears: p.maxSearchYears,
 	}, nil
@@ -502,6 +546,87 @@ func StandardParser() Parser {
 //   - Descriptors, e.g. "@midnight", "@every 1h30m"
 func ParseStandard(standardSpec string) (Schedule, error) {
 	return standardParser.Parse(standardSpec)
+}
+
+// getYearField parses a year field and returns a bitmask with years stored as
+// offsets from YearBase (1970). The bits represent year offsets 0-63 for years 1970-2033.
+// Supports wildcards (*), single years, ranges (2024-2030), and steps (2020-2030/2).
+func getYearField(field string) (uint64, error) {
+	if field == "*" || field == "?" {
+		return starBit, nil
+	}
+
+	var bits uint64
+	ranges := strings.FieldsFunc(field, func(r rune) bool { return r == ',' })
+	for _, expr := range ranges {
+		bit, err := getYearRange(expr)
+		if err != nil {
+			return bits, err
+		}
+		bits |= bit
+	}
+	return bits, nil
+}
+
+// getYearRange parses a single year range expression and returns a bitmask.
+// Years are converted to offsets from YearBase for storage in uint64.
+func getYearRange(expr string) (uint64, error) {
+	rangeAndStep := strings.Split(expr, "/")
+	lowAndHigh := strings.Split(rangeAndStep[0], "-")
+
+	start, err := mustParseInt(lowAndHigh[0])
+	if err != nil {
+		return 0, err
+	}
+
+	var end uint
+	switch len(lowAndHigh) {
+	case 1:
+		end = start
+	case 2:
+		end, err = mustParseInt(lowAndHigh[1])
+		if err != nil {
+			return 0, err
+		}
+	default:
+		return 0, fmt.Errorf("too many hyphens: %q", expr)
+	}
+
+	var step uint = 1
+	if len(rangeAndStep) == 2 {
+		step, err = mustParseInt(rangeAndStep[1])
+		if err != nil {
+			return 0, err
+		}
+	} else if len(rangeAndStep) > 2 {
+		return 0, fmt.Errorf("too many slashes: %q", expr)
+	}
+
+	// Validate year bounds
+	if start < years.min {
+		return 0, fmt.Errorf("year (%d) below minimum (%d): %q", start, years.min, expr)
+	}
+	if end > years.max {
+		return 0, fmt.Errorf("year (%d) above maximum (%d): %q", end, years.max, expr)
+	}
+	if start > end {
+		return 0, fmt.Errorf("beginning of range (%d) beyond end of range (%d): %q", start, end, expr)
+	}
+	if step == 0 {
+		return 0, fmt.Errorf("step of range must be a positive number: %q", expr)
+	}
+
+	// Convert to offsets from YearBase and generate bits
+	// We can only store years 1970-2033 (64 bits) in uint64
+	startOffset := start - YearBase
+	endOffset := end - YearBase
+
+	// Check if years fit within uint64 capacity
+	if endOffset > 63 {
+		return 0, fmt.Errorf("year %d exceeds bitmask capacity (max %d): %q", end, YearBase+63, expr)
+	}
+
+	return getBits(startOffset, endOffset, step), nil
 }
 
 // getField returns an Int with the bits set representing all of the times that
@@ -702,6 +827,7 @@ func newDescriptorSchedule(hour, dom, month, dow uint64, loc *time.Location, max
 		Dom:            dom,
 		Month:          month,
 		Dow:            dow,
+		Year:           starBit, // Any year
 		Location:       loc,
 		MaxSearchYears: maxSearchYears,
 	}
