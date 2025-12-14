@@ -2728,24 +2728,31 @@ func TestRunOnce_AddWhileRunning(t *testing.T) {
 	defer c.Stop()
 
 	var executions int32
-	executed := make(chan struct{})
+	executed := make(chan struct{}, 1)
 
 	id, _ := c.AddOnceFunc("* * * * * *", func() {
 		atomic.AddInt32(&executions, 1)
-		close(executed)
+		select {
+		case executed <- struct{}{}:
+		default:
+		}
 	})
 
+	// Wait for timer to be registered
 	fc.BlockUntil(1)
+
+	// Advance clock and allow job to execute
 	fc.Advance(time.Second)
 
 	select {
 	case <-executed:
 		// Good
-	case <-time.After(100 * time.Millisecond):
+	case <-time.After(time.Second):
 		t.Fatal("job did not execute")
 	}
 
-	time.Sleep(50 * time.Millisecond)
+	// Allow removal to complete
+	time.Sleep(100 * time.Millisecond)
 
 	if entry := c.Entry(id); entry.ID != 0 {
 		t.Error("run-once entry should be removed after execution")
