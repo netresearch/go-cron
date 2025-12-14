@@ -787,176 +787,174 @@ func TestJobWithZeroTimeDoesNotRun(t *testing.T) {
 	}
 }
 
-func TestStopAndWait(t *testing.T) {
-	t.Run("nothing running, returns immediately", func(t *testing.T) {
-		cron := newWithSeconds()
-		cron.Start()
-		ctx := cron.Stop()
-		select {
-		case <-ctx.Done():
-		case <-time.After(time.Millisecond):
-			t.Error("context was not done immediately")
-		}
+func TestStopAndWait_NothingRunning(t *testing.T) {
+	cron := newWithSeconds()
+	cron.Start()
+	ctx := cron.Stop()
+	select {
+	case <-ctx.Done():
+	case <-time.After(time.Millisecond):
+		t.Error("context was not done immediately")
+	}
+}
+
+func TestStopAndWait_RepeatedCalls(t *testing.T) {
+	cron := newWithSeconds()
+	cron.Start()
+	_ = cron.Stop()
+	time.Sleep(time.Millisecond)
+	ctx := cron.Stop()
+	select {
+	case <-ctx.Done():
+	case <-time.After(time.Millisecond):
+		t.Error("context was not done immediately")
+	}
+}
+
+func TestStopAndWait_FastJobs(t *testing.T) {
+	cron := newWithSeconds()
+	cron.AddFunc("* * * * * *", func() {})
+	cron.Start()
+	cron.AddFunc("* * * * * *", func() {})
+	cron.AddFunc("* * * * * *", func() {})
+	cron.AddFunc("* * * * * *", func() {})
+	time.Sleep(time.Second)
+	ctx := cron.Stop()
+	select {
+	case <-ctx.Done():
+	case <-time.After(time.Millisecond):
+		t.Error("context was not done immediately")
+	}
+}
+
+func TestStopAndWait_WaitsForSlowJob(t *testing.T) {
+	cron := newWithSeconds()
+	cron.AddFunc("* * * * * *", func() {})
+	cron.Start()
+	cron.AddFunc("* * * * * *", func() { time.Sleep(2 * time.Second) })
+	cron.AddFunc("* * * * * *", func() {})
+	time.Sleep(time.Second)
+
+	ctx := cron.Stop()
+
+	// Verify that it is not done for at least 750ms
+	select {
+	case <-ctx.Done():
+		t.Error("context was done too quickly immediately")
+	case <-time.After(750 * time.Millisecond):
+		// expected, because the job sleeping for 1 second is still running
+	}
+
+	// Verify that it IS done in the next 500ms (giving 250ms buffer)
+	select {
+	case <-ctx.Done():
+		// expected
+	case <-time.After(1500 * time.Millisecond):
+		t.Error("context not done after job should have completed")
+	}
+}
+
+func TestStopAndWait_RepeatedCallsWaitingForCompletion(t *testing.T) {
+	cron := newWithSeconds()
+
+	// Use channels to synchronize instead of relying on timing
+	jobStarted := make(chan struct{})
+	jobCanFinish := make(chan struct{})
+	jobDone := make(chan struct{})
+
+	cron.AddFunc("* * * * * *", func() {})
+	cron.AddFunc("* * * * * *", func() {
+		close(jobStarted) // Signal that slow job has started
+		<-jobCanFinish    // Wait until test allows job to finish
+		close(jobDone)
 	})
+	cron.Start()
+	cron.AddFunc("* * * * * *", func() {})
 
-	t.Run("repeated calls to Stop", func(t *testing.T) {
-		cron := newWithSeconds()
-		cron.Start()
-		_ = cron.Stop()
-		time.Sleep(time.Millisecond)
-		ctx := cron.Stop()
-		select {
-		case <-ctx.Done():
-		case <-time.After(time.Millisecond):
-			t.Error("context was not done immediately")
-		}
+	// Wait for slow job to actually start
+	select {
+	case <-jobStarted:
+		// Job started, proceed
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for job to start")
+	}
+
+	ctx := cron.Stop()
+	ctx2 := cron.Stop()
+
+	// Verify contexts are NOT done while job is still running
+	select {
+	case <-ctx.Done():
+		t.Error("context was done while job still running")
+	case <-ctx2.Done():
+		t.Error("context2 was done while job still running")
+	default:
+		// expected - contexts should not be done yet
+	}
+
+	// Allow the job to finish
+	close(jobCanFinish)
+
+	// Wait for job to complete
+	<-jobDone
+
+	// Verify that ctx IS done after job completes
+	select {
+	case <-ctx.Done():
+		// expected
+	case <-time.After(time.Second):
+		t.Error("context not done after job completed")
+	}
+
+	// Verify that ctx2 is also done.
+	select {
+	case <-ctx2.Done():
+		// expected
+	case <-time.After(time.Millisecond):
+		t.Error("context2 not done even though context1 is")
+	}
+
+	// Verify that a new context retrieved from stop is immediately done.
+	ctx3 := cron.Stop()
+	select {
+	case <-ctx3.Done():
+		// expected
+	case <-time.After(time.Millisecond):
+		t.Error("context not done even when cron Stop is completed")
+	}
+}
+
+func TestStopAndWait_BlocksUntilJobCompletes(t *testing.T) {
+	cron := newWithSeconds()
+	var completed atomic.Bool
+	cron.AddFunc("* * * * * *", func() {
+		time.Sleep(500 * time.Millisecond)
+		completed.Store(true)
 	})
+	cron.Start()
+	time.Sleep(time.Second) // Wait for job to start running
 
-	t.Run("a couple fast jobs added, still returns immediately", func(t *testing.T) {
-		cron := newWithSeconds()
-		cron.AddFunc("* * * * * *", func() {})
-		cron.Start()
-		cron.AddFunc("* * * * * *", func() {})
-		cron.AddFunc("* * * * * *", func() {})
-		cron.AddFunc("* * * * * *", func() {})
-		time.Sleep(time.Second)
-		ctx := cron.Stop()
-		select {
-		case <-ctx.Done():
-		case <-time.After(time.Millisecond):
-			t.Error("context was not done immediately")
-		}
-	})
+	// StopAndWait should block until job completes
+	cron.StopAndWait()
 
-	t.Run("a couple fast jobs and a slow job added, waits for slow job", func(t *testing.T) {
-		cron := newWithSeconds()
-		cron.AddFunc("* * * * * *", func() {})
-		cron.Start()
-		cron.AddFunc("* * * * * *", func() { time.Sleep(2 * time.Second) })
-		cron.AddFunc("* * * * * *", func() {})
-		time.Sleep(time.Second)
+	if !completed.Load() {
+		t.Error("StopAndWait returned before job completed")
+	}
+}
 
-		ctx := cron.Stop()
-
-		// Verify that it is not done for at least 750ms
-		select {
-		case <-ctx.Done():
-			t.Error("context was done too quickly immediately")
-		case <-time.After(750 * time.Millisecond):
-			// expected, because the job sleeping for 1 second is still running
-		}
-
-		// Verify that it IS done in the next 500ms (giving 250ms buffer)
-		select {
-		case <-ctx.Done():
-			// expected
-		case <-time.After(1500 * time.Millisecond):
-			t.Error("context not done after job should have completed")
-		}
-	})
-
-	t.Run("repeated calls to stop, waiting for completion and after", func(t *testing.T) {
-		cron := newWithSeconds()
-
-		// Use channels to synchronize instead of relying on timing
-		jobStarted := make(chan struct{})
-		jobCanFinish := make(chan struct{})
-		jobDone := make(chan struct{})
-
-		cron.AddFunc("* * * * * *", func() {})
-		cron.AddFunc("* * * * * *", func() {
-			close(jobStarted) // Signal that slow job has started
-			<-jobCanFinish    // Wait until test allows job to finish
-			close(jobDone)
-		})
-		cron.Start()
-		cron.AddFunc("* * * * * *", func() {})
-
-		// Wait for slow job to actually start
-		select {
-		case <-jobStarted:
-			// Job started, proceed
-		case <-time.After(5 * time.Second):
-			t.Fatal("timeout waiting for job to start")
-		}
-
-		ctx := cron.Stop()
-		ctx2 := cron.Stop()
-
-		// Verify contexts are NOT done while job is still running
-		select {
-		case <-ctx.Done():
-			t.Error("context was done while job still running")
-		case <-ctx2.Done():
-			t.Error("context2 was done while job still running")
-		default:
-			// expected - contexts should not be done yet
-		}
-
-		// Allow the job to finish
-		close(jobCanFinish)
-
-		// Wait for job to complete
-		<-jobDone
-
-		// Verify that ctx IS done after job completes
-		select {
-		case <-ctx.Done():
-			// expected
-		case <-time.After(time.Second):
-			t.Error("context not done after job completed")
-		}
-
-		// Verify that ctx2 is also done.
-		select {
-		case <-ctx2.Done():
-			// expected
-		case <-time.After(time.Millisecond):
-			t.Error("context2 not done even though context1 is")
-		}
-
-		// Verify that a new context retrieved from stop is immediately done.
-		ctx3 := cron.Stop()
-		select {
-		case <-ctx3.Done():
-			// expected
-		case <-time.After(time.Millisecond):
-			t.Error("context not done even when cron Stop is completed")
-		}
-	})
-
-	t.Run("StopAndWait blocks until job completes", func(t *testing.T) {
-		cron := newWithSeconds()
-		var completed atomic.Bool
-		cron.AddFunc("* * * * * *", func() {
-			time.Sleep(500 * time.Millisecond)
-			completed.Store(true)
-		})
-		cron.Start()
-		time.Sleep(time.Second) // Wait for job to start running
-
-		// StopAndWait should block until job completes
+func TestStopAndWait_NonRunningCron(t *testing.T) {
+	cron := newWithSeconds()
+	done := make(chan struct{})
+	go func() {
 		cron.StopAndWait()
-
-		if !completed.Load() {
-			t.Error("StopAndWait returned before job completed")
-		}
-	})
-
-	t.Run("StopAndWait on non-running cron returns immediately", func(t *testing.T) {
-		cron := newWithSeconds()
-		done := make(chan struct{})
-		go func() {
-			cron.StopAndWait()
-			close(done)
-		}()
-		select {
-		case <-done:
-			// expected
-		case <-time.After(100 * time.Millisecond):
-			t.Error("StopAndWait blocked on non-running cron")
-		}
-	})
+		close(done)
+	}()
+	select {
+	case <-done:
+		// expected
+	case <-time.After(100 * time.Millisecond):
+		t.Error("StopAndWait blocked on non-running cron")
+	}
 }
 
 func TestStopWithTimeout(t *testing.T) {
@@ -1242,214 +1240,216 @@ func TestTimeMovedBackwards(t *testing.T) {
 	// would require mocking the system clock.
 }
 
-// TestFakeClockSchedulerIntegration tests the scheduler with FakeClock
+// TestFakeClock_EverySecondSchedule tests the scheduler with FakeClock
 // for deterministic, fast execution without real-time delays.
-func TestFakeClockSchedulerIntegration(t *testing.T) {
-	t.Run("every second schedule", func(t *testing.T) {
-		startTime := time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
-		fakeClock := NewFakeClock(startTime)
+func TestFakeClock_EverySecondSchedule(t *testing.T) {
+	startTime := time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
+	fakeClock := NewFakeClock(startTime)
 
-		var count int
-		var mu sync.Mutex
+	var count int
+	var mu sync.Mutex
 
-		cron := New(WithClock(fakeClock))
-		cron.Schedule(Every(time.Second), FuncJob(func() {
-			mu.Lock()
-			count++
-			mu.Unlock()
-		}))
-
-		cron.Start()
-		defer cron.Stop()
-
-		// Wait for timer registration
-		fakeClock.BlockUntil(1)
-
-		// Advance 5 seconds
-		for i := 0; i < 5; i++ {
-			fakeClock.Advance(time.Second)
-			time.Sleep(5 * time.Millisecond) // Let goroutines run
-			if i < 4 {
-				fakeClock.BlockUntil(1)
-			}
-		}
-
-		time.Sleep(10 * time.Millisecond)
-
+	cron := New(WithClock(fakeClock))
+	cron.Schedule(Every(time.Second), FuncJob(func() {
 		mu.Lock()
-		if count != 5 {
-			t.Errorf("expected 5 job runs, got %d", count)
-		}
+		count++
 		mu.Unlock()
-	})
+	}))
 
-	t.Run("cron expression schedule", func(t *testing.T) {
-		// Start at 10:59:55 - job fires at top of every hour
-		startTime := time.Date(2024, 1, 15, 10, 59, 55, 0, time.UTC)
-		fakeClock := NewFakeClock(startTime)
+	cron.Start()
+	defer cron.Stop()
 
-		var fired bool
-		var mu sync.Mutex
+	// Wait for timer registration
+	fakeClock.BlockUntil(1)
 
-		cron := New(WithClock(fakeClock))
-		cron.AddFunc("0 * * * *", func() { // Top of every hour
-			mu.Lock()
-			fired = true
-			mu.Unlock()
-		})
-
-		cron.Start()
-		defer cron.Stop()
-
-		fakeClock.BlockUntil(1)
-
-		// Advance to 11:00:00
-		fakeClock.Advance(5 * time.Second)
-		time.Sleep(10 * time.Millisecond)
-
-		mu.Lock()
-		if !fired {
-			t.Error("expected job to fire at top of hour")
-		}
-		mu.Unlock()
-	})
-
-	t.Run("multiple jobs different intervals", func(t *testing.T) {
-		startTime := time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
-		fakeClock := NewFakeClock(startTime)
-
-		var fastCount, slowCount int
-		var mu sync.Mutex
-
-		cron := New(WithClock(fakeClock))
-		cron.Schedule(Every(time.Second), FuncJob(func() {
-			mu.Lock()
-			fastCount++
-			mu.Unlock()
-		}))
-		cron.Schedule(Every(5*time.Second), FuncJob(func() {
-			mu.Lock()
-			slowCount++
-			mu.Unlock()
-		}))
-
-		cron.Start()
-		defer cron.Stop()
-
-		fakeClock.BlockUntil(1)
-
-		// Advance 10 seconds total
-		for i := 0; i < 10; i++ {
-			fakeClock.Advance(time.Second)
-			time.Sleep(5 * time.Millisecond)
-			if i < 9 {
-				fakeClock.BlockUntil(1)
-			}
-		}
-
-		time.Sleep(10 * time.Millisecond)
-
-		mu.Lock()
-		if fastCount != 10 {
-			t.Errorf("fast job: expected 10 runs, got %d", fastCount)
-		}
-		if slowCount != 2 {
-			t.Errorf("slow job: expected 2 runs, got %d", slowCount)
-		}
-		mu.Unlock()
-	})
-
-	t.Run("add job while running", func(t *testing.T) {
-		startTime := time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
-		fakeClock := NewFakeClock(startTime)
-
-		var count int
-		var mu sync.Mutex
-		ran := make(chan struct{}, 1)
-
-		cron := New(WithClock(fakeClock))
-		cron.Start()
-		defer cron.Stop()
-
-		// Add job after start
-		cron.Schedule(Every(time.Second), FuncJob(func() {
-			mu.Lock()
-			count++
-			mu.Unlock()
-			select {
-			case ran <- struct{}{}:
-			default:
-			}
-		}))
-
-		// Wait for timer
-		fakeClock.BlockUntil(1)
-
-		// Advance and wait for job to complete via channel
+	// Advance 5 seconds
+	for i := 0; i < 5; i++ {
 		fakeClock.Advance(time.Second)
-		select {
-		case <-ran:
-		case <-time.After(time.Second):
-			t.Fatal("timeout waiting for job to run")
+		time.Sleep(5 * time.Millisecond) // Let goroutines run
+		if i < 4 {
+			fakeClock.BlockUntil(1)
 		}
+	}
 
+	time.Sleep(10 * time.Millisecond)
+
+	mu.Lock()
+	if count != 5 {
+		t.Errorf("expected 5 job runs, got %d", count)
+	}
+	mu.Unlock()
+}
+
+// TestFakeClock_CronExpressionSchedule tests cron expressions with FakeClock.
+func TestFakeClock_CronExpressionSchedule(t *testing.T) {
+	// Start at 10:59:55 - job fires at top of every hour
+	startTime := time.Date(2024, 1, 15, 10, 59, 55, 0, time.UTC)
+	fakeClock := NewFakeClock(startTime)
+
+	var fired bool
+	var mu sync.Mutex
+
+	cron := New(WithClock(fakeClock))
+	cron.AddFunc("0 * * * *", func() { // Top of every hour
 		mu.Lock()
-		if count != 1 {
-			t.Errorf("expected 1 run after adding job, got %d", count)
-		}
+		fired = true
 		mu.Unlock()
 	})
 
-	t.Run("remove job while running", func(t *testing.T) {
-		startTime := time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
-		fakeClock := NewFakeClock(startTime)
+	cron.Start()
+	defer cron.Stop()
 
-		var count int
-		var mu sync.Mutex
-		ran := make(chan struct{}, 1)
+	fakeClock.BlockUntil(1)
 
-		cron := New(WithClock(fakeClock))
-		id := cron.Schedule(Every(time.Second), FuncJob(func() {
-			mu.Lock()
-			count++
-			mu.Unlock()
-			select {
-			case ran <- struct{}{}:
-			default:
-			}
-		}))
+	// Advance to 11:00:00
+	fakeClock.Advance(5 * time.Second)
+	time.Sleep(10 * time.Millisecond)
 
-		cron.Start()
-		defer cron.Stop()
+	mu.Lock()
+	if !fired {
+		t.Error("expected job to fire at top of hour")
+	}
+	mu.Unlock()
+}
 
-		fakeClock.BlockUntil(1)
+// TestFakeClock_MultipleJobsDifferentIntervals tests multiple jobs with different intervals.
+func TestFakeClock_MultipleJobsDifferentIntervals(t *testing.T) {
+	startTime := time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
+	fakeClock := NewFakeClock(startTime)
+
+	var fastCount, slowCount int
+	var mu sync.Mutex
+
+	cron := New(WithClock(fakeClock))
+	cron.Schedule(Every(time.Second), FuncJob(func() {
+		mu.Lock()
+		fastCount++
+		mu.Unlock()
+	}))
+	cron.Schedule(Every(5*time.Second), FuncJob(func() {
+		mu.Lock()
+		slowCount++
+		mu.Unlock()
+	}))
+
+	cron.Start()
+	defer cron.Stop()
+
+	fakeClock.BlockUntil(1)
+
+	// Advance 10 seconds total
+	for i := 0; i < 10; i++ {
 		fakeClock.Advance(time.Second)
+		time.Sleep(5 * time.Millisecond)
+		if i < 9 {
+			fakeClock.BlockUntil(1)
+		}
+	}
+
+	time.Sleep(10 * time.Millisecond)
+
+	mu.Lock()
+	if fastCount != 10 {
+		t.Errorf("fast job: expected 10 runs, got %d", fastCount)
+	}
+	if slowCount != 2 {
+		t.Errorf("slow job: expected 2 runs, got %d", slowCount)
+	}
+	mu.Unlock()
+}
+
+// TestFakeClock_AddJobWhileRunning tests adding a job while the scheduler is running.
+func TestFakeClock_AddJobWhileRunning(t *testing.T) {
+	startTime := time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
+	fakeClock := NewFakeClock(startTime)
+
+	var count int
+	var mu sync.Mutex
+	ran := make(chan struct{}, 1)
+
+	cron := New(WithClock(fakeClock))
+	cron.Start()
+	defer cron.Stop()
+
+	// Add job after start
+	cron.Schedule(Every(time.Second), FuncJob(func() {
+		mu.Lock()
+		count++
+		mu.Unlock()
 		select {
-		case <-ran:
-		case <-time.After(time.Second):
-			t.Fatal("timeout waiting for job to run")
+		case ran <- struct{}{}:
+		default:
 		}
+	}))
 
+	// Wait for timer
+	fakeClock.BlockUntil(1)
+
+	// Advance and wait for job to complete via channel
+	fakeClock.Advance(time.Second)
+	select {
+	case <-ran:
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for job to run")
+	}
+
+	mu.Lock()
+	if count != 1 {
+		t.Errorf("expected 1 run after adding job, got %d", count)
+	}
+	mu.Unlock()
+}
+
+// TestFakeClock_RemoveJobWhileRunning tests removing a job while the scheduler is running.
+func TestFakeClock_RemoveJobWhileRunning(t *testing.T) {
+	startTime := time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
+	fakeClock := NewFakeClock(startTime)
+
+	var count int
+	var mu sync.Mutex
+	ran := make(chan struct{}, 1)
+
+	cron := New(WithClock(fakeClock))
+	id := cron.Schedule(Every(time.Second), FuncJob(func() {
 		mu.Lock()
-		if count != 1 {
-			t.Errorf("expected 1 run before removal, got %d", count)
-		}
+		count++
 		mu.Unlock()
-
-		// Remove the job
-		cron.Remove(id)
-		time.Sleep(50 * time.Millisecond) // Allow remove to process
-
-		// Advance more time - job should not run
-		fakeClock.Advance(5 * time.Second)
-		time.Sleep(50 * time.Millisecond) // Give time for any incorrect runs
-
-		mu.Lock()
-		if count != 1 {
-			t.Errorf("expected still 1 run after removal, got %d", count)
+		select {
+		case ran <- struct{}{}:
+		default:
 		}
-		mu.Unlock()
-	})
+	}))
+
+	cron.Start()
+	defer cron.Stop()
+
+	fakeClock.BlockUntil(1)
+	fakeClock.Advance(time.Second)
+	select {
+	case <-ran:
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for job to run")
+	}
+
+	mu.Lock()
+	if count != 1 {
+		t.Errorf("expected 1 run before removal, got %d", count)
+	}
+	mu.Unlock()
+
+	// Remove the job
+	cron.Remove(id)
+	time.Sleep(50 * time.Millisecond) // Allow remove to process
+
+	// Advance more time - job should not run
+	fakeClock.Advance(5 * time.Second)
+	time.Sleep(50 * time.Millisecond) // Give time for any incorrect runs
+
+	mu.Lock()
+	if count != 1 {
+		t.Errorf("expected still 1 run after removal, got %d", count)
+	}
+	mu.Unlock()
 }
 
 // Tests for job metadata (Name and Tags)
