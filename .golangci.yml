@@ -219,14 +219,14 @@ linters:
         path: spec\.go
         text: "(Next|Prev)"
 
-      # parse() handles multiple ParseOption flags for field configuration
-      # Complexity is inherent to flexible cron expression parsing
+      # parse() and getRangeWithHash handle multiple ParseOption flags and hash expression scenarios
+      # Complexity is inherent to flexible cron expression parsing with hash support
       - linters:
           - gocyclo
           - cyclop
           - funlen
         path: parser\.go
-        text: "parse"
+        text: "(parse|getRangeWithHash)"
     paths:
       - third_party$
       - builtin$
