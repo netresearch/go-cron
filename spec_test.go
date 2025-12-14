@@ -509,3 +509,147 @@ func TestNormalizeDOW(t *testing.T) {
 		})
 	}
 }
+
+func TestPrev(t *testing.T) {
+	runs := []struct {
+		time, spec string
+		expected   string
+	}{
+		// Simple cases - mirror of TestNext
+		{"Mon Jul 9 15:05 2012", "0 0/15 * * * *", "Mon Jul 9 15:00 2012"},
+		{"Mon Jul 9 15:01 2012", "0 0/15 * * * *", "Mon Jul 9 15:00 2012"},
+		{"Mon Jul 9 15:00:01 2012", "0 0/15 * * * *", "Mon Jul 9 15:00 2012"},
+
+		// Wrap around hours (backwards)
+		{"Mon Jul 9 16:25 2012", "0 20-35/15 * * * *", "Mon Jul 9 16:20 2012"},
+		{"Mon Jul 9 16:19 2012", "0 20-35/15 * * * *", "Mon Jul 9 15:35 2012"},
+
+		// Wrap around days (backwards)
+		{"Tue Jul 10 00:05 2012", "0 */15 * * * *", "Tue Jul 10 00:00 2012"},
+		{"Tue Jul 10 00:00:01 2012", "0 */15 * * * *", "Tue Jul 10 00:00 2012"},
+		{"Mon Jul 9 00:10 2012", "0 20-35/15 * * * *", "Sun Jul 8 23:35 2012"},
+
+		// Every second
+		{"Mon Jul 9 15:00:05 2012", "* * * * * *", "Mon Jul 9 15:00:04 2012"},
+
+		// Specific seconds
+		{"Mon Jul 9 15:00:35 2012", "0,30 * * * * *", "Mon Jul 9 15:00:30 2012"},
+
+		// Hourly schedule
+		{"Mon Jul 9 15:30 2012", "@hourly", "Mon Jul 9 15:00 2012"},
+		{"Mon Jul 9 15:00:01 2012", "@hourly", "Mon Jul 9 15:00 2012"},
+
+		// Daily schedule
+		{"Mon Jul 9 12:00 2012", "@daily", "Mon Jul 9 00:00 2012"},
+		{"Mon Jul 9 00:00:01 2012", "@daily", "Mon Jul 9 00:00 2012"},
+
+		// Weekly schedule
+		{"Sun Jul 15 12:00 2012", "@weekly", "Sun Jul 15 00:00 2012"},
+		{"Sat Jul 14 23:59 2012", "@weekly", "Sun Jul 8 00:00 2012"},
+
+		// Monthly schedule
+		{"Sun Jul 15 12:00 2012", "@monthly", "Sun Jul 1 00:00 2012"},
+		{"Sat Jun 30 23:59 2012", "@monthly", "Fri Jun 1 00:00 2012"},
+	}
+
+	for _, c := range runs {
+		name := c.spec + "_from_" + c.time
+		t.Run(name, func(t *testing.T) {
+			sched, err := secondParser.Parse(c.spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			actual := sched.Prev(getTime(c.time))
+			expected := getTime(c.expected)
+			if !actual.Equal(expected) {
+				t.Errorf("%s, \"%s\": (expected) %v != %v (actual)", c.time, c.spec, expected, actual)
+			}
+		})
+	}
+}
+
+func TestPrevWithTz(t *testing.T) {
+	runs := []struct {
+		time, spec string
+		expected   string
+	}{
+		// Basic timezone test
+		{"2016-01-03T14:15:03+0530", "14 14 * * *", "2016-01-03T14:14:00+0530"},
+		{"2016-01-03T14:13:00+0530", "14 14 * * ?", "2016-01-02T14:14:00+0530"},
+
+		// Previous day
+		{"2016-01-03T14:00:00+0530", "14 14 * * *", "2016-01-02T14:14:00+0530"},
+	}
+	for _, c := range runs {
+		name := c.spec + "_from_" + c.time
+		t.Run(name, func(t *testing.T) {
+			sched, err := ParseStandard(c.spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			actual := sched.Prev(getTimeTZ(c.time))
+			expected := getTimeTZ(c.expected)
+			if !actual.Equal(expected) {
+				t.Errorf("%s, \"%s\": (expected) %v != %v (actual)", c.time, c.spec, expected, actual)
+			}
+		})
+	}
+}
+
+func TestPrevUnsatisfiable(t *testing.T) {
+	// Feb 30 doesn't exist - should return zero time
+	sched, err := secondParser.Parse("0 0 0 30 Feb ?")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	result := sched.Prev(now)
+	if !result.IsZero() {
+		t.Errorf("Expected zero time for unsatisfiable schedule, got %v", result)
+	}
+}
+
+func TestPrevAndNextSymmetry(t *testing.T) {
+	// For any schedule, Next(Prev(t)) should return the same time as Prev(t)
+	// when t is exactly on a scheduled time.
+	specs := []string{
+		"0 0 * * * *",      // Every hour
+		"0 30 * * * *",     // Every hour at :30
+		"0 0 */2 * * *",    // Every 2 hours
+		"0 0 0 * * *",      // Daily
+		"0 0 0 * * 0",      // Weekly on Sunday
+		"0 0 0 1 * *",      // Monthly
+		"*/15 * * * * *",   // Every 15 seconds
+		"0 */10 * * * *",   // Every 10 minutes
+		"0 0 9-17 * * 1-5", // Weekdays 9am-5pm
+	}
+
+	now := time.Date(2024, 6, 15, 12, 30, 45, 0, time.UTC)
+
+	for _, spec := range specs {
+		t.Run(spec, func(t *testing.T) {
+			sched, err := secondParser.Parse(spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// Get a scheduled time
+			scheduledTime := sched.Next(now)
+			if scheduledTime.IsZero() {
+				t.Skip("No next time found")
+			}
+
+			// Prev from just after the scheduled time should return the scheduled time
+			prevTime := sched.Prev(scheduledTime.Add(time.Second))
+			if !prevTime.Equal(scheduledTime) {
+				t.Errorf("Prev(Next(t)+1s) = %v, want %v", prevTime, scheduledTime)
+			}
+
+			// Next from just before the scheduled time should return the scheduled time
+			nextTime := sched.Next(scheduledTime.Add(-time.Second))
+			if !nextTime.Equal(scheduledTime) {
+				t.Errorf("Next(scheduled-1s) = %v, want %v", nextTime, scheduledTime)
+			}
+		})
+	}
+}

@@ -714,6 +714,106 @@ func ExampleTimeoutWithContext() {
 	// Output:
 }
 
+// This example demonstrates using Schedule.Prev() to find the previous execution time.
+// This is useful for detecting missed executions or determining when a job last ran.
+func ExampleSpecSchedule_Prev() {
+	// Parse a schedule that runs at 9 AM on weekdays
+	schedule, err := cron.ParseStandard("0 9 * * MON-FRI")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Find the previous execution time from a given point
+	// Starting from Wednesday at noon
+	now := time.Date(2025, 1, 8, 12, 0, 0, 0, time.UTC) // Wednesday
+
+	prev := schedule.Prev(now)
+	fmt.Printf("Previous run: %s at %s\n", prev.Format("Mon"), prev.Format("15:04"))
+
+	// Can chain to find earlier executions
+	prev2 := schedule.Prev(prev)
+	fmt.Printf("Before that: %s at %s\n", prev2.Format("Mon"), prev2.Format("15:04"))
+	// Output:
+	// Previous run: Wed at 09:00
+	// Before that: Tue at 09:00
+}
+
+// This example demonstrates using Prev() to detect missed job executions.
+// By comparing Prev() to the last known run time, you can determine if
+// any scheduled executions were missed.
+func ExampleSpecSchedule_Prev_detectMissed() {
+	schedule, _ := cron.ParseStandard("0 * * * *") // Every hour
+
+	// Simulate: job was last run at 10:00, it's now 14:30
+	lastRun := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
+	now := time.Date(2025, 1, 1, 14, 30, 0, 0, time.UTC)
+
+	// Find when the job should have last run
+	shouldHaveRun := schedule.Prev(now)
+
+	if shouldHaveRun.After(lastRun) {
+		// Count missed executions
+		missed := 0
+		checkTime := now
+		for {
+			prev := schedule.Prev(checkTime)
+			if !prev.After(lastRun) {
+				break
+			}
+			missed++
+			checkTime = prev
+		}
+		fmt.Printf("Missed %d execution(s)\n", missed)
+		fmt.Printf("Most recent missed: %s\n", shouldHaveRun.Format("15:04"))
+	}
+	// Output:
+	// Missed 4 execution(s)
+	// Most recent missed: 14:00
+}
+
+// This example demonstrates the symmetry between Next() and Prev().
+// For any time t where schedule.Next(t) returns n, schedule.Prev(n + 1 second) returns n.
+func ExampleSpecSchedule_Prev_symmetry() {
+	schedule, _ := cron.ParseStandard("30 9 * * *") // Daily at 9:30
+
+	// Start from Monday midnight
+	start := time.Date(2025, 1, 6, 0, 0, 0, 0, time.UTC) // Monday
+
+	// Get next scheduled time
+	next := schedule.Next(start)
+	fmt.Printf("Next: %s\n", next.Format("Mon 15:04"))
+
+	// Get prev from just after that time - should return the same time
+	prev := schedule.Prev(next.Add(time.Second))
+	fmt.Printf("Prev: %s\n", prev.Format("Mon 15:04"))
+
+	fmt.Printf("Symmetric: %v\n", next.Equal(prev))
+	// Output:
+	// Next: Mon 09:30
+	// Prev: Mon 09:30
+	// Symmetric: true
+}
+
+// This example demonstrates using ConstantDelaySchedule.Prev().
+// For constant delays, Prev() simply subtracts the delay interval.
+func ExampleConstantDelaySchedule_Prev() {
+	// Create a schedule that runs every 5 minutes
+	schedule := cron.Every(5 * time.Minute)
+
+	now := time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC)
+
+	// Get the previous execution time
+	prev := schedule.Prev(now)
+	fmt.Printf("Previous: %s\n", prev.Format("15:04:05"))
+
+	// Chain to get earlier times
+	prev2 := schedule.Prev(prev)
+	fmt.Printf("Before that: %s\n", prev2.Format("15:04:05"))
+	// Output:
+	// Previous: 11:55:00
+	// Before that: 11:50:00
+}
+
 // This example demonstrates using WithMaxEntries to limit the number of jobs.
 // This provides protection against memory exhaustion from excessive entry additions.
 func ExampleWithMaxEntries() {

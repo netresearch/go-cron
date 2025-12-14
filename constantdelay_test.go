@@ -376,3 +376,113 @@ func TestConstantDelayNextBoundaries(t *testing.T) {
 		}
 	})
 }
+
+func TestConstantDelayPrev(t *testing.T) {
+	tests := []struct {
+		time     string
+		delay    time.Duration
+		expected string
+	}{
+		// Simple cases - mirror of Next tests but going backwards
+		{"Mon Jul 9 15:00 2012", 15 * time.Minute, "Mon Jul 9 14:45 2012"},
+		{"Mon Jul 9 15:14 2012", 15 * time.Minute, "Mon Jul 9 14:59 2012"},
+		{"Mon Jul 9 15:14:59 2012", 15 * time.Minute, "Mon Jul 9 14:59:59 2012"},
+
+		// Wrap around hours backwards
+		{"Mon Jul 9 16:20 2012", 35 * time.Minute, "Mon Jul 9 15:45 2012"},
+
+		// Wrap around days backwards
+		{"Tue Jul 10 00:00 2012", 14 * time.Minute, "Mon Jul 9 23:46 2012"},
+		{"Tue Jul 10 00:20 2012", 35 * time.Minute, "Mon Jul 9 23:45 2012"},
+	}
+
+	for _, c := range tests {
+		actual := Every(c.delay).Prev(getTime(c.time))
+		expected := getTime(c.expected)
+		if actual != expected {
+			t.Errorf("%s, \"%s\": (expected) %v != %v (actual)", c.time, c.delay, expected, actual)
+		}
+	}
+}
+
+// TestConstantDelayPrevBoundaries tests the Prev() method boundaries
+// to kill mutations similar to Next() boundaries.
+func TestConstantDelayPrevBoundaries(t *testing.T) {
+	baseTime := time.Date(2024, 1, 1, 12, 0, 0, 500_000_000, time.UTC) // Has 500ms nanoseconds
+
+	t.Run("Delay=0 returns t-1s fallback", func(t *testing.T) {
+		sched := ConstantDelaySchedule{Delay: 0}
+		prev := sched.Prev(baseTime)
+		expected := baseTime.Add(-time.Second)
+		if !prev.Equal(expected) {
+			t.Errorf("Prev() with Delay=0: got %v, want %v (1s fallback)", prev, expected)
+		}
+	})
+
+	t.Run("Delay=-1 returns t-1s fallback", func(t *testing.T) {
+		sched := ConstantDelaySchedule{Delay: -1 * time.Nanosecond}
+		prev := sched.Prev(baseTime)
+		expected := baseTime.Add(-time.Second)
+		if !prev.Equal(expected) {
+			t.Errorf("Prev() with Delay=-1ns: got %v, want %v", prev, expected)
+		}
+	})
+
+	t.Run("Delay < 1s - no rounding", func(t *testing.T) {
+		sched := ConstantDelaySchedule{Delay: 500 * time.Millisecond}
+		prev := sched.Prev(baseTime)
+		expected := baseTime.Add(-500 * time.Millisecond)
+		if !prev.Equal(expected) {
+			t.Errorf("Prev() with Delay=500ms: got %v, want %v (no rounding)", prev, expected)
+		}
+	})
+
+	t.Run("Delay = 1s exactly - rounds to second", func(t *testing.T) {
+		sched := ConstantDelaySchedule{Delay: time.Second}
+		prev := sched.Prev(baseTime)
+		// Subtracts 1s and adds back the nanosecond offset
+		// -1s + 500ms nanoseconds = 12:00:00.5 - 1s + 0.5s = 12:00:00
+		expected := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+		if !prev.Equal(expected) {
+			t.Errorf("Prev() with Delay=1s: got %v, want %v (rounded to second)", prev, expected)
+		}
+	})
+
+	t.Run("Delay > 1s - rounds to second", func(t *testing.T) {
+		sched := ConstantDelaySchedule{Delay: 5 * time.Second}
+		prev := sched.Prev(baseTime)
+		// -5s + 500ms nanoseconds = 12:00:00.5 - 5s + 0.5s = 11:55:01
+		expected := time.Date(2024, 1, 1, 11, 59, 56, 0, time.UTC)
+		if !prev.Equal(expected) {
+			t.Errorf("Prev() with Delay=5s: got %v, want %v (rounded)", prev, expected)
+		}
+	})
+}
+
+func TestConstantDelayPrevAndNextSymmetry(t *testing.T) {
+	delays := []time.Duration{
+		time.Second,
+		5 * time.Second,
+		time.Minute,
+		15 * time.Minute,
+		time.Hour,
+	}
+
+	baseTime := time.Date(2024, 6, 15, 12, 30, 0, 0, time.UTC)
+
+	for _, delay := range delays {
+		t.Run(delay.String(), func(t *testing.T) {
+			sched := Every(delay)
+
+			// Next then Prev should return close to original
+			nextTime := sched.Next(baseTime)
+			prevFromNext := sched.Prev(nextTime)
+
+			// For ConstantDelaySchedule, the difference should equal the delay
+			diff := nextTime.Sub(prevFromNext)
+			if diff != delay {
+				t.Errorf("Next() - Prev(Next()) = %v, want %v", diff, delay)
+			}
+		})
+	}
+}
