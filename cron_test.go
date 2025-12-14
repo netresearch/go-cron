@@ -2722,26 +2722,30 @@ func TestRunOnce_MixedJobs(t *testing.T) {
 // TestRunOnce_AddWhileRunning verifies run-once works when added to a running cron.
 func TestRunOnce_AddWhileRunning(t *testing.T) {
 	fc := NewFakeClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
-	c := New(WithClock(fc), WithParser(secondParser))
+	c := New(WithClock(fc))
 
 	c.Start()
 	defer c.Stop()
 
-	var executions int32
+	var count int
+	var mu sync.Mutex
 	executed := make(chan struct{}, 1)
 
-	id, _ := c.AddOnceFunc("* * * * * *", func() {
-		atomic.AddInt32(&executions, 1)
+	// Use Every() schedule like TestFakeClock_AddJobWhileRunning for reliable timing
+	id, _ := c.ScheduleOnceJob(Every(time.Second), FuncJob(func() {
+		mu.Lock()
+		count++
+		mu.Unlock()
 		select {
 		case executed <- struct{}{}:
 		default:
 		}
-	})
+	}))
 
 	// Wait for timer to be registered
 	fc.BlockUntil(1)
 
-	// Advance clock and allow job to execute
+	// Advance clock and wait for job via channel
 	fc.Advance(time.Second)
 
 	select {
@@ -2753,6 +2757,12 @@ func TestRunOnce_AddWhileRunning(t *testing.T) {
 
 	// Allow removal to complete
 	time.Sleep(100 * time.Millisecond)
+
+	mu.Lock()
+	if count != 1 {
+		t.Errorf("expected 1 execution, got %d", count)
+	}
+	mu.Unlock()
 
 	if entry := c.Entry(id); entry.ID != 0 {
 		t.Error("run-once entry should be removed after execution")
