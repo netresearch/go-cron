@@ -957,3 +957,85 @@ func ExampleNewParser_yearRange() {
 	// First in range: 2024
 	// After range is zero: true
 }
+
+// This example demonstrates using Hash expressions to distribute jobs.
+// Different hash keys produce different execution times for the same spec.
+func ExampleNewParser_hash() {
+	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Hash)
+
+	// Same spec with different keys produces different schedules
+	sched1, _ := parser.ParseWithHashKey("H * * * *", "job-a")
+	sched2, _ := parser.ParseWithHashKey("H * * * *", "job-b")
+
+	from := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	next1 := sched1.Next(from)
+	next2 := sched2.Next(from)
+
+	// The two jobs run at different minutes
+	fmt.Printf("job-a runs at minute: %d\n", next1.Minute())
+	fmt.Printf("job-b runs at minute: %d\n", next2.Minute())
+	fmt.Printf("Different times: %v\n", next1.Minute() != next2.Minute())
+	// Output:
+	// job-a runs at minute: 54
+	// job-b runs at minute: 23
+	// Different times: true
+}
+
+// This example demonstrates using H/step for distributed interval scheduling.
+func ExampleNewParser_hashStep() {
+	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Hash)
+
+	// H/15 runs every 15 minutes, but starts at a hash-determined offset
+	schedule, _ := parser.ParseWithHashKey("H/15 * * * *", "my-job")
+
+	from := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	// Get the first 4 execution times
+	for i := 0; i < 4; i++ {
+		next := schedule.Next(from)
+		fmt.Printf("%s\n", next.Format("15:04"))
+		from = next
+	}
+	// Output:
+	// 00:07
+	// 00:22
+	// 00:37
+	// 00:52
+}
+
+// This example demonstrates using H(range) to constrain the hash.
+func ExampleNewParser_hashRange() {
+	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Hash)
+
+	// H(0-29) picks a hash-based minute in the first half hour
+	schedule, _ := parser.ParseWithHashKey("H(0-29) * * * *", "early-job")
+
+	from := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	next := schedule.Next(from)
+
+	fmt.Printf("Minute: %d\n", next.Minute())
+	fmt.Printf("In range 0-29: %v\n", next.Minute() <= 29)
+	// Output:
+	// Minute: 18
+	// In range 0-29: true
+}
+
+// This example demonstrates using WithHashKey for default hash configuration.
+func ExampleParser_WithHashKey() {
+	// Configure parser with a default hash key
+	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Hash).
+		WithHashKey("default-service")
+
+	// Parse can now handle H expressions without explicit hash key
+	schedule, err := parser.Parse("H * * * *")
+	if err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
+
+	from := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	next := schedule.Next(from)
+	fmt.Printf("Next at minute: %d\n", next.Minute())
+	// Output:
+	// Next at minute: 16
+}

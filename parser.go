@@ -3,6 +3,7 @@ package cron
 import (
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"math"
 	"strconv"
 	"strings"
@@ -28,6 +29,7 @@ const (
 	DowOptional                            // Optional day of week field, default *
 	Descriptor                             // Allow descriptors such as @monthly, @weekly, etc.
 	Year                                   // Year field, default * (any year)
+	Hash                                   // Allow Jenkins-style 'H' hash expressions for load distribution
 )
 
 var places = []ParseOption{
@@ -56,6 +58,7 @@ type Parser struct {
 	minEveryInterval time.Duration
 	maxSearchYears   int
 	cache            *sync.Map // optional cache: spec string -> cacheEntry
+	hashKey          string    // key used for H (hash) expressions
 }
 
 // cacheEntry holds a cached parse result.
@@ -276,6 +279,26 @@ func (p Parser) WithSecondOptional() Parser {
 	return p
 }
 
+// WithHashKey returns a new Parser configured with a default hash key for
+// Jenkins-style 'H' expressions. The hash key is used to deterministically
+// distribute execution times across the allowed range.
+//
+// When a hash key is set, the Parse method can handle H expressions without
+// requiring ParseWithHashKey to be called explicitly.
+//
+// Example:
+//
+//	// Parser with default hash key for all H expressions
+//	p := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Hash).
+//	    WithHashKey("my-service")
+//
+//	// H resolves based on "my-service" hash
+//	sched, _ := p.Parse("H * * * *")
+func (p Parser) WithHashKey(key string) Parser {
+	p.hashKey = key
+	return p
+}
+
 // MaxSpecLength is the maximum allowed length for a cron spec string.
 // This limit prevents potential resource exhaustion from extremely long inputs.
 const MaxSpecLength = 1024
@@ -336,6 +359,26 @@ func (p Parser) Parse(spec string) (Schedule, error) {
 	}
 
 	return schedule, err
+}
+
+// ParseWithHashKey returns a new crontab schedule using the specified hash key
+// for Jenkins-style 'H' expressions. The hash key is used to deterministically
+// compute the offset for H fields, allowing different jobs to be distributed
+// across the time range.
+//
+// This method must be used when the spec contains 'H' expressions and no
+// default hash key was set via WithHashKey().
+//
+// Example:
+//
+//	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Hash)
+//	// Each job runs at a different minute based on its name
+//	sched1, _ := parser.ParseWithHashKey("H * * * *", "job-a")
+//	sched2, _ := parser.ParseWithHashKey("H * * * *", "job-b")
+func (p Parser) ParseWithHashKey(spec, hashKey string) (Schedule, error) {
+	// Create a copy with the hash key set
+	p.hashKey = hashKey
+	return p.Parse(spec)
 }
 
 // parse is the internal parsing logic, called by Parse.
@@ -399,12 +442,32 @@ func (p Parser) parse(spec string) (Schedule, error) {
 		return nil, err
 	}
 
-	field := func(field string, r bounds) uint64 {
+	// Check if any field contains H expression
+	hashEnabled := p.options&Hash != 0
+	hasHashExpr := false
+	for _, f := range fields {
+		if strings.Contains(f, "H") {
+			hasHashExpr = true
+			break
+		}
+	}
+
+	// Validate hash requirements
+	if hasHashExpr {
+		if !hashEnabled {
+			return nil, errors.New("h expressions require hash option to be enabled")
+		}
+		if p.hashKey == "" {
+			return nil, errors.New("h expressions require a hash key: use ParseWithHashKey or WithHashKey")
+		}
+	}
+
+	field := func(fieldExpr string, r bounds) uint64 {
 		if err != nil {
 			return 0
 		}
 		var bits uint64
-		bits, err = getField(field, r)
+		bits, err = getFieldWithHash(fieldExpr, r, p.hashKey, hashEnabled)
 		return bits
 	}
 
@@ -560,6 +623,30 @@ func getYearField(field string) (uint64, error) {
 	ranges := strings.FieldsFunc(field, func(r rune) bool { return r == ',' })
 	for _, expr := range ranges {
 		bit, err := getYearRange(expr)
+		if err != nil {
+			return bits, err
+		}
+		bits |= bit
+	}
+	return bits, nil
+}
+
+// computeHash returns a deterministic hash value from a key.
+// Uses FNV-1a which provides good distribution for string keys.
+func computeHash(key string) uint64 {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(key)) // hash.Hash.Write never returns an error
+	return h.Sum64()
+}
+
+// getFieldWithHash returns an Int with the bits set representing all of the times that
+// the field represents or error parsing field value. It handles H (hash) expressions
+// when hashKey is provided.
+func getFieldWithHash(field string, r bounds, hashKey string, hashEnabled bool) (uint64, error) {
+	var bits uint64
+	ranges := strings.FieldsFunc(field, func(r rune) bool { return r == ',' })
+	for _, expr := range ranges {
+		bit, err := getRangeWithHash(expr, r, hashKey, hashEnabled)
 		if err != nil {
 			return bits, err
 		}
@@ -732,6 +819,106 @@ func getRange(expr string, r bounds) (uint64, error) {
 	}
 
 	return getBits(start, end, step) | extra, nil
+}
+
+// getRangeWithHash handles H (hash) expressions in addition to standard range expressions.
+// H expressions use a deterministic hash of the hashKey to select a value within the range.
+//
+// Supported formats:
+//   - H: hash within field bounds
+//   - H/N: every N steps starting from hash offset
+//   - H(min-max): hash within explicit range
+//   - H(min-max)/N: every N steps within explicit range starting from hash offset
+func getRangeWithHash(expr string, r bounds, hashKey string, hashEnabled bool) (uint64, error) {
+	// Check for H expression
+	if !strings.HasPrefix(expr, "H") {
+		return getRange(expr, r)
+	}
+
+	if !hashEnabled {
+		return 0, errors.New("h expressions require hash option to be enabled")
+	}
+
+	// Parse H expression: H, H/N, H(min-max), H(min-max)/N
+	rangeAndStep := strings.Split(expr, "/")
+	hashPart := rangeAndStep[0]
+
+	// Parse range bounds from H or H(min-max)
+	var start, end uint
+	switch {
+	case hashPart == "H":
+		// Use field bounds
+		start, end = r.min, r.max
+	case strings.HasPrefix(hashPart, "H(") && strings.HasSuffix(hashPart, ")"):
+		// Parse explicit range H(min-max)
+		rangeSpec := hashPart[2 : len(hashPart)-1]
+		rangeParts := strings.Split(rangeSpec, "-")
+		if len(rangeParts) != 2 {
+			return 0, fmt.Errorf("invalid H range syntax: %q", expr)
+		}
+		var err error
+		start, err = mustParseInt(rangeParts[0])
+		if err != nil {
+			return 0, fmt.Errorf("invalid range start in %q: %w", expr, err)
+		}
+		end, err = mustParseInt(rangeParts[1])
+		if err != nil {
+			return 0, fmt.Errorf("invalid range end in %q: %w", expr, err)
+		}
+	default:
+		return 0, fmt.Errorf("invalid H expression syntax: %q", expr)
+	}
+
+	// Validate bounds
+	if start < r.min {
+		return 0, fmt.Errorf("range start (%d) below minimum (%d): %q", start, r.min, expr)
+	}
+	if end > r.max {
+		return 0, fmt.Errorf("range end (%d) above maximum (%d): %q", end, r.max, expr)
+	}
+	if start > end {
+		return 0, fmt.Errorf("range start (%d) beyond end (%d): %q", start, end, expr)
+	}
+
+	// Parse step if present
+	var step uint = 1
+	if len(rangeAndStep) == 2 {
+		var err error
+		step, err = mustParseInt(rangeAndStep[1])
+		if err != nil {
+			return 0, fmt.Errorf("invalid step in %q: %w", expr, err)
+		}
+		if step == 0 {
+			return 0, fmt.Errorf("step must be positive: %q", expr)
+		}
+	} else if len(rangeAndStep) > 2 {
+		return 0, fmt.Errorf("too many slashes: %q", expr)
+	}
+
+	// Compute hash-based offset
+	hashValue := computeHash(hashKey)
+
+	if step > 1 {
+		// H/step: Generate values at step intervals starting from hash offset
+		// The offset determines where within the step cycle we start
+		stepOffset := uint(hashValue % uint64(step))
+		firstValue := start + stepOffset
+
+		// Generate all values: firstValue, firstValue+step, firstValue+2*step, ...
+		// until we exceed end
+		var bits uint64
+		for v := firstValue; v <= end; v += step {
+			bits |= 1 << v
+		}
+		return bits, nil
+	}
+
+	// Simple H: hash selects a single value within the range
+	rangeSize := end - start + 1
+	hashOffset := uint(hashValue % uint64(rangeSize))
+	hashValue1 := start + hashOffset
+
+	return 1 << hashValue1, nil
 }
 
 // parseIntOrName returns the (possibly-named) integer contained in expr.
