@@ -908,3 +908,52 @@ func ExampleWithMaxEntries() {
 	// Job 3 failed: cron: max entries limit reached
 	// Total jobs: 2
 }
+
+// This example demonstrates parsing cron expressions with a year field.
+// The Year option enables 6-field expressions (minute hour dom month dow year)
+// or 7-field expressions when combined with Second.
+func ExampleNewParser_yearField() {
+	// Create parser with Year field support (6 fields total)
+	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Year)
+
+	// Schedule for January 1, 2025 at midnight
+	schedule, err := parser.Parse("0 0 1 1 * 2025")
+	if err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
+
+	// Find next execution from December 2024
+	from := time.Date(2024, 12, 15, 0, 0, 0, 0, time.UTC)
+	next := schedule.Next(from)
+	fmt.Printf("Next execution: %s\n", next.Format("2006-01-02 15:04:05"))
+	// Output:
+	// Next execution: 2025-01-01 00:00:00
+}
+
+// This example demonstrates using year ranges to limit schedule execution
+// to specific years. This is useful for temporary schedules or migrations.
+func ExampleNewParser_yearRange() {
+	// Create parser with Year field support
+	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Year)
+
+	// Schedule for January 1 at midnight, only in 2024-2026
+	schedule, err := parser.Parse("0 0 1 1 * 2024-2026")
+	if err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
+
+	// Check from 2023 - should skip to 2024
+	from := time.Date(2023, 6, 15, 0, 0, 0, 0, time.UTC)
+	next := schedule.Next(from)
+	fmt.Printf("First in range: %d\n", next.Year())
+
+	// Check after 2026 - should return zero time
+	from2 := time.Date(2026, 6, 15, 0, 0, 0, 0, time.UTC)
+	next2 := schedule.Next(from2)
+	fmt.Printf("After range is zero: %v\n", next2.IsZero())
+	// Output:
+	// First in range: 2024
+	// After range is zero: true
+}

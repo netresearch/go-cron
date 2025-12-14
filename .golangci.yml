@@ -208,6 +208,25 @@ linters:
       - linters:
           - fatcontext
         path: _test\.go
+
+      # Next() and Prev() have inherent complexity due to multi-field time calculation
+      # with year/month/day/hour/minute/second wraparound logic - cannot be simplified
+      # without fragmenting the algorithm and reducing clarity
+      - linters:
+          - gocognit
+          - gocyclo
+          - cyclop
+        path: spec\.go
+        text: "(Next|Prev)"
+
+      # parse() handles multiple ParseOption flags for field configuration
+      # Complexity is inherent to flexible cron expression parsing
+      - linters:
+          - gocyclo
+          - cyclop
+          - funlen
+        path: parser\.go
+        text: "parse"
     paths:
       - third_party$
       - builtin$
