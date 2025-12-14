@@ -199,6 +199,12 @@ func (s *slowSchedule) Next(t time.Time) time.Time {
 	return t.Add(time.Hour)
 }
 
+func (s *slowSchedule) Prev(t time.Time) time.Time {
+	// Simulate expensive calculation
+	time.Sleep(s.delay)
+	return t.Add(-time.Hour)
+}
+
 // TestSlowScheduleNext tests behavior with slow Schedule.Next() implementations.
 // Note: Schedule.Next() panics are NOT currently handled by the scheduler and will
 // crash the run loop. This is a known limitation - schedules must not panic.
