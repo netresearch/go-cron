@@ -268,3 +268,161 @@ func dayMatches(s *SpecSchedule, t time.Time) bool {
 	}
 	return domMatch || dowMatch
 }
+
+// prepareTimeForPrevSchedule converts time to schedule timezone and prepares for backwards matching.
+// Returns the prepared time, effective location, and original location for final conversion.
+func prepareTimeForPrevSchedule(t time.Time, schedLoc *time.Location) (prepared time.Time, loc, origLocation *time.Location) {
+	origLocation = t.Location()
+	loc = schedLoc
+	if loc == time.Local {
+		loc = t.Location()
+	}
+	if schedLoc != time.Local {
+		t = t.In(schedLoc)
+	}
+	// Start at the latest possible time before t (the previous second).
+	prepared = t.Add(-1*time.Second - time.Duration(t.Nanosecond())*time.Nanosecond)
+	return
+}
+
+// retreatMinute retreats time until the minute field matches the schedule bitmask.
+// It returns the updated time, an 'added' flag indicating if time was modified,
+// and a 'wrap' flag that is true if the minute rolled past 0 to 59.
+// When wrap is true, the caller must decrement the hour and re-validate.
+func retreatMinute(t time.Time, minuteBits uint64, added bool) (time.Time, bool, bool) {
+	for !fieldMatches(t.Minute(), minuteBits) {
+		cur := t.Minute()
+		if !added {
+			added = true
+			// Truncate to beginning of current minute, then go back 1 second
+			t = t.Truncate(time.Minute)
+			t = t.Add(-1 * time.Second)
+		} else {
+			t = t.Add(-1 * time.Minute)
+		}
+		if t.Minute() > cur {
+			return t, added, true // wrap
+		}
+	}
+	return t, added, false
+}
+
+// retreatSecond retreats time until the second field matches the schedule bitmask.
+// It returns the updated time, an 'added' flag indicating if time was modified,
+// and a 'wrap' flag that is true if the second rolled past 0 to 59.
+// When wrap is true, the caller must decrement the minute and re-validate.
+func retreatSecond(t time.Time, secondBits uint64, added bool) (time.Time, bool, bool) {
+	for !fieldMatches(t.Second(), secondBits) {
+		cur := t.Second()
+		if !added {
+			added = true
+			t = t.Truncate(time.Second)
+		}
+		t = t.Add(-1 * time.Second)
+		if t.Second() > cur {
+			return t, added, true // wrap
+		}
+	}
+	return t, added, false
+}
+
+// Prev returns the previous time this schedule was activated, earlier than the given time.
+// If no time can be found to satisfy the schedule, returns the zero time.
+func (s *SpecSchedule) Prev(t time.Time) time.Time {
+	// General approach: For each field (Month, Day, Hour, Minute, Second),
+	// check if it matches. If not, decrement until it matches.
+	// Wrap-around resets to verify previous fields.
+
+	t, loc, origLocation := prepareTimeForPrevSchedule(t, s.Location)
+	added := false // indicates whether a field has been decremented
+
+	// If no time is found within the search limit, return zero.
+	// Use configured MaxSearchYears if set, otherwise use default.
+	searchYears := s.MaxSearchYears
+	if searchYears <= 0 {
+		searchYears = defaultSearchYears
+	}
+	yearLimit := t.Year() - searchYears
+
+WRAP:
+	if t.Year() < yearLimit {
+		return time.Time{}
+	}
+
+	// Find the last applicable month.
+	// If it's this month, then do nothing.
+	for !fieldMatches(int(t.Month()), s.Month) {
+		cur := t.Month()
+		if !added {
+			added = true
+			// Set to start of month, then go back 1 second to end of previous month
+			t = time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, loc)
+			t = t.Add(-1 * time.Second)
+		} else {
+			// Go to the first day of current month, then back 1 second
+			t = time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, loc)
+			t = t.Add(-1 * time.Second)
+		}
+		// Check for wrap to previous year
+		if t.Month() > cur {
+			goto WRAP
+		}
+	}
+
+	// Now get a day in that month (going backwards).
+	for !dayMatches(s, t) {
+		cur := t.Day()
+		if !added {
+			added = true
+			// Set to end of current day
+			t = time.Date(t.Year(), t.Month(), t.Day(), 23, 59, 59, 0, loc)
+		}
+		t = t.AddDate(0, 0, -1)
+		// Handle DST causing issues
+		t = normalizeDSTDayPrev(t)
+
+		if t.Day() > cur {
+			goto WRAP
+		}
+	}
+
+	// Find matching hour (going backwards)
+	for !fieldMatches(t.Hour(), s.Hour) {
+		cur := t.Hour()
+		if !added {
+			added = true
+			// Set to end of current hour
+			t = time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), 59, 59, 0, loc)
+		} else {
+			t = t.Add(-1 * time.Hour)
+		}
+
+		if t.Hour() > cur {
+			goto WRAP
+		}
+	}
+
+	var wrap bool
+	t, added, wrap = retreatMinute(t, s.Minute, added)
+	if wrap {
+		goto WRAP
+	}
+
+	t, _, wrap = retreatSecond(t, s.Second, added)
+	if wrap {
+		goto WRAP
+	}
+
+	return t.In(origLocation)
+}
+
+// normalizeDSTDayPrev adjusts time when DST causes issues going backwards.
+// Similar to normalizeDSTDay but for backwards traversal.
+func normalizeDSTDayPrev(t time.Time) time.Time {
+	// Ensure we're at the end of the day
+	if t.Hour() == 23 {
+		return t
+	}
+	// If we're at a weird hour due to DST, adjust to end of day
+	return time.Date(t.Year(), t.Month(), t.Day(), 23, 59, 59, 0, t.Location())
+}

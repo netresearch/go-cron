@@ -69,3 +69,19 @@ func (schedule ConstantDelaySchedule) Next(t time.Time) time.Time {
 	// For second+ intervals, round to the second
 	return t.Add(schedule.Delay - time.Duration(t.Nanosecond())*time.Nanosecond)
 }
+
+// Prev returns the previous activation time, earlier than the given time.
+// For ConstantDelaySchedule, this simply subtracts the delay.
+// If the delay is zero or negative (invalid), returns t - 1 second as a safe fallback.
+func (schedule ConstantDelaySchedule) Prev(t time.Time) time.Time {
+	// Defensive: prevent invalid results if delay is zero or negative
+	if schedule.Delay <= 0 {
+		return t.Add(-time.Second)
+	}
+	// For sub-second intervals, don't round to second boundary
+	if schedule.Delay < time.Second {
+		return t.Add(-schedule.Delay)
+	}
+	// For second+ intervals, round to the second boundary
+	return t.Add(-schedule.Delay + time.Duration(t.Nanosecond())*time.Nanosecond)
+}
