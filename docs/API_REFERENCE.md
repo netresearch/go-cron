@@ -323,6 +323,36 @@ activation time, later than the given time.
 
 ---
 
+### ScheduleWithPrev
+
+```go
+type ScheduleWithPrev interface {
+    Schedule
+    Prev(time.Time) time.Time
+}
+```
+
+ScheduleWithPrev is an optional interface that schedules can implement to support
+backward time traversal. This is useful for detecting missed executions or
+determining the last scheduled run time.
+
+Built-in schedules (`SpecSchedule`, `ConstantDelaySchedule`) implement this interface.
+Custom Schedule implementations may optionally implement it.
+
+**Usage:**
+
+```go
+schedule, _ := cron.ParseStandard("0 9 * * *")
+
+// Type assert to access Prev()
+if sp, ok := schedule.(cron.ScheduleWithPrev); ok {
+    prev := sp.Prev(time.Now())
+    fmt.Println("Last scheduled run:", prev)
+}
+```
+
+---
+
 ### ScheduleParser
 
 ```go

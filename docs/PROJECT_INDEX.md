@@ -187,6 +187,16 @@ type Schedule interface {
 }
 ```
 
+#### `ScheduleWithPrev`
+```go
+type ScheduleWithPrev interface {
+    Schedule
+    Prev(time.Time) time.Time
+}
+```
+
+Optional interface for backward time traversal. Built-in schedules implement this.
+
 #### `ScheduleParser`
 ```go
 type ScheduleParser interface {
