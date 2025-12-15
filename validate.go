@@ -265,20 +265,19 @@ func (r *SpecAnalysis) parseFields(spec string) {
 }
 
 // looksLikeYear returns true if the field appears to be a year value or year expression.
+// A field "looks like a year" if it contains a number >= 100, which distinguishes it
+// from seconds (0-59), minutes (0-59), hours (0-23), days (1-31), months (1-12), dow (0-7).
 func looksLikeYear(field string) bool {
-	// Wildcard works for any field
-	if field == "*" {
-		return false // Ambiguous, assume it's not year
+	// Wildcard is ambiguous - could be any field
+	if field == "*" || field == "?" {
+		return false
 	}
-	// Check if it starts with a 4-digit year (e.g., "2024", "2024-2026", "2024,2025")
-	// or contains a 4-digit year
+	// Check if any numeric part is >= 100 (clearly a year, not another cron field)
 	for _, part := range strings.FieldsFunc(field, func(r rune) bool {
 		return r == ',' || r == '-' || r == '/'
 	}) {
-		if len(part) == 4 {
-			if year, err := strconv.Atoi(part); err == nil && year >= 1970 && year <= 2099 {
-				return true
-			}
+		if year, err := strconv.Atoi(part); err == nil && year >= 100 {
+			return true
 		}
 	}
 	return false
