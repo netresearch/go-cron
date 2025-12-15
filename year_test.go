@@ -1,6 +1,7 @@
 package cron
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -41,12 +42,12 @@ func TestYearFieldParsing(t *testing.T) {
 		},
 		{
 			name:    "year below minimum",
-			spec:    "0 0 1 1 * 1969",
+			spec:    "0 0 1 1 * 0",
 			wantErr: true,
 		},
 		{
 			name:    "year above maximum",
-			spec:    "0 0 1 1 * 2034",
+			spec:    "0 0 1 1 * 2147483648",
 			wantErr: true,
 		},
 	}
@@ -145,6 +146,18 @@ func TestYearFieldScheduleNext(t *testing.T) {
 			spec:     "0 0 1 1 * 2024,2026,2028",
 			from:     time.Date(2024, 6, 15, 10, 0, 0, 0, loc),
 			wantYear: 2026,
+		},
+		{
+			name:     "far future year - year 3000",
+			spec:     "0 0 1 1 * 3000",
+			from:     time.Date(2999, 6, 15, 10, 0, 0, 0, loc),
+			wantYear: 3000,
+		},
+		{
+			name:     "far future year range",
+			spec:     "0 0 1 1 * 5000-5010/2",
+			from:     time.Date(5000, 6, 15, 10, 0, 0, 0, loc),
+			wantYear: 5002,
 		},
 	}
 
@@ -307,15 +320,17 @@ func TestYearBounds(t *testing.T) {
 		year    string
 		wantErr bool
 	}{
-		{"1970", false}, // Unix epoch - minimum
-		{"2000", false}, // Y2K
-		{"2024", false}, // Current era
-		{"2033", false}, // Maximum year (1970 + 63)
-		{"1969", true},  // Below minimum
-		{"2034", true},  // Above maximum
-		{"0", true},     // Invalid
-		{"-1", true},    // Invalid
-		{"10000", true}, // Way above maximum
+		{"1", false},          // Minimum year (YearBase)
+		{"100", false},        // 3-digit year
+		{"1970", false},       // Unix epoch
+		{"2000", false},       // Y2K
+		{"2024", false},       // Current era
+		{"9999", false},       // 4-digit max
+		{"10000", false},      // 5-digit year - valid with sparse storage
+		{"999999", false},     // 6-digit year
+		{"2147483647", false}, // MaxInt32 (YearMax)
+		{"0", true},           // Below minimum
+		{"-1", true},          // Negative - invalid
 	}
 
 	for _, tt := range tests {
@@ -358,5 +373,114 @@ func TestYearFieldConcurrent(t *testing.T) {
 
 	for i := 0; i < 10; i++ {
 		<-done
+	}
+}
+
+// TestSecondOptionalWithYear tests that SecondOptional and Year can be used together.
+// This combination requires special handling because of field count ambiguity.
+func TestSecondOptionalWithYear(t *testing.T) {
+	// Parser with both SecondOptional and Year enabled
+	parser := NewParser(SecondOptional | Minute | Hour | Dom | Month | Dow | Year)
+	loc := time.UTC
+
+	tests := []struct {
+		name       string
+		spec       string
+		wantErr    bool
+		errContain string
+		from       time.Time
+		wantYear   int
+		wantSecond int
+	}{
+		{
+			// 7 fields: second minute hour dom month dow year
+			name:       "7 fields with explicit year",
+			spec:       "30 15 10 1 1 * 2025",
+			wantErr:    false,
+			from:       time.Date(2024, 12, 1, 0, 0, 0, 0, loc),
+			wantYear:   2025,
+			wantSecond: 30,
+		},
+		{
+			// 6 fields with explicit year: minute hour dom month dow year
+			name:       "6 fields with year - no seconds",
+			spec:       "15 10 1 1 * 2025",
+			wantErr:    false,
+			from:       time.Date(2024, 12, 1, 0, 0, 0, 0, loc),
+			wantYear:   2025,
+			wantSecond: 0, // Default when seconds omitted
+		},
+		{
+			// 7 fields with wildcard year
+			name:       "7 fields with wildcard year",
+			spec:       "30 15 10 1 1 * *",
+			wantErr:    false,
+			from:       time.Date(2024, 12, 1, 0, 0, 0, 0, loc),
+			wantYear:   2025,
+			wantSecond: 30,
+		},
+		{
+			// 6 fields ending with wildcard - NEW BEHAVIOR: prefer seconds
+			// "15 10 1 1 * *" is now [sec=15 min=10 hour=1 dom=1 month=* dow=*] year=any
+			name:       "6 fields with wildcard - prefers seconds",
+			spec:       "15 10 1 1 * *",
+			wantErr:    false,
+			from:       time.Date(2024, 12, 1, 2, 0, 0, 0, loc), // After 01:10:15
+			wantYear:   2025,                                    // Next is Jan 1, 2025
+			wantSecond: 15,                                      // Now treated as seconds!
+		},
+		{
+			// 6 fields ending with number < 100 - treated as dow, not year
+			// "30 15 10 1 1 5" is [sec=30 min=15 hour=10 dom=1 month=1 dow=5] year=any
+			name:       "6 fields with dow - prefers seconds",
+			spec:       "30 15 10 1 1 5",
+			wantErr:    false,
+			from:       time.Date(2024, 12, 1, 0, 0, 0, 0, loc),
+			wantYear:   2025,
+			wantSecond: 30,
+		},
+		{
+			// 7 fields with year range - unambiguous
+			name:       "7 fields with year range",
+			spec:       "0 0 0 1 1 * 2024-2026",
+			wantErr:    false,
+			from:       time.Date(2023, 6, 1, 0, 0, 0, 0, loc),
+			wantYear:   2024,
+			wantSecond: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			schedule, err := parser.Parse(tt.spec)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("Parse(%q) expected error containing %q, got nil", tt.spec, tt.errContain)
+					return
+				}
+				if tt.errContain != "" && !strings.Contains(err.Error(), tt.errContain) {
+					t.Errorf("Parse(%q) error = %v, want error containing %q", tt.spec, err, tt.errContain)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("Parse(%q) unexpected error: %v", tt.spec, err)
+			}
+
+			next := schedule.Next(tt.from)
+			if next.IsZero() {
+				t.Errorf("Next(%v) returned zero time", tt.from)
+				return
+			}
+
+			if next.Year() != tt.wantYear {
+				t.Errorf("Next(%v).Year() = %d, want %d", tt.from, next.Year(), tt.wantYear)
+			}
+
+			if next.Second() != tt.wantSecond {
+				t.Errorf("Next(%v).Second() = %d, want %d", tt.from, next.Second(), tt.wantSecond)
+			}
+		})
 	}
 }

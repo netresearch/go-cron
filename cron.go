@@ -918,6 +918,13 @@ func (c *Cron) tryIncrementEntryCount() bool {
 // If the entry has a name, it is also removed from the nameIndex.
 // After removal, it may trigger index map compaction to reclaim memory.
 // If the ID is not found, the function returns without error.
+//
+// IMPORTANT: This function must ONLY be called from:
+//   - The run loop (when c.running is true) - owns the data exclusively
+//   - Remove() when not running - caller already holds runningMu
+//
+// This avoids a deadlock where ScheduleJob holds runningMu while sending to c.add,
+// and a concurrent run-once job completion tries to acquire runningMu here.
 func (c *Cron) removeEntry(id EntryID) {
 	entry, ok := c.entryIndex[id]
 	if !ok {
@@ -927,17 +934,11 @@ func (c *Cron) removeEntry(id EntryID) {
 	c.entries.RemoveAt(entry)
 	delete(c.entryIndex, id)
 
-	// Remove from nameIndex with proper synchronization.
-	// When not running, caller (Remove) already holds runningMu.
-	// When running, we must acquire it here to synchronize with ScheduleJob.
+	// Remove from nameIndex. No mutex needed:
+	// - When running: run loop owns all data exclusively, no concurrent access
+	// - When not running: caller (Remove) already holds runningMu
 	if entry.Name != "" {
-		if c.running {
-			c.runningMu.Lock()
-			delete(c.nameIndex, entry.Name)
-			c.runningMu.Unlock()
-		} else {
-			delete(c.nameIndex, entry.Name)
-		}
+		delete(c.nameIndex, entry.Name)
 	}
 	atomic.AddInt64(&c.entryCount, -1)
 
@@ -955,7 +956,12 @@ const indexCompactionThreshold = 1000
 // and is proportional to current map size. This reclaims memory from Go's
 // map implementation which doesn't shrink on delete.
 //
-// Caller must NOT hold runningMu (this function may acquire it internally).
+// IMPORTANT: This function must ONLY be called from:
+//   - The run loop (when c.running is true) - owns the data exclusively
+//   - Remove() when not running - caller already holds runningMu
+//
+// This avoids a deadlock where ScheduleJob holds runningMu while sending to c.add,
+// and a concurrent compaction tries to acquire runningMu here.
 func (c *Cron) maybeCompactIndexes() {
 	// Only compact if we've deleted enough entries AND the deletion count
 	// is significant relative to remaining entries. This avoids rebuilding
@@ -973,16 +979,12 @@ func (c *Cron) maybeCompactIndexes() {
 	maps.Copy(newEntryIndex, c.entryIndex)
 	c.entryIndex = newEntryIndex
 
-	// Rebuild nameIndex with proper synchronization
-	if c.running {
-		c.runningMu.Lock()
-	}
+	// Rebuild nameIndex. No mutex needed:
+	// - When running: run loop owns all data exclusively, no concurrent access
+	// - When not running: caller (Remove) already holds runningMu
 	newNameIndex := make(map[string]*Entry, len(c.nameIndex))
 	maps.Copy(newNameIndex, c.nameIndex)
 	c.nameIndex = newNameIndex
-	if c.running {
-		c.runningMu.Unlock()
-	}
 
 	c.indexDeletions = 0
 }

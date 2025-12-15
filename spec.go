@@ -7,10 +7,10 @@ import "time"
 type SpecSchedule struct {
 	Second, Minute, Hour, Dom, Month, Dow uint64
 
-	// Year is a bitmask for valid years, stored as offsets from YearBase (1970).
-	// For example, year 2024 is stored as bit (2024-1970) = bit 54.
-	// If starBit is set, any year is valid.
-	Year uint64
+	// Year stores valid years using sparse storage for unlimited range.
+	// nil means any year (wildcard). An empty map means no valid years.
+	// Uses map[int]struct{} for O(1) lookup with minimal memory overhead.
+	Year map[int]struct{}
 
 	// Override location for this schedule.
 	Location *time.Location
@@ -28,13 +28,14 @@ type bounds struct {
 }
 
 // YearBase is the minimum valid year for the Year field.
-// Years are stored as offsets from this base year.
-const YearBase = 1970
+// Set to 1 CE to allow any reasonable historical or future date.
+const YearBase = 1
 
 // YearMax is the maximum valid year for the Year field.
-// Years are stored as offsets from YearBase in a uint64 bitmask.
-// Since uint64 provides 64 bits (0-63), the maximum representable year is 1970+63=2033.
-const YearMax = 2033
+// With sparse map[int]struct{} storage, there is no technical limit.
+// Using math.MaxInt32 (2147483647) ensures compatibility across platforms
+// while being effectively unlimited for any practical scheduling use.
+const YearMax = 1<<31 - 1 // 2147483647
 
 // The bounds for each field.
 var (
@@ -180,19 +181,15 @@ func fieldMatches(value int, bits uint64) bool {
 	return 1<<uint(value)&bits != 0
 }
 
-// yearMatches checks if a year matches the year bitmask.
-// Years are stored as offsets from YearBase (1970).
-// If starBit is set in the bitmask, any year matches.
-func yearMatches(year int, bits uint64) bool {
-	if bits&starBit != 0 {
-		return true
+// yearMatches checks if a year matches the year set.
+// A nil yearSet means any year (wildcard).
+// An empty yearSet means no year matches.
+func yearMatches(year int, yearSet map[int]struct{}) bool {
+	if yearSet == nil {
+		return true // nil = wildcard (any year)
 	}
-	offset := year - YearBase
-	if offset < 0 || offset > 63 {
-		return false
-	}
-	// #nosec G115 -- offset is bounded 0-63, safe for uint
-	return 1<<uint(offset)&bits != 0
+	_, ok := yearSet[year]
+	return ok
 }
 
 // Next returns the next time this schedule is activated, greater than the given time.
