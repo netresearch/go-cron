@@ -367,7 +367,7 @@ func TestStandardSpecSchedule(t *testing.T) {
 	}{
 		{
 			expr:     "5 * * * *",
-			expected: &SpecSchedule{1 << seconds.min, 1 << 5, all(hours), all(dom), all(months), allDowNormalized(), nil, time.Local, 0},
+			expected: &SpecSchedule{1 << seconds.min, 1 << 5, all(hours), all(dom), all(months), allDowNormalized(), nil, time.Local, 0, nil, nil},
 		},
 		{
 			expr:     "@every 5m",
@@ -599,15 +599,15 @@ func allDowNormalized() uint64 {
 }
 
 func every5min(loc *time.Location) *SpecSchedule {
-	return &SpecSchedule{1 << 0, 1 << 5, all(hours), all(dom), all(months), allDowNormalized(), nil, loc, 0}
+	return &SpecSchedule{1 << 0, 1 << 5, all(hours), all(dom), all(months), allDowNormalized(), nil, loc, 0, nil, nil}
 }
 
 func every5min5s(loc *time.Location) *SpecSchedule {
-	return &SpecSchedule{1 << 5, 1 << 5, all(hours), all(dom), all(months), allDowNormalized(), nil, loc, 0}
+	return &SpecSchedule{1 << 5, 1 << 5, all(hours), all(dom), all(months), allDowNormalized(), nil, loc, 0, nil, nil}
 }
 
 func midnight(loc *time.Location) *SpecSchedule {
-	return &SpecSchedule{1, 1, 1, all(dom), all(months), allDowNormalized(), nil, loc, 0}
+	return &SpecSchedule{1, 1, 1, all(dom), all(months), allDowNormalized(), nil, loc, 0, nil, nil}
 }
 
 func annual(loc *time.Location) *SpecSchedule {
@@ -919,5 +919,633 @@ func TestSundayAs7Range(t *testing.T) {
 	next := sched.Next(thursday)
 	if next.Weekday() != time.Friday {
 		t.Errorf("Next after Thursday should be Friday, got %v", next.Weekday())
+	}
+}
+
+// =============================================================================
+// Extended Cron Syntax Tests (#n, #L, L, L-n, nW, LW)
+// =============================================================================
+
+func TestExtendedDowNth(t *testing.T) {
+	// Parser with DowNth enabled
+	parser := NewParser(Minute | Hour | Dom | Month | Dow | DowNth)
+
+	tests := []struct {
+		name    string
+		expr    string
+		wantErr bool
+		checkFn func(*testing.T, *SpecSchedule)
+	}{
+		{
+			name: "FRI#3 - third Friday",
+			expr: "0 0 * * FRI#3",
+			checkFn: func(t *testing.T, s *SpecSchedule) {
+				if len(s.DowConstraints) != 1 {
+					t.Fatalf("expected 1 constraint, got %d", len(s.DowConstraints))
+				}
+				c := s.DowConstraints[0]
+				if c.Weekday != 5 || c.N != 3 {
+					t.Errorf("expected FRI(5)#3, got weekday=%d n=%d", c.Weekday, c.N)
+				}
+			},
+		},
+		{
+			name: "5#2 - second Friday (numeric)",
+			expr: "0 0 * * 5#2",
+			checkFn: func(t *testing.T, s *SpecSchedule) {
+				if len(s.DowConstraints) != 1 {
+					t.Fatalf("expected 1 constraint, got %d", len(s.DowConstraints))
+				}
+				c := s.DowConstraints[0]
+				if c.Weekday != 5 || c.N != 2 {
+					t.Errorf("expected 5#2, got weekday=%d n=%d", c.Weekday, c.N)
+				}
+			},
+		},
+		{
+			name: "MON#1 - first Monday",
+			expr: "0 0 * * MON#1",
+			checkFn: func(t *testing.T, s *SpecSchedule) {
+				c := s.DowConstraints[0]
+				if c.Weekday != 1 || c.N != 1 {
+					t.Errorf("expected MON(1)#1, got weekday=%d n=%d", c.Weekday, c.N)
+				}
+			},
+		},
+		{
+			name:    "FRI#6 - invalid (max is 5)",
+			expr:    "0 0 * * FRI#6",
+			wantErr: true,
+		},
+		{
+			name:    "FRI#0 - invalid (min is 1)",
+			expr:    "0 0 * * FRI#0",
+			wantErr: true,
+		},
+		{
+			name:    "FRI# - missing occurrence",
+			expr:    "0 0 * * FRI#",
+			wantErr: true,
+		},
+		{
+			name:    "#3 - missing weekday",
+			expr:    "0 0 * * #3",
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sched, err := parser.Parse(tc.expr)
+			if tc.wantErr {
+				if err == nil {
+					t.Errorf("expected error but got none")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			spec := sched.(*SpecSchedule)
+			if tc.checkFn != nil {
+				tc.checkFn(t, spec)
+			}
+		})
+	}
+}
+
+func TestExtendedDowLast(t *testing.T) {
+	// Parser with DowLast enabled
+	parser := NewParser(Minute | Hour | Dom | Month | Dow | DowLast)
+
+	tests := []struct {
+		name    string
+		expr    string
+		wantErr bool
+		checkFn func(*testing.T, *SpecSchedule)
+	}{
+		{
+			name: "FRI#L - last Friday",
+			expr: "0 0 * * FRI#L",
+			checkFn: func(t *testing.T, s *SpecSchedule) {
+				if len(s.DowConstraints) != 1 {
+					t.Fatalf("expected 1 constraint, got %d", len(s.DowConstraints))
+				}
+				c := s.DowConstraints[0]
+				if c.Weekday != 5 || c.N != -1 {
+					t.Errorf("expected FRI(5)#L(-1), got weekday=%d n=%d", c.Weekday, c.N)
+				}
+			},
+		},
+		{
+			name: "0#L - last Sunday (numeric)",
+			expr: "0 0 * * 0#L",
+			checkFn: func(t *testing.T, s *SpecSchedule) {
+				c := s.DowConstraints[0]
+				if c.Weekday != 0 || c.N != -1 {
+					t.Errorf("expected 0#L, got weekday=%d n=%d", c.Weekday, c.N)
+				}
+			},
+		},
+		{
+			name: "fri#l - lowercase",
+			expr: "0 0 * * fri#l",
+			checkFn: func(t *testing.T, s *SpecSchedule) {
+				c := s.DowConstraints[0]
+				if c.Weekday != 5 || c.N != -1 {
+					t.Errorf("expected fri#l, got weekday=%d n=%d", c.Weekday, c.N)
+				}
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sched, err := parser.Parse(tc.expr)
+			if tc.wantErr {
+				if err == nil {
+					t.Errorf("expected error but got none")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			spec := sched.(*SpecSchedule)
+			if tc.checkFn != nil {
+				tc.checkFn(t, spec)
+			}
+		})
+	}
+}
+
+func TestExtendedDowCombined(t *testing.T) {
+	// Parser with both DowNth and DowLast enabled
+	parser := NewParser(Minute | Hour | Dom | Month | Dow | DowNth | DowLast)
+
+	// Test combined expression: MON,FRI#3,SUN#L
+	sched, err := parser.Parse("0 0 * * MON,FRI#3,SUN#L")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	spec := sched.(*SpecSchedule)
+
+	// Should have Monday in bitmask
+	if spec.Dow&(1<<1) == 0 {
+		t.Error("Monday should be in bitmask")
+	}
+
+	// Should have 2 constraints
+	if len(spec.DowConstraints) != 2 {
+		t.Fatalf("expected 2 constraints, got %d", len(spec.DowConstraints))
+	}
+
+	// Find FRI#3 and SUN#L
+	var hasFri3, hasSunL bool
+	for _, c := range spec.DowConstraints {
+		if c.Weekday == 5 && c.N == 3 {
+			hasFri3 = true
+		}
+		if c.Weekday == 0 && c.N == -1 {
+			hasSunL = true
+		}
+	}
+	if !hasFri3 {
+		t.Error("missing FRI#3 constraint")
+	}
+	if !hasSunL {
+		t.Error("missing SUN#L constraint")
+	}
+}
+
+func TestExtendedDomL(t *testing.T) {
+	// Parser with DomL enabled
+	parser := NewParser(Minute | Hour | Dom | Month | Dow | DomL)
+
+	tests := []struct {
+		name    string
+		expr    string
+		wantErr bool
+		checkFn func(*testing.T, *SpecSchedule)
+	}{
+		{
+			name: "L - last day of month",
+			expr: "0 0 L * *",
+			checkFn: func(t *testing.T, s *SpecSchedule) {
+				if len(s.DomConstraints) != 1 {
+					t.Fatalf("expected 1 constraint, got %d", len(s.DomConstraints))
+				}
+				c := s.DomConstraints[0]
+				if c.Type != DomLast {
+					t.Errorf("expected DomLast type, got %d", c.Type)
+				}
+			},
+		},
+		{
+			name: "L-3 - third from last day",
+			expr: "0 0 L-3 * *",
+			checkFn: func(t *testing.T, s *SpecSchedule) {
+				if len(s.DomConstraints) != 1 {
+					t.Fatalf("expected 1 constraint, got %d", len(s.DomConstraints))
+				}
+				c := s.DomConstraints[0]
+				if c.Type != DomLastOffset || c.N != 3 {
+					t.Errorf("expected DomLastOffset with N=3, got type=%d n=%d", c.Type, c.N)
+				}
+			},
+		},
+		{
+			name: "l-1 - lowercase",
+			expr: "0 0 l-1 * *",
+			checkFn: func(t *testing.T, s *SpecSchedule) {
+				c := s.DomConstraints[0]
+				if c.Type != DomLastOffset || c.N != 1 {
+					t.Errorf("expected DomLastOffset with N=1, got type=%d n=%d", c.Type, c.N)
+				}
+			},
+		},
+		{
+			name:    "L-0 - invalid offset",
+			expr:    "0 0 L-0 * *",
+			wantErr: true,
+		},
+		{
+			name:    "L-31 - offset too large",
+			expr:    "0 0 L-31 * *",
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sched, err := parser.Parse(tc.expr)
+			if tc.wantErr {
+				if err == nil {
+					t.Errorf("expected error but got none")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			spec := sched.(*SpecSchedule)
+			if tc.checkFn != nil {
+				tc.checkFn(t, spec)
+			}
+		})
+	}
+}
+
+func TestExtendedDomW(t *testing.T) {
+	// Parser with DomW enabled
+	parser := NewParser(Minute | Hour | Dom | Month | Dow | DomW)
+
+	tests := []struct {
+		name    string
+		expr    string
+		wantErr bool
+		checkFn func(*testing.T, *SpecSchedule)
+	}{
+		{
+			name: "15W - nearest weekday to 15th",
+			expr: "0 0 15W * *",
+			checkFn: func(t *testing.T, s *SpecSchedule) {
+				if len(s.DomConstraints) != 1 {
+					t.Fatalf("expected 1 constraint, got %d", len(s.DomConstraints))
+				}
+				c := s.DomConstraints[0]
+				if c.Type != DomNearestWeekday || c.N != 15 {
+					t.Errorf("expected DomNearestWeekday with N=15, got type=%d n=%d", c.Type, c.N)
+				}
+			},
+		},
+		{
+			name: "1w - lowercase",
+			expr: "0 0 1w * *",
+			checkFn: func(t *testing.T, s *SpecSchedule) {
+				c := s.DomConstraints[0]
+				if c.Type != DomNearestWeekday || c.N != 1 {
+					t.Errorf("expected DomNearestWeekday with N=1, got type=%d n=%d", c.Type, c.N)
+				}
+			},
+		},
+		{
+			name: "LW - last weekday of month",
+			expr: "0 0 LW * *",
+			checkFn: func(t *testing.T, s *SpecSchedule) {
+				if len(s.DomConstraints) != 1 {
+					t.Fatalf("expected 1 constraint, got %d", len(s.DomConstraints))
+				}
+				c := s.DomConstraints[0]
+				if c.Type != DomLastWeekday {
+					t.Errorf("expected DomLastWeekday type, got %d", c.Type)
+				}
+			},
+		},
+		{
+			name:    "0W - invalid day",
+			expr:    "0 0 0W * *",
+			wantErr: true,
+		},
+		{
+			name:    "32W - day too large",
+			expr:    "0 0 32W * *",
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sched, err := parser.Parse(tc.expr)
+			if tc.wantErr {
+				if err == nil {
+					t.Errorf("expected error but got none")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			spec := sched.(*SpecSchedule)
+			if tc.checkFn != nil {
+				tc.checkFn(t, spec)
+			}
+		})
+	}
+}
+
+func TestExtendedDomCombined(t *testing.T) {
+	// Parser with both DomL and DomW enabled
+	parser := NewParser(Minute | Hour | Dom | Month | Dow | DomL | DomW)
+
+	// Test combined expression: 1,15,L
+	sched, err := parser.Parse("0 0 1,15,L * *")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	spec := sched.(*SpecSchedule)
+
+	// Should have 1 and 15 in bitmask
+	if spec.Dom&(1<<1) == 0 {
+		t.Error("day 1 should be in bitmask")
+	}
+	if spec.Dom&(1<<15) == 0 {
+		t.Error("day 15 should be in bitmask")
+	}
+
+	// Should have L constraint
+	if len(spec.DomConstraints) != 1 {
+		t.Fatalf("expected 1 constraint, got %d", len(spec.DomConstraints))
+	}
+	if spec.DomConstraints[0].Type != DomLast {
+		t.Error("expected DomLast constraint")
+	}
+}
+
+func TestExtendedFlag(t *testing.T) {
+	// Parser with Extended flag (enables all extended syntax)
+	parser := NewParser(Minute | Hour | Dom | Month | Dow | Extended)
+
+	// Should accept all extended syntax
+	tests := []string{
+		"0 0 * * FRI#3", // DowNth
+		"0 0 * * MON#L", // DowLast
+		"0 0 L * *",     // DomL
+		"0 0 L-5 * *",   // DomL
+		"0 0 15W * *",   // DomW
+		"0 0 LW * *",    // DomW
+	}
+
+	for _, expr := range tests {
+		t.Run(expr, func(t *testing.T) {
+			_, err := parser.Parse(expr)
+			if err != nil {
+				t.Errorf("Extended parser should accept %q, got error: %v", expr, err)
+			}
+		})
+	}
+}
+
+func TestExtendedSyntaxDisabledByDefault(t *testing.T) {
+	// Standard parser without extended flags
+	parser := NewParser(Minute | Hour | Dom | Month | Dow)
+
+	// Should reject extended syntax
+	tests := []struct {
+		expr string
+		desc string
+	}{
+		{"0 0 * * FRI#3", "DowNth"},
+		{"0 0 * * FRI#L", "DowLast"},
+		{"0 0 L * *", "DomL"},
+		{"0 0 15W * *", "DomW"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.desc, func(t *testing.T) {
+			_, err := parser.Parse(tc.expr)
+			if err == nil {
+				t.Errorf("standard parser should reject %q (%s)", tc.expr, tc.desc)
+			}
+		})
+	}
+}
+
+func TestExtendedDowScheduling(t *testing.T) {
+	// Test actual scheduling with DOW constraints
+	parser := NewParser(Minute | Hour | Dom | Month | Dow | DowNth | DowLast)
+
+	// FRI#3 - third Friday of month
+	sched, err := parser.Parse("0 12 * * FRI#3")
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+
+	// Start from Jan 1, 2024 (Monday)
+	start := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	next := sched.Next(start)
+
+	// Third Friday of Jan 2024 is Jan 19
+	expected := time.Date(2024, 1, 19, 12, 0, 0, 0, time.UTC)
+	if !next.Equal(expected) {
+		t.Errorf("FRI#3: expected %v, got %v", expected, next)
+	}
+
+	// Next occurrence should be Feb 16, 2024 (third Friday of Feb)
+	next = sched.Next(next)
+	expected = time.Date(2024, 2, 16, 12, 0, 0, 0, time.UTC)
+	if !next.Equal(expected) {
+		t.Errorf("FRI#3 next: expected %v, got %v", expected, next)
+	}
+}
+
+func TestExtendedDowLastScheduling(t *testing.T) {
+	parser := NewParser(Minute | Hour | Dom | Month | Dow | DowLast)
+
+	// FRI#L - last Friday of month
+	sched, err := parser.Parse("0 12 * * FRI#L")
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+
+	// Start from Jan 1, 2024
+	start := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	next := sched.Next(start)
+
+	// Last Friday of Jan 2024 is Jan 26
+	expected := time.Date(2024, 1, 26, 12, 0, 0, 0, time.UTC)
+	if !next.Equal(expected) {
+		t.Errorf("FRI#L: expected %v, got %v", expected, next)
+	}
+
+	// Next occurrence should be Feb 23, 2024 (last Friday of Feb)
+	next = sched.Next(next)
+	expected = time.Date(2024, 2, 23, 12, 0, 0, 0, time.UTC)
+	if !next.Equal(expected) {
+		t.Errorf("FRI#L next: expected %v, got %v", expected, next)
+	}
+}
+
+func TestExtendedDomLastScheduling(t *testing.T) {
+	parser := NewParser(Minute | Hour | Dom | Month | Dow | DomL)
+
+	// L - last day of month
+	sched, err := parser.Parse("0 12 L * *")
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+
+	// Start from Jan 15, 2024
+	start := time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)
+	next := sched.Next(start)
+
+	// Last day of Jan 2024 is Jan 31
+	expected := time.Date(2024, 1, 31, 12, 0, 0, 0, time.UTC)
+	if !next.Equal(expected) {
+		t.Errorf("L: expected %v, got %v", expected, next)
+	}
+
+	// Next occurrence should be Feb 29, 2024 (leap year)
+	next = sched.Next(next)
+	expected = time.Date(2024, 2, 29, 12, 0, 0, 0, time.UTC)
+	if !next.Equal(expected) {
+		t.Errorf("L next (Feb leap): expected %v, got %v", expected, next)
+	}
+}
+
+func TestExtendedDomLastOffsetScheduling(t *testing.T) {
+	parser := NewParser(Minute | Hour | Dom | Month | Dow | DomL)
+
+	// L-3 - third from last day
+	sched, err := parser.Parse("0 12 L-3 * *")
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+
+	// Start from Jan 15, 2024
+	start := time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)
+	next := sched.Next(start)
+
+	// Third from last of Jan (31 days) is Jan 28
+	expected := time.Date(2024, 1, 28, 12, 0, 0, 0, time.UTC)
+	if !next.Equal(expected) {
+		t.Errorf("L-3: expected %v, got %v", expected, next)
+	}
+
+	// Next occurrence: Feb 2024 has 29 days (leap year), so L-3 = Feb 26
+	next = sched.Next(next)
+	expected = time.Date(2024, 2, 26, 12, 0, 0, 0, time.UTC)
+	if !next.Equal(expected) {
+		t.Errorf("L-3 next (Feb leap): expected %v, got %v", expected, next)
+	}
+}
+
+func TestExtendedDomNearestWeekdayScheduling(t *testing.T) {
+	parser := NewParser(Minute | Hour | Dom | Month | Dow | DomW)
+
+	tests := []struct {
+		name     string
+		expr     string
+		start    time.Time
+		expected time.Time
+	}{
+		{
+			// 15W when 15th is Monday (weekday) - should be 15th
+			name:     "15W on weekday",
+			expr:     "0 12 15W * *",
+			start:    time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), // Jan 2024, 15th is Monday
+			expected: time.Date(2024, 1, 15, 12, 0, 0, 0, time.UTC),
+		},
+		{
+			// 15W when 15th is Saturday - should be Friday 14th
+			name:     "15W on Saturday",
+			expr:     "0 12 15W * *",
+			start:    time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC), // June 2024, 15th is Saturday
+			expected: time.Date(2024, 6, 14, 12, 0, 0, 0, time.UTC),
+		},
+		{
+			// 15W when 15th is Sunday - should be Monday 16th
+			name:     "15W on Sunday",
+			expr:     "0 12 15W * *",
+			start:    time.Date(2024, 9, 1, 0, 0, 0, 0, time.UTC), // Sep 2024, 15th is Sunday
+			expected: time.Date(2024, 9, 16, 12, 0, 0, 0, time.UTC),
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sched, err := parser.Parse(tc.expr)
+			if err != nil {
+				t.Fatalf("parse error: %v", err)
+			}
+			next := sched.Next(tc.start)
+			if !next.Equal(tc.expected) {
+				t.Errorf("%s: expected %v, got %v", tc.name, tc.expected, next)
+			}
+		})
+	}
+}
+
+func TestExtendedDomLastWeekdayScheduling(t *testing.T) {
+	parser := NewParser(Minute | Hour | Dom | Month | Dow | DomW)
+
+	// LW - last weekday of month
+	sched, err := parser.Parse("0 12 LW * *")
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+
+	tests := []struct {
+		name     string
+		start    time.Time
+		expected time.Time
+	}{
+		{
+			// Jan 2024 ends on Wednesday (31st)
+			name:     "Jan 2024 ends on Wednesday",
+			start:    time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC),
+			expected: time.Date(2024, 1, 31, 12, 0, 0, 0, time.UTC),
+		},
+		{
+			// Feb 2024 ends on Thursday (29th - leap year)
+			name:     "Feb 2024 ends on Thursday",
+			start:    time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC),
+			expected: time.Date(2024, 2, 29, 12, 0, 0, 0, time.UTC),
+		},
+		{
+			// March 2024 ends on Sunday (31st), last weekday is Friday 29th
+			name:     "March 2024 ends on Sunday",
+			start:    time.Date(2024, 3, 1, 0, 0, 0, 0, time.UTC),
+			expected: time.Date(2024, 3, 29, 12, 0, 0, 0, time.UTC),
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			next := sched.Next(tc.start)
+			if !next.Equal(tc.expected) {
+				t.Errorf("%s: expected %v, got %v (weekday: %v)", tc.name, tc.expected, next, next.Weekday())
+			}
+		})
 	}
 }

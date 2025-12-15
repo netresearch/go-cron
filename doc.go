@@ -105,6 +105,69 @@ Question mark ( ? )
 Question mark may be used instead of '*' for leaving either day-of-month or
 day-of-week blank.
 
+# Extended Syntax (Optional)
+
+The following extended syntax is available when enabled via parser options.
+These provide Quartz/Jenkins-style cron expression features.
+
+To enable extended syntax, use the Extended parser option:
+
+	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Extended)
+	c := cron.New(cron.WithParser(parser))
+
+Or enable individual features:
+
+	// Enable only L syntax for last day of month
+	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.DomL)
+
+	// Enable nth weekday syntax (#n)
+	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.DowNth)
+
+Hash-Number ( #n ) - Day of Week Field
+
+Used in the day-of-week field to specify the nth occurrence of a weekday in a month.
+Requires DowNth option to be enabled.
+
+	FRI#3    - Third Friday of every month
+	MON#1    - First Monday of every month
+	0#2      - Second Sunday of every month
+
+Hash-L ( #L ) - Day of Week Field
+
+Used in the day-of-week field to specify the last occurrence of a weekday in a month.
+Requires DowLast option to be enabled.
+
+	FRI#L    - Last Friday of every month
+	SUN#L    - Last Sunday of every month
+	1#L      - Last Monday of every month
+
+# L ( L ) - Day of Month Field
+
+Specifies the last day of the month. Requires DomL option to be enabled.
+
+	L        - Last day of every month (Jan 31, Feb 28/29, etc.)
+	L-3      - Third from last day of month
+	L-1      - Second to last day of month
+
+# W ( W ) - Day of Month Field
+
+Specifies the nearest weekday to a given day. Requires DomW option to be enabled.
+The nearest weekday stays within the same month (won't cross month boundaries).
+
+	15W      - Nearest weekday to the 15th
+	1W       - Nearest weekday to the 1st (could be Mon/Tue/Wed if 1st is weekend)
+	LW       - Last weekday of the month
+
+Combined Examples
+
+	0 12 L * *        - Noon on the last day of every month
+	0 12 L-3 * *      - Noon on the third from last day of every month
+	0 12 LW * *       - Noon on the last weekday of every month
+	0 12 15W * *      - Noon on the nearest weekday to the 15th
+	0 12 * * FRI#3    - Noon on the third Friday of every month
+	0 12 * * MON#L    - Noon on the last Monday of every month
+	0 12 1,15,L * *   - Noon on the 1st, 15th, and last day of every month
+
 # Predefined schedules
 
 You may use one of several pre-defined schedules in place of a cron expression.

@@ -1207,3 +1207,117 @@ func ExampleJitterWithLogger() {
 	defer c.Stop()
 	// Output:
 }
+
+// This example demonstrates using Extended parser option for Quartz/Jenkins-style syntax.
+// The Extended flag enables all extended cron syntax: #n, #L, L, L-n, nW, LW.
+func ExampleExtended() {
+	// Create parser with extended syntax support
+	parser := cron.NewParser(
+		cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor | cron.Extended,
+	)
+
+	c := cron.New(cron.WithParser(parser))
+
+	// Run on the 3rd Friday of every month at noon
+	c.AddFunc("0 12 * * FRI#3", func() {
+		fmt.Println("Third Friday of the month")
+	})
+
+	// Run on the last Friday of every month at noon
+	c.AddFunc("0 12 * * FRI#L", func() {
+		fmt.Println("Last Friday of the month")
+	})
+
+	// Run on the last day of every month at midnight
+	c.AddFunc("0 0 L * *", func() {
+		fmt.Println("Last day of the month")
+	})
+
+	// Run on the nearest weekday to the 15th at noon
+	c.AddFunc("0 12 15W * *", func() {
+		fmt.Println("Nearest weekday to the 15th")
+	})
+
+	// Run on the last weekday of every month at 5pm
+	c.AddFunc("0 17 LW * *", func() {
+		fmt.Println("Last weekday of the month")
+	})
+
+	c.Start()
+	defer c.Stop()
+	// Output:
+}
+
+// This example demonstrates using individual extended syntax options
+// when you only need specific features.
+func ExampleDowNth() {
+	// Enable only the #n syntax for nth weekday of month
+	parser := cron.NewParser(
+		cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.DowNth,
+	)
+
+	c := cron.New(cron.WithParser(parser))
+
+	// First Monday of every month - often used for monthly meetings
+	c.AddFunc("0 9 * * MON#1", func() {
+		fmt.Println("Monthly meeting - first Monday")
+	})
+
+	// Second Tuesday - Patch Tuesday (Microsoft)
+	c.AddFunc("0 3 * * TUE#2", func() {
+		fmt.Println("Patch Tuesday maintenance")
+	})
+
+	c.Start()
+	defer c.Stop()
+	// Output:
+}
+
+// This example demonstrates the DomL option for last-day-of-month scheduling.
+func ExampleDomL() {
+	// Enable L syntax for last day of month
+	parser := cron.NewParser(
+		cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.DomL,
+	)
+
+	c := cron.New(cron.WithParser(parser))
+
+	// Monthly billing run on last day
+	c.AddFunc("0 23 L * *", func() {
+		fmt.Println("End of month billing")
+	})
+
+	// Reports due 3 days before month end
+	c.AddFunc("0 17 L-3 * *", func() {
+		fmt.Println("Reports due reminder")
+	})
+
+	c.Start()
+	defer c.Stop()
+	// Output:
+}
+
+// This example demonstrates the DomW option for weekday-relative scheduling.
+func ExampleDomW() {
+	// Enable W syntax for nearest weekday scheduling
+	parser := cron.NewParser(
+		cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.DomW,
+	)
+
+	c := cron.New(cron.WithParser(parser))
+
+	// Pay day on nearest weekday to the 15th and last day
+	// (handles weekends by moving to nearest weekday)
+	c.AddFunc("0 12 15W * *", func() {
+		fmt.Println("Mid-month pay day")
+	})
+
+	// Last business day of the month
+	c.AddFunc("0 17 LW * *", func() {
+		fmt.Println("Last business day")
+	})
+
+	c.Start()
+	defer c.Stop()
+	// Output:
+}

@@ -19,6 +19,43 @@ type SpecSchedule struct {
 	// before giving up and returning zero time. This prevents infinite loops
 	// for unsatisfiable schedules (e.g., Feb 30). Zero means use the default (5 years).
 	MaxSearchYears int
+
+	// DomConstraints holds dynamic day-of-month constraints that cannot be
+	// pre-computed into bitmasks (L, L-n, LW, nW). These are evaluated at
+	// match time because they depend on the specific month.
+	DomConstraints []DomConstraint
+
+	// DowConstraints holds nth-weekday-of-month constraints (e.g., FRI#3, MON#L).
+	// These are evaluated at match time because they depend on which dates
+	// fall on which weekdays in the specific month.
+	DowConstraints []DowConstraint
+}
+
+// DomConstraintType identifies the type of day-of-month constraint.
+type DomConstraintType uint8
+
+const (
+	// DomLast represents 'L' - the last day of the month.
+	DomLast DomConstraintType = iota
+	// DomLastOffset represents 'L-n' - n days before the last day of month.
+	DomLastOffset
+	// DomLastWeekday represents 'LW' - the last weekday (Mon-Fri) of month.
+	DomLastWeekday
+	// DomNearestWeekday represents 'nW' - the nearest weekday to day n.
+	DomNearestWeekday
+)
+
+// DomConstraint represents a dynamic day-of-month constraint.
+type DomConstraint struct {
+	Type DomConstraintType
+	N    int // For DomLastOffset: offset; for DomNearestWeekday: day number
+}
+
+// DowConstraint represents an nth-weekday-of-month constraint.
+// For example, FRI#3 means "3rd Friday of the month".
+type DowConstraint struct {
+	Weekday int // 0-6 (Sunday=0, Saturday=6)
+	N       int // 1-5 for nth occurrence, -1 for last occurrence
 }
 
 // bounds provides a range of acceptable values (plus a map of name to value).
@@ -95,6 +132,125 @@ func NormalizeDOW(bits uint64) uint64 {
 		bits = (bits | 1) &^ dowBit7 // Set bit 0, clear bit 7
 	}
 	return bits
+}
+
+// lastDayOfMonth returns the last day of the month for the given time.
+func lastDayOfMonth(t time.Time) int {
+	// Go to first day of next month, then back one day
+	return time.Date(t.Year(), t.Month()+1, 0, 0, 0, 0, 0, t.Location()).Day()
+}
+
+// weekdayOccurrence returns which occurrence (1-5) of the weekday this date
+// represents within its month. For example, if t is the 3rd Friday of the month,
+// this returns 3.
+func weekdayOccurrence(t time.Time) int {
+	return (t.Day()-1)/7 + 1
+}
+
+// isLastOccurrence returns true if this is the last occurrence of the given
+// weekday in the month. For example, if t is a Friday and there are no more
+// Fridays in the month, this returns true.
+func isLastOccurrence(t time.Time) bool {
+	return t.Day()+7 > lastDayOfMonth(t)
+}
+
+// nearestWeekday returns the day of month that is the nearest weekday to the
+// given target day. If the target is a weekday, returns the target.
+// If Saturday, returns Friday (or Monday if that would go to previous month).
+// If Sunday, returns Monday (or Friday if that would go to next month).
+func nearestWeekday(year int, month time.Month, targetDay int, loc *time.Location) int {
+	t := time.Date(year, month, targetDay, 12, 0, 0, 0, loc)
+	lastDay := lastDayOfMonth(t)
+
+	// Clamp target to valid range
+	if targetDay > lastDay {
+		targetDay = lastDay
+		t = time.Date(year, month, targetDay, 12, 0, 0, 0, loc)
+	}
+
+	wd := t.Weekday()
+	switch wd {
+	case time.Saturday:
+		// Try Friday first
+		if targetDay > 1 {
+			return targetDay - 1
+		}
+		// If target is 1st (Saturday), use Monday the 3rd
+		return targetDay + 2
+	case time.Sunday:
+		// Try Monday first
+		if targetDay < lastDay {
+			return targetDay + 1
+		}
+		// If target is last day (Sunday), use Friday before
+		return targetDay - 2
+	default:
+		return targetDay
+	}
+}
+
+// lastWeekdayOfMonth returns the day of month that is the last weekday (Mon-Fri).
+func lastWeekdayOfMonth(year int, month time.Month, loc *time.Location) int {
+	lastDay := time.Date(year, month+1, 0, 12, 0, 0, 0, loc).Day()
+	t := time.Date(year, month, lastDay, 12, 0, 0, 0, loc)
+	wd := t.Weekday()
+	switch wd {
+	case time.Saturday:
+		return lastDay - 1
+	case time.Sunday:
+		return lastDay - 2
+	default:
+		return lastDay
+	}
+}
+
+// domConstraintMatches checks if any of the DOM constraints match the given time.
+func domConstraintMatches(constraints []DomConstraint, t time.Time) bool {
+	day := t.Day()
+	for _, c := range constraints {
+		switch c.Type {
+		case DomLast:
+			if day == lastDayOfMonth(t) {
+				return true
+			}
+		case DomLastOffset:
+			if day == lastDayOfMonth(t)-c.N {
+				return true
+			}
+		case DomLastWeekday:
+			if day == lastWeekdayOfMonth(t.Year(), t.Month(), t.Location()) {
+				return true
+			}
+		case DomNearestWeekday:
+			if day == nearestWeekday(t.Year(), t.Month(), c.N, t.Location()) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// dowConstraintMatches checks if any of the DOW constraints match the given time.
+func dowConstraintMatches(constraints []DowConstraint, t time.Time) bool {
+	wd := int(t.Weekday())
+	occ := weekdayOccurrence(t)
+	isLast := isLastOccurrence(t)
+
+	for _, c := range constraints {
+		if c.Weekday != wd {
+			continue
+		}
+		switch c.N {
+		case -1:
+			// Last occurrence
+			if isLast {
+				return true
+			}
+		case occ:
+			return true
+		}
+	}
+	return false
 }
 
 // advanceMinute advances time until the minute field matches the schedule bitmask.
@@ -303,6 +459,15 @@ func dayMatches(s *SpecSchedule, t time.Time) bool {
 		domMatch = 1<<uint(t.Day())&s.Dom > 0
 		dowMatch = 1<<uint(t.Weekday())&s.Dow > 0
 	)
+
+	// Check dynamic constraints (L, W, #n patterns)
+	if len(s.DomConstraints) > 0 && domConstraintMatches(s.DomConstraints, t) {
+		domMatch = true
+	}
+	if len(s.DowConstraints) > 0 && dowConstraintMatches(s.DowConstraints, t) {
+		dowMatch = true
+	}
+
 	if s.Dom&starBit > 0 || s.Dow&starBit > 0 {
 		return domMatch && dowMatch
 	}
