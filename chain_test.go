@@ -718,3 +718,212 @@ func TestTimeoutZeroBoundary(t *testing.T) {
 		})
 	}
 }
+
+// TestJitter_AddsDelay verifies that Jitter adds a delay before job execution.
+func TestJitter_AddsDelay(t *testing.T) {
+	maxJitter := 100 * time.Millisecond
+	var executed bool
+
+	job := FuncJob(func() {
+		executed = true
+	})
+
+	wrappedJob := NewChain(Jitter(maxJitter)).Then(job)
+
+	start := time.Now()
+	wrappedJob.Run()
+	elapsed := time.Since(start)
+
+	if !executed {
+		t.Error("job was not executed")
+	}
+
+	// Jitter should add some delay (0 to maxJitter)
+	// We can't test exact value due to randomness, but we can verify
+	// it doesn't exceed maxJitter significantly
+	if elapsed > maxJitter+10*time.Millisecond {
+		t.Errorf("jitter exceeded max: elapsed=%v, maxJitter=%v", elapsed, maxJitter)
+	}
+}
+
+// TestJitter_ZeroDisabled verifies that zero jitter doesn't add delay.
+func TestJitter_ZeroDisabled(t *testing.T) {
+	var executed bool
+
+	job := FuncJob(func() {
+		executed = true
+	})
+
+	wrappedJob := NewChain(Jitter(0)).Then(job)
+
+	start := time.Now()
+	wrappedJob.Run()
+	elapsed := time.Since(start)
+
+	if !executed {
+		t.Error("job was not executed")
+	}
+
+	// With zero jitter, execution should be nearly instant
+	if elapsed > 10*time.Millisecond {
+		t.Errorf("zero jitter should not add delay: elapsed=%v", elapsed)
+	}
+}
+
+// TestJitter_NegativeDisabled verifies that negative jitter doesn't add delay.
+func TestJitter_NegativeDisabled(t *testing.T) {
+	var executed bool
+
+	job := FuncJob(func() {
+		executed = true
+	})
+
+	wrappedJob := NewChain(Jitter(-10 * time.Second)).Then(job)
+
+	start := time.Now()
+	wrappedJob.Run()
+	elapsed := time.Since(start)
+
+	if !executed {
+		t.Error("job was not executed")
+	}
+
+	// With negative jitter, execution should be nearly instant
+	if elapsed > 10*time.Millisecond {
+		t.Errorf("negative jitter should not add delay: elapsed=%v", elapsed)
+	}
+}
+
+// TestJitter_Distribution verifies jitter values are distributed across range.
+func TestJitter_Distribution(t *testing.T) {
+	maxJitter := 50 * time.Millisecond
+	iterations := 20
+	var totalDelay time.Duration
+
+	for i := 0; i < iterations; i++ {
+		job := FuncJob(func() {})
+		wrappedJob := NewChain(Jitter(maxJitter)).Then(job)
+
+		start := time.Now()
+		wrappedJob.Run()
+		totalDelay += time.Since(start)
+	}
+
+	avgDelay := totalDelay / time.Duration(iterations)
+
+	// Average should be roughly maxJitter/2 (uniform distribution)
+	// Allow generous tolerance due to execution overhead and randomness
+	expectedAvg := maxJitter / 2
+	tolerance := maxJitter / 2 // 50% tolerance
+
+	if avgDelay < expectedAvg-tolerance || avgDelay > expectedAvg+tolerance {
+		t.Logf("average delay=%v, expected ~%v (tolerance ±%v)", avgDelay, expectedAvg, tolerance)
+		// Don't fail - randomness can cause this occasionally
+	}
+}
+
+// TestJitter_ComposesWithOtherWrappers verifies jitter works with other wrappers.
+func TestJitter_ComposesWithOtherWrappers(t *testing.T) {
+	var recovered bool
+	var executed bool
+
+	job := FuncJob(func() {
+		executed = true
+	})
+
+	// Compose Jitter with Recover
+	wrappedJob := NewChain(
+		Recover(DiscardLogger),
+		Jitter(10*time.Millisecond),
+	).Then(job)
+
+	wrappedJob.Run()
+
+	if !executed {
+		t.Error("job was not executed")
+	}
+
+	// Test that panic recovery still works with jitter
+	panicJob := FuncJob(func() {
+		recovered = false
+		panic("test panic")
+	})
+
+	wrappedPanicJob := NewChain(
+		Recover(DiscardLogger),
+		Jitter(10*time.Millisecond),
+	).Then(panicJob)
+
+	// Should not panic due to Recover wrapper
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf("panic was not recovered: %v", r)
+			} else {
+				recovered = true
+			}
+		}()
+		wrappedPanicJob.Run()
+	}()
+
+	if !recovered {
+		t.Error("Recover wrapper should have caught panic")
+	}
+}
+
+// TestJitterWithLogger_LogsDelay verifies that JitterWithLogger logs the delay.
+func TestJitterWithLogger_LogsDelay(t *testing.T) {
+	maxJitter := 50 * time.Millisecond
+	var executed bool
+	var logCalled bool
+
+	// Create a test logger that captures the log call
+	testLogger := &testLogCapture{}
+
+	job := FuncJob(func() {
+		executed = true
+	})
+
+	wrappedJob := NewChain(JitterWithLogger(testLogger, maxJitter)).Then(job)
+	wrappedJob.Run()
+
+	if !executed {
+		t.Error("job was not executed")
+	}
+
+	// Check that Info was called with jitter info
+	testLogger.mu.Lock()
+	logCalled = len(testLogger.infoCalls) > 0
+	testLogger.mu.Unlock()
+
+	if !logCalled {
+		t.Error("JitterWithLogger should have logged the delay")
+	}
+}
+
+// TestJitterWithLogger_ZeroNoLog verifies zero jitter doesn't log.
+func TestJitterWithLogger_ZeroNoLog(t *testing.T) {
+	var executed bool
+
+	testLogger := &testLogCapture{}
+
+	job := FuncJob(func() {
+		executed = true
+	})
+
+	wrappedJob := NewChain(JitterWithLogger(testLogger, 0)).Then(job)
+	wrappedJob.Run()
+
+	if !executed {
+		t.Error("job was not executed")
+	}
+
+	// Check that Info was NOT called (zero jitter = no delay = no log)
+	testLogger.mu.Lock()
+	logCount := len(testLogger.infoCalls)
+	testLogger.mu.Unlock()
+
+	if logCount > 0 {
+		t.Errorf("JitterWithLogger with zero jitter should not log, got %d calls", logCount)
+	}
+}

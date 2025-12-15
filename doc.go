@@ -251,6 +251,7 @@ to achieve the following effects:
   - Delay a job's execution if the previous run hasn't completed yet
   - Skip a job's execution if the previous run hasn't completed yet
   - Log each job's invocations
+  - Add random delay (jitter) to prevent thundering herd
 
 Install wrappers for all jobs added to a cron using the `cron.WithChain` option:
 
@@ -312,6 +313,7 @@ Available Wrappers:
   - TimeoutWithContext: True cancellation via context
   - RetryWithBackoff: Retry panicking jobs with exponential backoff
   - CircuitBreaker: Stop execution after consecutive failures
+  - Jitter: Add random delay to prevent thundering herd
 
 # Timeout Wrapper Caveats
 
