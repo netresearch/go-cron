@@ -888,7 +888,11 @@ func parseDowConstraint(expr string, idx int, r bounds, allowNth, allowLast bool
 		n = int(nth)
 	}
 
-	// #nosec G115 -- weekday is validated to be in range [0,6]
+	// Normalize weekday 7 (Sunday as 7) to 0 (Sunday as 0) for consistency with time.Weekday()
+	if weekday == 7 {
+		weekday = 0
+	}
+	// #nosec G115 -- weekday is validated to be in range [0,7] and normalized to [0,6]
 	return DowConstraint{Weekday: int(weekday), N: n}, nil
 }
 

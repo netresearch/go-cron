@@ -1057,6 +1057,17 @@ func TestExtendedDowLast(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "7#L - last Sunday (Sunday as 7, normalized to 0)",
+			expr: "0 0 * * 7#L",
+			checkFn: func(t *testing.T, s *SpecSchedule) {
+				c := s.DowConstraints[0]
+				// Weekday 7 should be normalized to 0 (Sunday)
+				if c.Weekday != 0 || c.N != -1 {
+					t.Errorf("expected 7#L normalized to weekday=0, got weekday=%d n=%d", c.Weekday, c.N)
+				}
+			},
+		},
 	}
 
 	for _, tc := range tests {
