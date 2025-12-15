@@ -107,10 +107,24 @@ type Schedule interface {
 	// Next returns the next activation time, later than the given time.
 	// Next is invoked initially, and then each time the job is run.
 	Next(time.Time) time.Time
+}
 
+// ScheduleWithPrev is an optional interface that schedules can implement
+// to support backward time traversal. This is useful for detecting missed
+// executions or determining the last scheduled run time.
+//
+// Built-in schedules (SpecSchedule, ConstantDelaySchedule) implement this
+// interface. Custom Schedule implementations may optionally implement it.
+//
+// Use type assertion to check for support:
+//
+//	if sp, ok := schedule.(ScheduleWithPrev); ok {
+//	    prev := sp.Prev(time.Now())
+//	}
+type ScheduleWithPrev interface {
+	Schedule
 	// Prev returns the previous activation time, earlier than the given time.
-	// This is useful for detecting missed executions or determining the last
-	// scheduled run time. Returns zero time if no previous time can be found.
+	// Returns zero time if no previous time can be found.
 	Prev(time.Time) time.Time
 }
 

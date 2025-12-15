@@ -780,24 +780,27 @@ func ExampleTimeoutWithContext() {
 	// Output:
 }
 
-// This example demonstrates using Schedule.Prev() to find the previous execution time.
+// This example demonstrates using ScheduleWithPrev.Prev() to find the previous execution time.
 // This is useful for detecting missed executions or determining when a job last ran.
-func ExampleSpecSchedule_Prev() {
+func ExampleScheduleWithPrev_Prev() {
 	// Parse a schedule that runs at 9 AM on weekdays
 	schedule, err := cron.ParseStandard("0 9 * * MON-FRI")
 	if err != nil {
 		log.Fatal(err)
 	}
 
+	// Type assert to ScheduleWithPrev to access Prev()
+	sp := schedule.(cron.ScheduleWithPrev)
+
 	// Find the previous execution time from a given point
 	// Starting from Wednesday at noon
 	now := time.Date(2025, 1, 8, 12, 0, 0, 0, time.UTC) // Wednesday
 
-	prev := schedule.Prev(now)
+	prev := sp.Prev(now)
 	fmt.Printf("Previous run: %s at %s\n", prev.Format("Mon"), prev.Format("15:04"))
 
 	// Can chain to find earlier executions
-	prev2 := schedule.Prev(prev)
+	prev2 := sp.Prev(prev)
 	fmt.Printf("Before that: %s at %s\n", prev2.Format("Mon"), prev2.Format("15:04"))
 	// Output:
 	// Previous run: Wed at 09:00
@@ -807,22 +810,25 @@ func ExampleSpecSchedule_Prev() {
 // This example demonstrates using Prev() to detect missed job executions.
 // By comparing Prev() to the last known run time, you can determine if
 // any scheduled executions were missed.
-func ExampleSpecSchedule_Prev_detectMissed() {
+func ExampleScheduleWithPrev_Prev_detectMissed() {
 	schedule, _ := cron.ParseStandard("0 * * * *") // Every hour
+
+	// Type assert to ScheduleWithPrev to access Prev()
+	sp := schedule.(cron.ScheduleWithPrev)
 
 	// Simulate: job was last run at 10:00, it's now 14:30
 	lastRun := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
 	now := time.Date(2025, 1, 1, 14, 30, 0, 0, time.UTC)
 
 	// Find when the job should have last run
-	shouldHaveRun := schedule.Prev(now)
+	shouldHaveRun := sp.Prev(now)
 
 	if shouldHaveRun.After(lastRun) {
 		// Count missed executions
 		missed := 0
 		checkTime := now
 		for {
-			prev := schedule.Prev(checkTime)
+			prev := sp.Prev(checkTime)
 			if !prev.After(lastRun) {
 				break
 			}
@@ -839,8 +845,11 @@ func ExampleSpecSchedule_Prev_detectMissed() {
 
 // This example demonstrates the symmetry between Next() and Prev().
 // For any time t where schedule.Next(t) returns n, schedule.Prev(n + 1 second) returns n.
-func ExampleSpecSchedule_Prev_symmetry() {
+func ExampleScheduleWithPrev_Prev_symmetry() {
 	schedule, _ := cron.ParseStandard("30 9 * * *") // Daily at 9:30
+
+	// Type assert to ScheduleWithPrev to access Prev()
+	sp := schedule.(cron.ScheduleWithPrev)
 
 	// Start from Monday midnight
 	start := time.Date(2025, 1, 6, 0, 0, 0, 0, time.UTC) // Monday
@@ -850,7 +859,7 @@ func ExampleSpecSchedule_Prev_symmetry() {
 	fmt.Printf("Next: %s\n", next.Format("Mon 15:04"))
 
 	// Get prev from just after that time - should return the same time
-	prev := schedule.Prev(next.Add(time.Second))
+	prev := sp.Prev(next.Add(time.Second))
 	fmt.Printf("Prev: %s\n", prev.Format("Mon 15:04"))
 
 	fmt.Printf("Symmetric: %v\n", next.Equal(prev))

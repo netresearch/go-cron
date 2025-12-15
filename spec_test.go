@@ -559,7 +559,7 @@ func TestPrev(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			actual := sched.Prev(getTime(c.time))
+			actual := sched.(ScheduleWithPrev).Prev(getTime(c.time))
 			expected := getTime(c.expected)
 			if !actual.Equal(expected) {
 				t.Errorf("%s, \"%s\": (expected) %v != %v (actual)", c.time, c.spec, expected, actual)
@@ -587,7 +587,7 @@ func TestPrevWithTz(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			actual := sched.Prev(getTimeTZ(c.time))
+			actual := sched.(ScheduleWithPrev).Prev(getTimeTZ(c.time))
 			expected := getTimeTZ(c.expected)
 			if !actual.Equal(expected) {
 				t.Errorf("%s, \"%s\": (expected) %v != %v (actual)", c.time, c.spec, expected, actual)
@@ -603,7 +603,7 @@ func TestPrevUnsatisfiable(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
-	result := sched.Prev(now)
+	result := sched.(ScheduleWithPrev).Prev(now)
 	if !result.IsZero() {
 		t.Errorf("Expected zero time for unsatisfiable schedule, got %v", result)
 	}
@@ -640,7 +640,7 @@ func TestPrevAndNextSymmetry(t *testing.T) {
 			}
 
 			// Prev from just after the scheduled time should return the scheduled time
-			prevTime := sched.Prev(scheduledTime.Add(time.Second))
+			prevTime := sched.(ScheduleWithPrev).Prev(scheduledTime.Add(time.Second))
 			if !prevTime.Equal(scheduledTime) {
 				t.Errorf("Prev(Next(t)+1s) = %v, want %v", prevTime, scheduledTime)
 			}

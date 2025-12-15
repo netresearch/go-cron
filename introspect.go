@@ -153,7 +153,7 @@ func CountWithLimit(schedule Schedule, start, end time.Time, limit int) int {
 // For minute-level schedules, seconds and nanoseconds in t are ignored.
 // For second-level schedules, nanoseconds are ignored.
 //
-// Returns false if schedule is nil.
+// Returns false if schedule is nil or doesn't implement ScheduleWithPrev.
 //
 // Example:
 //
@@ -166,13 +166,19 @@ func Matches(schedule Schedule, t time.Time) bool {
 		return false
 	}
 
+	// Matches requires Prev() support
+	sp, ok := schedule.(ScheduleWithPrev)
+	if !ok {
+		return false
+	}
+
 	// Use Prev to find the most recent scheduled time at or before t,
 	// then check if it equals t (ignoring sub-second precision).
 	//
 	// We need to check from a point slightly after t to catch exact matches.
 	// Add 1 second to ensure we catch the current time if it's a match.
 	checkTime := t.Add(time.Second)
-	prev := schedule.Prev(checkTime)
+	prev := sp.Prev(checkTime)
 
 	if prev.IsZero() {
 		return false

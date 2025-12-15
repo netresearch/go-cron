@@ -269,7 +269,7 @@ func TestYearFieldSchedulePrev(t *testing.T) {
 				t.Fatalf("Parse(%q) error = %v", tt.spec, err)
 			}
 
-			prev := schedule.Prev(tt.from)
+			prev := schedule.(ScheduleWithPrev).Prev(tt.from)
 			if tt.wantZero {
 				if !prev.IsZero() {
 					t.Errorf("Prev(%v) = %v, want zero time", tt.from, prev)
@@ -404,7 +404,7 @@ func TestYearFieldConcurrent(t *testing.T) {
 				if next.IsZero() {
 					t.Error("Next returned zero")
 				}
-				prev := schedule.Prev(from.Add(24 * time.Hour))
+				prev := schedule.(ScheduleWithPrev).Prev(from.Add(24 * time.Hour))
 				if prev.IsZero() {
 					t.Error("Prev returned zero")
 				}
