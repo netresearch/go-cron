@@ -529,7 +529,7 @@ func (p Parser) parseDomField(fieldStr string, hashEnabled bool) (uint64, []DomC
 	case (allowL || allowW) && hasSpecial:
 		return getDomFieldWithConstraints(fieldStr, dom, allowL, allowW, p.hashKey, hashEnabled)
 	case hasSpecial:
-		return 0, nil, errors.New("L/W syntax requires DomL or DomW option to be enabled")
+		return 0, nil, errors.New("extended day-of-month syntax requires DomL option (for L, L-n) or DomW option (for nW, LW) to be enabled")
 	default:
 		bits, err := getFieldWithHash(fieldStr, dom, p.hashKey, hashEnabled)
 		return bits, nil, err

@@ -1306,18 +1306,57 @@ func ExampleDomW() {
 
 	c := cron.New(cron.WithParser(parser))
 
-	// Pay day on nearest weekday to the 15th and last day
-	// (handles weekends by moving to nearest weekday)
+	// Pay day on nearest weekday to the 15th
+	// 15W works every month (all months have 15 days)
+	// If 15th is Saturday → Friday 14th; if Sunday → Monday 16th
 	c.AddFunc("0 12 15W * *", func() {
 		fmt.Println("Mid-month pay day")
 	})
 
-	// Last business day of the month
+	// Last business day of the month - use LW for every-month execution
+	// LW = Last Weekday (always runs, regardless of month length)
 	c.AddFunc("0 17 LW * *", func() {
 		fmt.Println("Last business day")
+	})
+
+	// IMPORTANT: 31W only runs in months with 31 days!
+	// It skips Feb, Apr, Jun, Sep, Nov (no 31st exists)
+	// Use LW instead if you want every-month execution.
+	c.AddFunc("0 9 31W * *", func() {
+		fmt.Println("31st weekday (7 months/year only)")
 	})
 
 	c.Start()
 	defer c.Stop()
 	// Output:
+}
+
+// This example demonstrates the difference between 31W and LW.
+// 31W skips months without a 31st day; LW runs every month.
+func ExampleDomW_lastWeekday() {
+	parser := cron.NewParser(
+		cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.DomW,
+	)
+
+	// Schedule with 31W - only runs in 31-day months
+	sched31W, _ := parser.Parse("0 12 31W * *")
+
+	// Schedule with LW - runs every month
+	schedLW, _ := parser.Parse("0 12 LW * *")
+
+	// Starting from February 1, 2024
+	start := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
+
+	// 31W skips February (no 31st) → runs March 29, 2024
+	// (March 31 is Sunday, nearest weekday is Friday 29th)
+	next31W := sched31W.Next(start)
+	fmt.Printf("31W from Feb 1: %s %d\n", next31W.Month(), next31W.Day())
+
+	// LW runs in February → Feb 29, 2024 (Thursday, last weekday)
+	nextLW := schedLW.Next(start)
+	fmt.Printf("LW from Feb 1: %s %d\n", nextLW.Month(), nextLW.Day())
+
+	// Output:
+	// 31W from Feb 1: March 29
+	// LW from Feb 1: February 29
 }
