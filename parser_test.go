@@ -1549,3 +1549,110 @@ func TestExtendedDomLastWeekdayScheduling(t *testing.T) {
 		})
 	}
 }
+
+func TestExtendedEdgeCases(t *testing.T) {
+	t.Run("31W in February - skip month (no day 31)", func(t *testing.T) {
+		// 31W in February: Feb only has 28/29 days, no day 31 exists
+		// Behavior: skip February, run in next month that has a 31st
+		// Use LW instead if you want "last weekday of every month"
+		parser := NewParser(Minute | Hour | Dom | Month | Dow | DomW)
+		sched, err := parser.Parse("0 12 31W * *")
+		if err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+
+		// Start in February 2024 - should skip to March
+		start := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
+		next := sched.Next(start)
+
+		// Feb has no 31st → skip to March
+		// March 31, 2024 is Sunday → nearest weekday is Friday March 29
+		// (Monday would be April 1, which crosses month boundary, so Friday is chosen)
+		expected := time.Date(2024, 3, 29, 12, 0, 0, 0, time.UTC)
+		if !next.Equal(expected) {
+			t.Errorf("31W from Feb: expected %v (March 29), got %v", expected, next)
+		}
+	})
+
+	t.Run("L-30 in February - large offset produces no match", func(t *testing.T) {
+		// L-30 means "30 days before last day of month"
+		// In February (28 days): 28 - 30 = -2 (invalid, no match)
+		// Schedule should skip to March
+		parser := NewParser(Minute | Hour | Dom | Month | Dow | DomL)
+		sched, err := parser.Parse("0 12 L-30 * *")
+		if err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+
+		// Start in February 2024
+		start := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
+		next := sched.Next(start)
+
+		// Feb has 29 days in 2024: L-30 = 29-30 = -1 (no match)
+		// March has 31 days: L-30 = 31-30 = 1 (March 1st)
+		expected := time.Date(2024, 3, 1, 12, 0, 0, 0, time.UTC)
+		if !next.Equal(expected) {
+			t.Errorf("L-30 from Feb: expected %v (March 1), got %v", expected, next)
+		}
+	})
+
+	t.Run("FRI#5 in month with only 4 Fridays", func(t *testing.T) {
+		// February 2024 has only 4 Fridays (2nd, 9th, 16th, 23rd)
+		// FRI#5 should not match in February, should skip to a month with 5 Fridays
+		parser := NewParser(Minute | Hour | Dom | Month | Dow | DowNth)
+		sched, err := parser.Parse("0 12 * * FRI#5")
+		if err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+
+		// Start in February 2024
+		start := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
+		next := sched.Next(start)
+
+		// Feb 2024 has 4 Fridays, March 2024 has 5 Fridays (1st, 8th, 15th, 22nd, 29th)
+		// 5th Friday of March 2024 is March 29th
+		expected := time.Date(2024, 3, 29, 12, 0, 0, 0, time.UTC)
+		if !next.Equal(expected) {
+			t.Errorf("FRI#5 from Feb 2024: expected %v (5th Friday of March), got %v", expected, next)
+		}
+	})
+
+	t.Run("L-27 boundary - minimum offset that works in all months", func(t *testing.T) {
+		// L-27 in February (28 days): 28-27 = 1 (valid)
+		// This is the largest offset guaranteed to work in all months
+		parser := NewParser(Minute | Hour | Dom | Month | Dow | DomL)
+		sched, err := parser.Parse("0 12 L-27 * *")
+		if err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+
+		// Non-leap year February has 28 days: L-27 = day 1
+		start := time.Date(2023, 2, 1, 0, 0, 0, 0, time.UTC)
+		next := sched.Next(start)
+
+		expected := time.Date(2023, 2, 1, 12, 0, 0, 0, time.UTC)
+		if !next.Equal(expected) {
+			t.Errorf("L-27 in Feb 2023: expected %v, got %v", expected, next)
+		}
+	})
+
+	t.Run("L-28 in non-leap February - no match", func(t *testing.T) {
+		// L-28 in non-leap February (28 days): 28-28 = 0 (invalid day)
+		// Should skip to March
+		parser := NewParser(Minute | Hour | Dom | Month | Dow | DomL)
+		sched, err := parser.Parse("0 12 L-28 * *")
+		if err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+
+		// Non-leap year February 2023 has 28 days: L-28 = 0 (no match)
+		start := time.Date(2023, 2, 1, 0, 0, 0, 0, time.UTC)
+		next := sched.Next(start)
+
+		// March has 31 days: L-28 = 3 (March 3rd)
+		expected := time.Date(2023, 3, 3, 12, 0, 0, 0, time.UTC)
+		if !next.Equal(expected) {
+			t.Errorf("L-28 from Feb 2023: expected %v (March 3), got %v", expected, next)
+		}
+	})
+}

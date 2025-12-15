@@ -158,15 +158,20 @@ func isLastOccurrence(t time.Time) bool {
 // given target day. If the target is a weekday, returns the target.
 // If Saturday, returns Friday (or Monday if that would go to previous month).
 // If Sunday, returns Monday (or Friday if that would go to next month).
+// If targetDay exceeds the month's length, returns -1 (no match).
+// Use LW syntax instead if you want "last weekday of month" semantics.
 func nearestWeekday(year int, month time.Month, targetDay int, loc *time.Location) int {
-	t := time.Date(year, month, targetDay, 12, 0, 0, 0, loc)
-	lastDay := lastDayOfMonth(t)
+	// Calculate lastDay BEFORE creating time with targetDay to avoid Go's date normalization.
+	// Go's time.Date(2024, Feb, 31) normalizes to March 2, corrupting the month context.
+	lastDay := time.Date(year, month+1, 0, 12, 0, 0, 0, loc).Day()
 
-	// Clamp target to valid range
+	// If targetDay doesn't exist in this month, return -1 (no match).
+	// For "last weekday" semantics, use LW instead of 31W.
 	if targetDay > lastDay {
-		targetDay = lastDay
-		t = time.Date(year, month, targetDay, 12, 0, 0, 0, loc)
+		return -1
 	}
+
+	t := time.Date(year, month, targetDay, 12, 0, 0, 0, loc)
 
 	wd := t.Weekday()
 	switch wd {

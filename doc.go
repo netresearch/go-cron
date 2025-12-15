@@ -152,11 +152,23 @@ Specifies the last day of the month. Requires DomL option to be enabled.
 # W ( W ) - Day of Month Field
 
 Specifies the nearest weekday to a given day. Requires DomW option to be enabled.
-The nearest weekday stays within the same month (won't cross month boundaries).
 
 	15W      - Nearest weekday to the 15th
 	1W       - Nearest weekday to the 1st (could be Mon/Tue/Wed if 1st is weekend)
 	LW       - Last weekday of the month
+	31W      - Nearest weekday to the 31st (only runs in 31-day months!)
+
+Important nW Behavior:
+
+  - If the target day doesn't exist (e.g., 31W in February), the month is skipped.
+    Use LW instead if you want "last weekday of every month."
+  - If the target day is a weekend, the nearest weekday within the same month is used
+    (following Quartz behavior - won't cross month boundaries).
+
+Examples:
+  - 31W in February: No day 31 exists → skip to March
+  - 31W in March (31st is Sunday): Uses Friday March 29 (stays in month)
+  - 1W in March (1st is Saturday): Uses Monday March 3 (stays in month)
 
 Combined Examples
 
