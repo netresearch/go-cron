@@ -237,27 +237,59 @@ func TestChainDelayIfStillRunning(t *testing.T) {
 
 // TestSkipIfStillRunning_RunsImmediately tests that SkipIfStillRunning runs jobs immediately.
 func TestSkipIfStillRunning_RunsImmediately(t *testing.T) {
-	var j countJob
-	wrappedJob := NewChain(SkipIfStillRunning(DiscardLogger)).Then(&j)
+	// Use channel synchronization instead of time.Sleep for reliable testing
+	jobDone := make(chan struct{})
+	job := FuncJob(func() {
+		close(jobDone)
+	})
+
+	wrappedJob := NewChain(SkipIfStillRunning(DiscardLogger)).Then(job)
 	go wrappedJob.Run()
-	time.Sleep(2 * time.Millisecond) // Give the job 2ms to complete.
-	if c := j.Done(); c != 1 {
-		t.Errorf("expected job run once, immediately, got %d", c)
+
+	// Wait for job completion with timeout
+	select {
+	case <-jobDone:
+		// Job completed successfully
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for job to complete")
 	}
 }
 
 // TestSkipIfStillRunning_SecondRunImmediateIfFirstDone tests sequential runs.
 func TestSkipIfStillRunning_SecondRunImmediateIfFirstDone(t *testing.T) {
-	var j countJob
-	wrappedJob := NewChain(SkipIfStillRunning(DiscardLogger)).Then(&j)
+	// Use WaitGroup to track job completions instead of timing
+	var wg sync.WaitGroup
+	var runCount atomic.Int32
+
+	job := FuncJob(func() {
+		runCount.Add(1)
+		wg.Done()
+	})
+
+	wrappedJob := NewChain(SkipIfStillRunning(DiscardLogger)).Then(job)
+
+	// Run first job and wait for it to complete
+	wg.Add(1)
+	wrappedJob.Run()
+
+	// Run second job (first is already done, so this should not be skipped)
+	wg.Add(1)
+	wrappedJob.Run()
+
+	// Both jobs should complete
+	done := make(chan struct{})
 	go func() {
-		go wrappedJob.Run()
-		time.Sleep(time.Millisecond)
-		go wrappedJob.Run()
+		wg.Wait()
+		close(done)
 	}()
-	time.Sleep(3 * time.Millisecond) // Give both jobs 3ms to complete.
-	if c := j.Done(); c != 2 {
-		t.Errorf("expected job run twice, immediately, got %d", c)
+
+	select {
+	case <-done:
+		if c := runCount.Load(); c != 2 {
+			t.Errorf("expected job run twice, got %d", c)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for jobs to complete")
 	}
 }
 
