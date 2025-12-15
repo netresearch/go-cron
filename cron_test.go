@@ -927,12 +927,22 @@ func TestStopAndWait_RepeatedCallsWaitingForCompletion(t *testing.T) {
 func TestStopAndWait_BlocksUntilJobCompletes(t *testing.T) {
 	cron := newWithSeconds()
 	var completed atomic.Bool
+	jobStarted := make(chan struct{})
+
 	cron.AddFunc("* * * * * *", func() {
+		close(jobStarted) // Signal that job has started
 		time.Sleep(500 * time.Millisecond)
 		completed.Store(true)
 	})
 	cron.Start()
-	time.Sleep(time.Second) // Wait for job to start running
+
+	// Wait for job to actually start executing (not just scheduled)
+	select {
+	case <-jobStarted:
+		// Job has started
+	case <-time.After(3 * time.Second):
+		t.Fatal("job did not start within timeout")
+	}
 
 	// StopAndWait should block until job completes
 	cron.StopAndWait()
@@ -961,13 +971,22 @@ func TestStopWithTimeout(t *testing.T) {
 	t.Run("job completes within timeout returns true", func(t *testing.T) {
 		cron := newWithSeconds()
 		var jobDone atomic.Bool
+		jobStarted := make(chan struct{})
+
 		cron.AddFunc("* * * * * *", func() {
+			close(jobStarted)
 			// Job takes 200ms
 			time.Sleep(200 * time.Millisecond)
 			jobDone.Store(true)
 		})
 		cron.Start()
-		time.Sleep(time.Second) // Wait for job to start
+
+		// Wait for job to actually start
+		select {
+		case <-jobStarted:
+		case <-time.After(3 * time.Second):
+			t.Fatal("job did not start within timeout")
+		}
 
 		// StopWithTimeout with 1s should succeed
 		result := cron.StopWithTimeout(time.Second)
@@ -982,14 +1001,21 @@ func TestStopWithTimeout(t *testing.T) {
 
 	t.Run("job exceeds timeout returns false", func(t *testing.T) {
 		cron := newWithSeconds()
-		var jobStarted atomic.Bool
+		jobStarted := make(chan struct{})
+
 		cron.AddFunc("* * * * * *", func() {
-			jobStarted.Store(true)
+			close(jobStarted)
 			// Job takes much longer than timeout
 			time.Sleep(2 * time.Second)
 		})
 		cron.Start()
-		time.Sleep(time.Second) // Wait for job to start
+
+		// Wait for job to actually start
+		select {
+		case <-jobStarted:
+		case <-time.After(3 * time.Second):
+			t.Fatal("job did not start within timeout")
+		}
 
 		// StopWithTimeout with 100ms should timeout
 		result := cron.StopWithTimeout(100 * time.Millisecond)
@@ -997,20 +1023,26 @@ func TestStopWithTimeout(t *testing.T) {
 		if result {
 			t.Error("StopWithTimeout returned true, expected false (timeout)")
 		}
-		if !jobStarted.Load() {
-			t.Error("Job did not start")
-		}
 	})
 
 	t.Run("zero timeout waits indefinitely", func(t *testing.T) {
 		cron := newWithSeconds()
 		var jobDone atomic.Bool
+		jobStarted := make(chan struct{})
+
 		cron.AddFunc("* * * * * *", func() {
+			close(jobStarted)
 			time.Sleep(100 * time.Millisecond)
 			jobDone.Store(true)
 		})
 		cron.Start()
-		time.Sleep(time.Second) // Wait for job to start
+
+		// Wait for job to actually start
+		select {
+		case <-jobStarted:
+		case <-time.After(3 * time.Second):
+			t.Fatal("job did not start within timeout")
+		}
 
 		// Zero timeout should wait indefinitely (equivalent to StopAndWait)
 		result := cron.StopWithTimeout(0)
@@ -1026,12 +1058,21 @@ func TestStopWithTimeout(t *testing.T) {
 	t.Run("negative timeout waits indefinitely", func(t *testing.T) {
 		cron := newWithSeconds()
 		var jobDone atomic.Bool
+		jobStarted := make(chan struct{})
+
 		cron.AddFunc("* * * * * *", func() {
+			close(jobStarted)
 			time.Sleep(100 * time.Millisecond)
 			jobDone.Store(true)
 		})
 		cron.Start()
-		time.Sleep(time.Second) // Let job start
+
+		// Wait for job to actually start
+		select {
+		case <-jobStarted:
+		case <-time.After(3 * time.Second):
+			t.Fatal("job did not start within timeout")
+		}
 
 		// Negative timeout should wait indefinitely
 		result := cron.StopWithTimeout(-time.Second)
