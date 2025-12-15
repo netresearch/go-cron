@@ -3,6 +3,7 @@ package cron
 import (
 	"context"
 	"fmt"
+	"math/rand/v2"
 	"runtime"
 	"sync"
 	"time"
@@ -437,5 +438,60 @@ func (t *timeoutContextJob) RunWithContext(ctx context.Context) {
 			// Job didn't finish - abandon it to prevent indefinite blocking
 			t.logger.Info("job abandoned", "timeout", t.timeout, "cleanup_timeout", cleanupTimeout)
 		}
+	}
+}
+
+// Jitter adds a random delay before job execution to prevent thundering herd.
+// When many jobs are scheduled at the same time (e.g., @hourly), they would
+// all execute simultaneously, causing database connection spikes, API rate
+// limiting, and resource contention. Jitter spreads out the execution times.
+//
+// The delay is uniformly distributed in the range [0, maxJitter).
+// A maxJitter of 0 or negative disables jitter (no delay).
+//
+// Example:
+//
+//	// Add 0-30s random delay before each execution
+//	cron.NewChain(cron.Jitter(30 * time.Second)).Then(myJob)
+//
+//	// Compose with other wrappers
+//	cron.NewChain(
+//	    cron.Recover(logger),
+//	    cron.Jitter(30 * time.Second),
+//	    cron.SkipIfStillRunning(logger),
+//	).Then(myJob)
+//
+//	// Use via WithChain option
+//	c.AddFunc("@hourly", syncData, cron.WithChain(cron.Jitter(30*time.Second)))
+func Jitter(maxJitter time.Duration) JobWrapper {
+	return func(j Job) Job {
+		return FuncJob(func() {
+			if maxJitter > 0 {
+				// #nosec G404 -- math/rand is appropriate for jitter; cryptographic randomness not needed
+				jitter := time.Duration(rand.Int64N(int64(maxJitter)))
+				time.Sleep(jitter)
+			}
+			j.Run()
+		})
+	}
+}
+
+// JitterWithLogger is like Jitter but logs the applied delay.
+// This is useful for debugging and observability to verify jitter is working.
+//
+// Example:
+//
+//	cron.NewChain(cron.JitterWithLogger(logger, 30 * time.Second)).Then(myJob)
+func JitterWithLogger(logger Logger, maxJitter time.Duration) JobWrapper {
+	return func(j Job) Job {
+		return FuncJob(func() {
+			if maxJitter > 0 {
+				// #nosec G404 -- math/rand is appropriate for jitter; cryptographic randomness not needed
+				jitter := time.Duration(rand.Int64N(int64(maxJitter)))
+				logger.Info("jitter", "delay", jitter, "max", maxJitter)
+				time.Sleep(jitter)
+			}
+			j.Run()
+		})
 	}
 }

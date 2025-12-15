@@ -1142,3 +1142,68 @@ func ExampleWithRunOnce_withRecover() {
 	// Output:
 	// Entry removed after panic: true
 }
+
+// This example demonstrates using Jitter to prevent thundering herd.
+// When many jobs are scheduled at the same time (e.g., @hourly), they would
+// all execute simultaneously. Jitter adds a random delay to spread them out.
+func ExampleJitter() {
+	c := cron.New(cron.WithChain(
+		cron.Recover(cron.DefaultLogger),
+		// Add 0-30s random delay before each job execution
+		cron.Jitter(30*time.Second),
+	))
+
+	c.AddFunc("@hourly", func() {
+		// This job will start between 0-30 seconds after the hour
+		// Each execution gets a new random delay
+		fmt.Println("Processing hourly task")
+	})
+
+	c.Start()
+	defer c.Stop()
+	// Output:
+}
+
+// This example demonstrates applying Jitter to individual jobs.
+// Different jobs can have different jitter ranges.
+func ExampleJitter_perJob() {
+	c := cron.New(cron.WithChain(
+		cron.Recover(cron.DefaultLogger),
+	))
+
+	// High-priority job: minimal jitter (0-5s)
+	highPriorityJob := cron.NewChain(cron.Jitter(5 * time.Second)).Then(cron.FuncJob(func() {
+		fmt.Println("High priority task")
+	}))
+	c.Schedule(cron.Every(time.Hour), highPriorityJob)
+
+	// Low-priority job: larger jitter (0-60s)
+	lowPriorityJob := cron.NewChain(cron.Jitter(60 * time.Second)).Then(cron.FuncJob(func() {
+		fmt.Println("Low priority task")
+	}))
+	c.Schedule(cron.Every(time.Hour), lowPriorityJob)
+
+	c.Start()
+	defer c.Stop()
+	// Output:
+}
+
+// This example demonstrates JitterWithLogger for observability.
+// The logger records the actual delay applied to each execution.
+func ExampleJitterWithLogger() {
+	logger := cron.DefaultLogger
+
+	c := cron.New(cron.WithChain(
+		cron.Recover(logger),
+		// Log the jitter delay for each execution
+		cron.JitterWithLogger(logger, 30*time.Second),
+	))
+
+	c.AddFunc("@hourly", func() {
+		fmt.Println("Task with logged jitter")
+	})
+
+	c.Start()
+	defer c.Stop()
+	// Output:
+}
