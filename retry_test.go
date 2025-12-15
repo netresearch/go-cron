@@ -627,3 +627,26 @@ func TestCircuitBreaker_IsOpenBoundary(t *testing.T) {
 			threshold+1, got)
 	}
 }
+
+// TestPanicWithStackAlias verifies the backward compatibility type alias.
+func TestPanicWithStackAlias(t *testing.T) {
+	// Create using the deprecated alias - this tests backward compatibility
+	p := PanicWithStack{Value: "test panic", Stack: []byte("stack trace")}
+
+	// Should have access to all PanicError methods
+	if p.Error() != "panic: test panic" {
+		t.Errorf("unexpected error message: %s", p.Error())
+	}
+
+	// Assignment to PanicError should work (same type)
+	pe := p
+	if pe.Value != "test panic" {
+		t.Errorf("unexpected value: %v", pe.Value)
+	}
+
+	// Assignment from PanicError to PanicWithStack should also work
+	pws := pe
+	if string(pws.Stack) != "stack trace" {
+		t.Errorf("unexpected stack: %s", pws.Stack)
+	}
+}

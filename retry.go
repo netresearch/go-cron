@@ -76,6 +76,13 @@ type PanicError struct {
 	Stack []byte // Stack trace at point of panic
 }
 
+// PanicWithStack is a type alias for backward compatibility.
+//
+// Deprecated: Use PanicError instead. This alias will be removed in a future release.
+//
+//nolint:errname // This is intentionally a type alias for backward compat
+type PanicWithStack = PanicError
+
 // Error implements the error interface for PanicError.
 func (p *PanicError) Error() string {
 	return fmt.Sprintf("panic: %v", p.Value)
