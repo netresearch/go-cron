@@ -213,10 +213,52 @@ func TestYearFieldSchedulePrev(t *testing.T) {
 			wantYear: 2026,
 		},
 		{
+			name:     "prev in year range - middle of range",
+			spec:     "0 0 1 1 * 2024-2026",
+			from:     time.Date(2026, 1, 1, 0, 0, 0, 0, loc),
+			wantYear: 2025,
+		},
+		{
+			name:     "prev in year range - start of range",
+			spec:     "0 0 1 1 * 2024-2026",
+			from:     time.Date(2025, 1, 1, 0, 0, 0, 0, loc),
+			wantYear: 2024,
+		},
+		{
 			name:     "before year range returns zero",
 			spec:     "0 0 1 1 * 2024-2026",
 			from:     time.Date(2024, 1, 1, 0, 0, 0, 0, loc),
 			wantZero: true,
+		},
+		{
+			name:     "wildcard year works normally",
+			spec:     "0 0 1 1 * *",
+			from:     time.Date(2024, 6, 15, 10, 0, 0, 0, loc),
+			wantYear: 2024,
+		},
+		{
+			name:     "year list",
+			spec:     "0 0 1 1 * 2024,2026,2028",
+			from:     time.Date(2027, 6, 15, 10, 0, 0, 0, loc),
+			wantYear: 2026,
+		},
+		{
+			name:     "year step",
+			spec:     "0 0 1 1 * 2020-2030/2",
+			from:     time.Date(2027, 6, 15, 10, 0, 0, 0, loc),
+			wantYear: 2026,
+		},
+		{
+			name:     "far future year - year 3000",
+			spec:     "0 0 1 1 * 3000",
+			from:     time.Date(3001, 6, 15, 10, 0, 0, 0, loc),
+			wantYear: 3000,
+		},
+		{
+			name:     "far future year range",
+			spec:     "0 0 1 1 * 5000-5010/2",
+			from:     time.Date(5007, 6, 15, 10, 0, 0, 0, loc),
+			wantYear: 5006,
 		},
 	}
 
