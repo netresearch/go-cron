@@ -30,7 +30,20 @@ const (
 	Descriptor                             // Allow descriptors such as @monthly, @weekly, etc.
 	Year                                   // Year field, default * (any year)
 	Hash                                   // Allow Jenkins-style 'H' hash expressions for load distribution
+	DowNth                                 // Allow #n syntax in DOW (e.g., FRI#3 for 3rd Friday)
+	DowLast                                // Allow #L syntax in DOW (e.g., FRI#L for last Friday)
+	DomL                                   // Allow L syntax in DOM (e.g., L for last day, L-3 for 3rd last day)
+	DomW                                   // Allow W syntax in DOM (e.g., 15W for nearest weekday, LW for last weekday)
 )
+
+// Extended is a convenience flag that enables all extended cron syntax options:
+// DowNth, DowLast, DomL, and DomW. This provides Quartz/Jenkins-style extensions.
+//
+// Example:
+//
+//	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor | cron.Extended)
+//	// Now supports: FRI#3 (3rd Friday), MON#L (last Monday), L (last day), 15W (nearest weekday)
+const Extended = DowNth | DowLast | DomL | DomW
 
 var places = []ParseOption{
 	Second,
@@ -454,13 +467,28 @@ func (p Parser) parse(spec string) (Schedule, error) {
 	}
 
 	var (
-		second     = field(fields[0], seconds)
-		minute     = field(fields[1], minutes)
-		hour       = field(fields[2], hours)
-		dayofmonth = field(fields[3], dom)
-		month      = field(fields[4], months)
-		dayofweek  = NormalizeDOW(field(fields[5], dow))
+		second = field(fields[0], seconds)
+		minute = field(fields[1], minutes)
+		hour   = field(fields[2], hours)
+		month  = field(fields[4], months)
 	)
+
+	// Check for errors from basic field parsing before proceeding
+	if err != nil {
+		return nil, err
+	}
+
+	// Parse DOM field with potential L/W constraints
+	dayofmonth, domConstraints, domErr := p.parseDomField(fields[3], hashEnabled)
+	if domErr != nil {
+		return nil, domErr
+	}
+
+	// Parse DOW field with potential #n/#L constraints
+	dayofweek, dowConstraints, dowErr := p.parseDowField(fields[5], hashEnabled)
+	if dowErr != nil {
+		return nil, dowErr
+	}
 
 	// Parse year field if Year option is enabled
 	var yearSet map[int]struct{} // nil = wildcard (any year)
@@ -485,7 +513,45 @@ func (p Parser) parse(spec string) (Schedule, error) {
 		Year:           yearSet,
 		Location:       loc,
 		MaxSearchYears: p.maxSearchYears,
+		DomConstraints: domConstraints,
+		DowConstraints: dowConstraints,
 	}, nil
+}
+
+// parseDomField parses the day-of-month field, handling extended L/W syntax if enabled.
+func (p Parser) parseDomField(fieldStr string, hashEnabled bool) (uint64, []DomConstraint, error) {
+	allowL := p.options&DomL != 0
+	allowW := p.options&DomW != 0
+	fieldUpper := strings.ToUpper(fieldStr)
+	hasSpecial := strings.Contains(fieldUpper, "L") || strings.Contains(fieldUpper, "W")
+
+	switch {
+	case (allowL || allowW) && hasSpecial:
+		return getDomFieldWithConstraints(fieldStr, dom, allowL, allowW, p.hashKey, hashEnabled)
+	case hasSpecial:
+		return 0, nil, errors.New("L/W syntax requires DomL or DomW option to be enabled")
+	default:
+		bits, err := getFieldWithHash(fieldStr, dom, p.hashKey, hashEnabled)
+		return bits, nil, err
+	}
+}
+
+// parseDowField parses the day-of-week field, handling extended #n/#L syntax if enabled.
+func (p Parser) parseDowField(fieldStr string, hashEnabled bool) (uint64, []DowConstraint, error) {
+	allowNth := p.options&DowNth != 0
+	allowLast := p.options&DowLast != 0
+	hasHash := strings.Contains(fieldStr, "#")
+
+	switch {
+	case (allowNth || allowLast) && hasHash:
+		bits, constraints, err := getDowFieldWithConstraints(fieldStr, dow, allowNth, allowLast, p.hashKey, hashEnabled)
+		return NormalizeDOW(bits), constraints, err
+	case hasHash:
+		return 0, nil, errors.New("#n/#L syntax requires DowNth or DowLast option to be enabled")
+	default:
+		bits, err := getFieldWithHash(fieldStr, dow, p.hashKey, hashEnabled)
+		return NormalizeDOW(bits), nil, err
+	}
 }
 
 // normalizeFields takes a subset set of the time fields and returns the full set
@@ -739,6 +805,195 @@ func getYearRange(expr string) ([]int, error) {
 		result = append(result, int(y)) // #nosec G115 -- bounds checked against MaxInt32
 	}
 	return result, nil
+}
+
+// getDowFieldWithConstraints parses a DOW field that may contain #n/#L expressions.
+// It splits the field by comma and for each part:
+//   - If it contains #, parses it as a DowConstraint (nth occurrence or last)
+//   - Otherwise, parses it as a normal bitmask expression
+//
+// Returns the combined bitmask for normal expressions, the list of constraints,
+// and any parsing error.
+//
+// Examples:
+//   - "FRI#3" → constraint for 3rd Friday
+//   - "FRI#L" → constraint for last Friday
+//   - "MON,FRI#3,SUN#L" → Monday bitmask + 3rd Friday constraint + last Sunday constraint
+func getDowFieldWithConstraints(field string, r bounds, allowNth, allowLast bool, hashKey string, hashEnabled bool) (uint64, []DowConstraint, error) {
+	var bits uint64
+	var constraints []DowConstraint
+
+	ranges := strings.FieldsFunc(field, func(r rune) bool { return r == ',' })
+	for _, expr := range ranges {
+		if idx := strings.Index(expr, "#"); idx != -1 {
+			// Parse as #n or #L constraint
+			constraint, err := parseDowConstraint(expr, idx, r, allowNth, allowLast)
+			if err != nil {
+				return 0, nil, err
+			}
+			constraints = append(constraints, constraint)
+		} else {
+			// Parse as normal bitmask expression
+			bit, err := getRangeWithHash(expr, r, hashKey, hashEnabled)
+			if err != nil {
+				return 0, nil, err
+			}
+			bits |= bit
+		}
+	}
+
+	return bits, constraints, nil
+}
+
+// parseDowConstraint parses a single #n or #L expression (e.g., "FRI#3" or "5#L").
+// idx is the position of the '#' character in expr.
+func parseDowConstraint(expr string, idx int, r bounds, allowNth, allowLast bool) (DowConstraint, error) {
+	weekdayPart := expr[:idx]
+	nthPart := expr[idx+1:]
+
+	if len(weekdayPart) == 0 {
+		return DowConstraint{}, fmt.Errorf("missing weekday before '#' in %q", expr)
+	}
+	if len(nthPart) == 0 {
+		return DowConstraint{}, fmt.Errorf("missing occurrence after '#' in %q", expr)
+	}
+
+	// Parse weekday (either numeric 0-6 or name like FRI)
+	weekday, err := parseIntOrName(weekdayPart, r.names)
+	if err != nil {
+		return DowConstraint{}, fmt.Errorf("invalid weekday in %q: %w", expr, err)
+	}
+	if weekday < r.min || weekday > r.max {
+		return DowConstraint{}, fmt.Errorf("weekday %d out of range [%d,%d] in %q", weekday, r.min, r.max, expr)
+	}
+
+	// Parse occurrence (L for last, or 1-5 for nth)
+	var n int
+	switch {
+	case strings.EqualFold(nthPart, "L"):
+		if !allowLast {
+			return DowConstraint{}, fmt.Errorf("#L syntax requires DowLast option: %q", expr)
+		}
+		n = -1 // -1 indicates "last occurrence"
+	case !allowNth:
+		return DowConstraint{}, fmt.Errorf("#n syntax requires DowNth option: %q", expr)
+	default:
+		nth, err := mustParseInt(nthPart)
+		if err != nil {
+			return DowConstraint{}, fmt.Errorf("invalid occurrence number in %q: %w", expr, err)
+		}
+		if nth < 1 || nth > 5 {
+			return DowConstraint{}, fmt.Errorf("occurrence must be 1-5, got %d in %q", nth, expr)
+		}
+		n = int(nth)
+	}
+
+	// #nosec G115 -- weekday is validated to be in range [0,6]
+	return DowConstraint{Weekday: int(weekday), N: n}, nil
+}
+
+// getDomFieldWithConstraints parses a DOM field that may contain L, L-n, nW, or LW expressions.
+// It splits the field by comma and for each part:
+//   - If it's "L" or "L-n", parses it as a DomConstraint (last day or offset from last)
+//   - If it's "LW", parses it as a DomConstraint (last weekday of month)
+//   - If it's "nW", parses it as a DomConstraint (nearest weekday to nth)
+//   - Otherwise, parses it as a normal bitmask expression
+//
+// Returns the combined bitmask for normal expressions, the list of constraints,
+// and any parsing error.
+//
+// Examples:
+//   - "L" → constraint for last day of month
+//   - "L-3" → constraint for 3rd from last day
+//   - "15W" → constraint for nearest weekday to 15th
+//   - "LW" → constraint for last weekday of month
+//   - "1,15,L" → 1st and 15th bitmask + last day constraint
+func getDomFieldWithConstraints(field string, r bounds, allowL, allowW bool, hashKey string, hashEnabled bool) (uint64, []DomConstraint, error) {
+	var bits uint64
+	var constraints []DomConstraint
+
+	ranges := strings.FieldsFunc(field, func(r rune) bool { return r == ',' })
+	for _, expr := range ranges {
+		exprUpper := strings.ToUpper(expr)
+
+		// Route expression to appropriate handler
+		switch {
+		case strings.HasPrefix(exprUpper, "L"):
+			// L expressions: L, L-n, LW
+			if !allowL && !allowW {
+				return 0, nil, fmt.Errorf("extended syntax L requires DomL or DomW option: %q", expr)
+			}
+			constraint, err := parseDomLConstraint(expr, exprUpper, allowL, allowW)
+			if err != nil {
+				return 0, nil, err
+			}
+			constraints = append(constraints, constraint)
+		case allowW && strings.HasSuffix(exprUpper, "W"):
+			// nW expression (e.g., 15W)
+			constraint, err := parseDomWConstraint(expr, exprUpper)
+			if err != nil {
+				return 0, nil, err
+			}
+			constraints = append(constraints, constraint)
+		case strings.Contains(exprUpper, "W"):
+			// Field contains W but not in a valid position or option not enabled
+			return 0, nil, fmt.Errorf("extended syntax W requires DomW option: %q", expr)
+		default:
+			// Parse as normal bitmask expression
+			bit, err := getRangeWithHash(expr, r, hashKey, hashEnabled)
+			if err != nil {
+				return 0, nil, err
+			}
+			bits |= bit
+		}
+	}
+
+	return bits, constraints, nil
+}
+
+// parseDomLConstraint parses L, L-n, or LW expressions.
+func parseDomLConstraint(expr, exprUpper string, allowL, allowW bool) (DomConstraint, error) {
+	switch {
+	case exprUpper == "L":
+		if !allowL {
+			return DomConstraint{}, fmt.Errorf("syntax L requires DomL option: %q", expr)
+		}
+		return DomConstraint{Type: DomLast}, nil
+	case exprUpper == "LW":
+		if !allowW {
+			return DomConstraint{}, fmt.Errorf("syntax LW requires DomW option: %q", expr)
+		}
+		return DomConstraint{Type: DomLastWeekday}, nil
+	case strings.HasPrefix(exprUpper, "L-"):
+		if !allowL {
+			return DomConstraint{}, fmt.Errorf("syntax L-n requires DomL option: %q", expr)
+		}
+		offsetStr := expr[2:] // Skip "L-"
+		offset, err := mustParseInt(offsetStr)
+		if err != nil {
+			return DomConstraint{}, fmt.Errorf("invalid offset in %q: %w", expr, err)
+		}
+		if offset < 1 || offset > 30 {
+			return DomConstraint{}, fmt.Errorf("offset must be 1-30, got %d in %q", offset, expr)
+		}
+		return DomConstraint{Type: DomLastOffset, N: int(offset)}, nil
+	default:
+		return DomConstraint{}, fmt.Errorf("invalid L expression: %q", expr)
+	}
+}
+
+// parseDomWConstraint parses nW expression (nearest weekday to nth day).
+func parseDomWConstraint(expr, exprUpper string) (DomConstraint, error) {
+	// Remove trailing W
+	dayStr := exprUpper[:len(exprUpper)-1]
+	day, err := mustParseInt(dayStr)
+	if err != nil {
+		return DomConstraint{}, fmt.Errorf("invalid day in %q: %w", expr, err)
+	}
+	if day < 1 || day > 31 {
+		return DomConstraint{}, fmt.Errorf("day must be 1-31, got %d in %q", day, expr)
+	}
+	return DomConstraint{Type: DomNearestWeekday, N: int(day)}, nil
 }
 
 // getField returns an Int with the bits set representing all of the times that
