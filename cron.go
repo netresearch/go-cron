@@ -149,6 +149,8 @@ type request[T, C any] struct {
 	reply chan C
 }
 
+// makeReq creates a request with the given value and a buffered reply channel of size 1.
+// This is used for synchronous operations where a response is expected.
 func makeReq[T, C any](v T) request[T, C] {
 	return request[T, C]{value: v, reply: make(chan C, 1)}
 }
