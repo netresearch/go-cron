@@ -13,6 +13,38 @@ features, bug fixes, and modernization improvements.
 ### Planned for v2
 - Context-aware Job interface with graceful shutdown support
 
+## [0.7.0] - 2025-12-16
+
+### Added
+- **Year field support**: Full year field in cron expressions (e.g., `0 0 1 1 * 2025`) (#229)
+- **Jenkins H hash expressions**: Load distribution with deterministic hashing (e.g., `H H * * *`) (#230)
+- **Extended cron syntax**: Support for `#n` (nth weekday), `#L` (last weekday of month),
+  `L` (last day of month), and `W` (nearest weekday) modifiers
+- **Schedule introspection API**: Query schedule metadata and field constraints (#210)
+- **Validation API**: `Validate()` and `ValidateSpecs()` for cron expression validation (#198)
+- **Run-once jobs**: `WithRunOnce` option for single-execution scheduling
+- **Schedule.Prev() method**: Calculate previous execution time (inverse of `Next()`)
+- **Entry options**: `WithPrev` and `WithRunImmediately` for fine-grained entry control
+- **IsRunning() method**: Query scheduler running state
+- **WithSecondOptional parser option**: Flexible 5 or 6-field cron expressions
+- **Sunday=7 support**: Accept `7` as Sunday in day-of-week field (in addition to `0`)
+- **Jitter wrappers**: `WithJitter` and `WithJitterByHash` to prevent thundering herd
+
+### Fixed
+- **Test stability**: Eliminated flaky timing in `SkipIfStillRunning` and `StopAndWait` tests
+
+### Changed
+- **ScheduleWithPrev interface**: Now optional via interface assertion for backward compatibility
+  with custom Schedule implementations that don't implement `Prev()`
+- **PanicWithStack**: Added type alias for backward compatibility with code referencing
+  the internal panic wrapper type
+- **Year field storage**: Sparse storage for memory efficiency with expanded year bounds
+
+### Documentation
+- Added cookbook with practical recipes for common patterns
+- Added Architecture Decision Records (ADRs) for key design decisions
+- Added real-time integration tests documentation
+
 ## [0.6.1] - 2025-12-03
 
 ### Changed
@@ -157,7 +189,8 @@ This fork includes all features from robfig/cron v3 plus:
    _, err := cron.ParseStandard("*/60 * * * *") // Error: step (60) must be less than range size (60)
    ```
 
-[Unreleased]: https://github.com/netresearch/go-cron/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/netresearch/go-cron/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/netresearch/go-cron/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/netresearch/go-cron/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/netresearch/go-cron/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/netresearch/go-cron/releases/tag/v0.5.0
