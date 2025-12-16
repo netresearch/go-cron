@@ -16,59 +16,84 @@ features, bug fixes, and modernization improvements.
 ## [0.7.0] - 2025-12-16
 
 ### Added
-- **Extended cron syntax** ([#224], [#225]): Quartz/Jenkins-style modifiers as opt-in parser options
+- **Extended cron syntax** ([#224], [#225], [PR#259]): Quartz/Jenkins-style modifiers as opt-in parser options
   - `#n` nth weekday of month (e.g., `FRI#3` = 3rd Friday) — see [`ExampleDowNth`]
   - `#L` last weekday of month (e.g., `FRI#L` = last Friday)
   - `L` last day of month, `L-n` nth from last — see [`ExampleDomL`]
   - `nW` nearest weekday, `LW` last weekday — see [`ExampleDomW`], [ADR-007]
   - New parser options: `DowNth`, `DowLast`, `DomL`, `DomW`, `Extended`
-- **Year field support** ([#229]): Full year field in cron expressions
+- **Year field support** ([#229], [PR#250], [PR#253]): Full year field in cron expressions
   - Sparse map storage for memory efficiency (years 1–2147483647)
   - Examples: `0 0 1 1 * 2025`, `0 0 * * * 2025-2030` — see [`ExampleNewParser_yearField`]
-- **Jenkins H hash expressions** ([#230]): Deterministic load distribution
+- **Jenkins H hash expressions** ([#230], [PR#251]): Deterministic load distribution
   - Hash-based scheduling: `H H * * *` distributes jobs across time
   - Configurable hash key: `Parser.WithHashKey()` — see [`ExampleNewParser_hash`]
-- **Schedule introspection API** ([#210]): Query schedule metadata and field constraints
+- **Schedule introspection API** ([#210], [PR#249]): Query schedule metadata and field constraints
   - `Bounds()`, `Fields()`, `Matches()` for runtime schedule analysis
-- **Validation API** ([#198]): Validate cron expressions without creating schedules
+- **Validation API** ([#198], [PR#248]): Validate cron expressions without creating schedules
   - `Validate(spec)` single expression, `ValidateSpecs(specs...)` bulk validation
-- **Run-once jobs**: Single-execution scheduling with automatic removal
+- **Run-once jobs** ([#231], [PR#252]): Single-execution scheduling with automatic removal
   - `WithRunOnce()` option, `AddOnceFunc()`, `AddOnceJob()` — see [`ExampleWithRunOnce`]
-- **Schedule.Prev() method**: Calculate previous execution time (inverse of `Next()`)
+- **Schedule.Prev() method** ([#222], [PR#246]): Calculate previous execution time (inverse of `Next()`)
   - Useful for missed job detection — see [`ExampleScheduleWithPrev_Prev_detectMissed`]
-- **Entry options**: Fine-grained entry control
+- **Entry options** ([#221], [PR#245]): Fine-grained entry control
   - `WithPrev` stores previous run time — see [`ExampleWithPrev`]
   - `WithRunImmediately` triggers immediate first execution — see [`ExampleWithRunImmediately`]
-- **IsRunning() method**: Query scheduler running state — see [`ExampleCron_IsRunning`]
-- **WithSecondOptional parser option**: Flexible 5 or 6-field cron expressions
-- **Sunday=7 support**: Accept `7` as Sunday in day-of-week field (POSIX extension)
+- **IsRunning() method** ([#232], [PR#244]): Query scheduler running state — see [`ExampleCron_IsRunning`]
+- **WithSecondOptional parser option** ([#220], [PR#242]): Flexible 5 or 6-field cron expressions
+- **Sunday=7 support** ([#234], [PR#243]): Accept `7` as Sunday in day-of-week field (POSIX extension)
   - See [`ExampleParseStandard_sundayFormats`]
-- **Jitter wrappers** ([#227]): Prevent thundering herd with randomized delays
+- **Jitter wrappers** ([#227], [PR#258]): Prevent thundering herd with randomized delays
   - `Jitter(maxJitter)`, `JitterWithLogger()` — see [`ExampleJitter`]
 
 ### Fixed
-- **Test stability**: Eliminated flaky timing in `SkipIfStillRunning` and `StopAndWait` tests
+- **Test stability** ([PR#256]): Eliminated flaky timing in `SkipIfStillRunning` and `StopAndWait` tests
   using proper channel synchronization
 
 ### Changed
-- **ScheduleWithPrev interface**: Now optional via interface assertion for backward
+- **ScheduleWithPrev interface** ([PR#260]): Now optional via interface assertion for backward
   compatibility with custom Schedule implementations that don't implement `Prev()`
-- **PanicWithStack**: Added type alias for backward compatibility with code referencing
+- **PanicWithStack** ([PR#261]): Added type alias for backward compatibility with code referencing
   the internal panic wrapper type
-- **Year field storage**: Sparse map storage for memory efficiency with expanded bounds
+- **Year field storage** ([PR#253]): Sparse map storage for memory efficiency with expanded bounds
 
 ### Documentation
-- Added [COOKBOOK] with practical recipes for common patterns
-- Added [Architecture Decision Records][ADRs] for key design decisions
-- Added [TESTING_GUIDE] with FakeClock usage and real-time integration tests
+- Added [COOKBOOK] ([#204]) with practical recipes for common patterns
+- Added [Architecture Decision Records][ADRs] ([#193]) for key design decisions
+- Added [TESTING_GUIDE] ([#211]) with FakeClock usage and real-time integration tests
 
+[#193]: https://github.com/netresearch/go-cron/issues/193
 [#198]: https://github.com/netresearch/go-cron/issues/198
+[#204]: https://github.com/netresearch/go-cron/issues/204
 [#210]: https://github.com/netresearch/go-cron/issues/210
+[#211]: https://github.com/netresearch/go-cron/issues/211
+[#220]: https://github.com/netresearch/go-cron/issues/220
+[#221]: https://github.com/netresearch/go-cron/issues/221
+[#222]: https://github.com/netresearch/go-cron/issues/222
 [#224]: https://github.com/netresearch/go-cron/issues/224
 [#225]: https://github.com/netresearch/go-cron/issues/225
 [#227]: https://github.com/netresearch/go-cron/issues/227
 [#229]: https://github.com/netresearch/go-cron/issues/229
 [#230]: https://github.com/netresearch/go-cron/issues/230
+[#231]: https://github.com/netresearch/go-cron/issues/231
+[#232]: https://github.com/netresearch/go-cron/issues/232
+[#234]: https://github.com/netresearch/go-cron/issues/234
+[PR#242]: https://github.com/netresearch/go-cron/pull/242
+[PR#243]: https://github.com/netresearch/go-cron/pull/243
+[PR#244]: https://github.com/netresearch/go-cron/pull/244
+[PR#245]: https://github.com/netresearch/go-cron/pull/245
+[PR#246]: https://github.com/netresearch/go-cron/pull/246
+[PR#248]: https://github.com/netresearch/go-cron/pull/248
+[PR#249]: https://github.com/netresearch/go-cron/pull/249
+[PR#250]: https://github.com/netresearch/go-cron/pull/250
+[PR#251]: https://github.com/netresearch/go-cron/pull/251
+[PR#252]: https://github.com/netresearch/go-cron/pull/252
+[PR#253]: https://github.com/netresearch/go-cron/pull/253
+[PR#256]: https://github.com/netresearch/go-cron/pull/256
+[PR#258]: https://github.com/netresearch/go-cron/pull/258
+[PR#259]: https://github.com/netresearch/go-cron/pull/259
+[PR#260]: https://github.com/netresearch/go-cron/pull/260
+[PR#261]: https://github.com/netresearch/go-cron/pull/261
 [ADR-007]: docs/adr/ADR-007-nw-skip-invalid-days.md
 [ADRs]: docs/adr/
 [COOKBOOK]: docs/COOKBOOK.md
