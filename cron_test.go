@@ -2796,18 +2796,21 @@ func TestRunOnce_AddWhileRunning(t *testing.T) {
 		t.Fatal("job did not execute")
 	}
 
-	// Allow removal to complete (longer for Windows CI)
-	time.Sleep(200 * time.Millisecond)
-
 	mu.Lock()
 	if count != 1 {
 		t.Errorf("expected 1 execution, got %d", count)
 	}
 	mu.Unlock()
 
-	if entry := c.Entry(id); entry.ID != 0 {
-		t.Error("run-once entry should be removed after execution")
+	// Wait for entry removal with timeout instead of arbitrary sleep
+	deadline := time.Now().Add(2 * OneSecond)
+	for time.Now().Before(deadline) {
+		if entry := c.Entry(id); entry.ID == 0 {
+			return // Success - entry was removed
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
+	t.Error("run-once entry should be removed after execution")
 }
 
 // TestRunOnce_RemoveBeforeExecution verifies run-once jobs can be removed manually.
