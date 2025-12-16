@@ -38,8 +38,8 @@ type Cron struct {
 	nameIndex   map[string]*Entry  // O(1) lookup by Name
 	chain       Chain
 	stop        chan struct{}
-	add         chan *Entry
-	remove      chan EntryID
+	add         chan request[*Entry, struct{}]
+	remove      chan request[EntryID, struct{}]
 	snapshot    chan chan []Entry
 	entryLookup chan entryLookupRequest // O(1) single-entry lookup when running
 	nameLookup  chan nameLookupRequest  // O(1) entry lookup by name when running
@@ -144,6 +144,15 @@ type nameLookupRequest struct {
 	reply chan Entry
 }
 
+type request[T, C any] struct {
+	value T
+	reply chan C
+}
+
+func makeReq[T, C any](v T) request[T, C] {
+	return request[T, C]{value: v, reply: make(chan C, 1)}
+}
+
 // Entry consists of a schedule and the func to execute on that schedule.
 type Entry struct {
 	// ID is the cron-assigned ID of this entry, which may be used to look up a
@@ -228,12 +237,12 @@ func New(opts ...Option) *Cron {
 		entryIndex:  make(map[EntryID]*Entry),
 		nameIndex:   make(map[string]*Entry),
 		chain:       NewChain(),
-		add:         make(chan *Entry),
+		add:         make(chan request[*Entry, struct{}]),
 		stop:        make(chan struct{}),
 		snapshot:    make(chan chan []Entry),
 		entryLookup: make(chan entryLookupRequest),
 		nameLookup:  make(chan nameLookupRequest),
-		remove:      make(chan EntryID),
+		remove:      make(chan request[EntryID, struct{}]),
 		running:     false,
 		runningMu:   sync.Mutex{},
 		logger:      DefaultLogger,
@@ -535,7 +544,9 @@ func (c *Cron) ScheduleJob(schedule Schedule, cmd Job, opts ...JobOption) (Entry
 		heap.Push(&c.entries, entry)
 		c.entryIndex[entry.ID] = entry
 	} else {
-		c.add <- entry
+		req := makeReq[*Entry, struct{}](entry)
+		c.add <- req
+		<-req.reply
 	}
 	// Success - don't decrement count in deferred function
 	countIncremented = false
@@ -563,8 +574,8 @@ func (c *Cron) Location() *time.Location {
 // This operation is O(1) in all cases using the internal index map.
 func (c *Cron) Entry(id EntryID) Entry {
 	c.runningMu.Lock()
+	defer c.runningMu.Unlock()
 	if c.running {
-		c.runningMu.Unlock()
 		// When running, use dedicated lookup channel for O(1) access
 		replyChan := make(chan Entry, 1)
 		c.entryLookup <- entryLookupRequest{id: id, reply: replyChan}
@@ -572,7 +583,6 @@ func (c *Cron) Entry(id EntryID) Entry {
 	}
 	// When not running, use direct map lookup (O(1))
 	entry, ok := c.entryIndex[id]
-	c.runningMu.Unlock()
 	if ok {
 		return *entry
 	}
@@ -584,7 +594,9 @@ func (c *Cron) Remove(id EntryID) {
 	c.runningMu.Lock()
 	defer c.runningMu.Unlock()
 	if c.running {
-		c.remove <- id
+		req := makeReq[EntryID, struct{}](id)
+		c.remove <- req
+		<-req.reply
 	} else {
 		c.removeEntry(id)
 	}
@@ -706,12 +718,14 @@ func (c *Cron) run() {
 				// Run every entry whose next time was less than now.
 				c.processDueEntries(now)
 
-			case newEntry := <-c.add:
+			case req := <-c.add:
+				newEntry := req.value
 				timer.Stop()
 				now = c.now()
 				c.scheduleEntryNext(newEntry, now)
 				heap.Push(&c.entries, newEntry)
 				c.entryIndex[newEntry.ID] = newEntry
+				req.reply <- struct{}{}
 				// Note: nameIndex and entryCount already updated by ScheduleJob
 				// (while holding runningMu) to prevent TOCTOU races
 				c.hooks.callOnSchedule(newEntry.ID, newEntry.Job, newEntry.Next)
@@ -744,10 +758,12 @@ func (c *Cron) run() {
 				c.logger.Info("stop")
 				return
 
-			case id := <-c.remove:
+			case req := <-c.remove:
+				id := req.value
 				timer.Stop()
 				now = c.now()
 				c.removeEntry(id)
+				req.reply <- struct{}{}
 				c.logger.Info("removed", "entry", id)
 			}
 
@@ -1009,8 +1025,8 @@ func (c *Cron) maybeCompactIndexes() {
 // This operation is O(1) in all cases using the internal name index.
 func (c *Cron) EntryByName(name string) Entry {
 	c.runningMu.Lock()
+	defer c.runningMu.Unlock()
 	if c.running {
-		c.runningMu.Unlock()
 		// When running, use dedicated lookup channel for O(1) access
 		replyChan := make(chan Entry, 1)
 		c.nameLookup <- nameLookupRequest{name: name, reply: replyChan}
@@ -1018,7 +1034,6 @@ func (c *Cron) EntryByName(name string) Entry {
 	}
 	// When not running, use direct map lookup (O(1))
 	entry, ok := c.nameIndex[name]
-	c.runningMu.Unlock()
 	if ok {
 		return *entry
 	}
