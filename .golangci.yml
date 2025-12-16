@@ -219,6 +219,14 @@ linters:
         path: spec\.go
         text: "(Next|Prev)"
 
+      # run() handles multiple concurrent channel operations (add, remove, snapshot,
+      # entryLookup, nameLookup, stop, timer) - complexity is inherent to the event loop
+      - linters:
+          - gocyclo
+          - cyclop
+        path: cron\.go
+        text: "run"
+
       # parse() and getRangeWithHash handle multiple ParseOption flags and hash expression scenarios
       # Complexity is inherent to flexible cron expression parsing with hash support
       - linters:

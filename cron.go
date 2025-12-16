@@ -35,7 +35,7 @@ const maxIdleDuration = 100000 * time.Hour
 type Cron struct {
 	entries     entryHeap
 	entryIndex  map[EntryID]*Entry // O(1) lookup by ID
-	nameIndex   map[string]*Entry  // O(1) lookup by Name
+	nameIndex   sync.Map           // O(1) lookup by Name, concurrent-safe
 	chain       Chain
 	stop        chan struct{}
 	add         chan *Entry
@@ -224,9 +224,9 @@ func (e Entry) Run() {
 // See "cron.With*" to modify the default behavior.
 func New(opts ...Option) *Cron {
 	c := &Cron{
-		entries:     nil,
-		entryIndex:  make(map[EntryID]*Entry),
-		nameIndex:   make(map[string]*Entry),
+		entries:    nil,
+		entryIndex: make(map[EntryID]*Entry),
+		// nameIndex uses sync.Map zero value (ready to use)
 		chain:       NewChain(),
 		add:         make(chan *Entry),
 		stop:        make(chan struct{}),
@@ -521,14 +521,12 @@ func (c *Cron) ScheduleJob(schedule Schedule, cmd Job, opts ...JobOption) (Entry
 		opt(entry)
 	}
 
-	// Check for duplicate name
+	// Check for duplicate name and reserve atomically
 	if entry.Name != "" {
-		if _, exists := c.nameIndex[entry.Name]; exists {
+		if _, loaded := c.nameIndex.LoadOrStore(entry.Name, entry); loaded {
 			c.nextID-- // Revert ID allocation
 			return 0, ErrDuplicateName
 		}
-		// Reserve name immediately to prevent TOCTOU race when running
-		c.nameIndex[entry.Name] = entry
 	}
 
 	if !c.running {
@@ -732,8 +730,12 @@ func (c *Cron) run() {
 
 			case req := <-c.nameLookup:
 				// O(1) entry lookup by name using nameIndex
-				if entry, ok := c.nameIndex[req.name]; ok {
-					req.reply <- *entry
+				if val, ok := c.nameIndex.Load(req.name); ok {
+					if entry, ok := val.(*Entry); ok {
+						req.reply <- *entry
+					} else {
+						req.reply <- Entry{}
+					}
 				} else {
 					req.reply <- Entry{}
 				}
@@ -948,11 +950,9 @@ func (c *Cron) removeEntry(id EntryID) {
 	c.entries.RemoveAt(entry)
 	delete(c.entryIndex, id)
 
-	// Remove from nameIndex. No mutex needed:
-	// - When running: run loop owns all data exclusively, no concurrent access
-	// - When not running: caller (Remove) already holds runningMu
+	// Remove from nameIndex (sync.Map is concurrent-safe)
 	if entry.Name != "" {
-		delete(c.nameIndex, entry.Name)
+		c.nameIndex.Delete(entry.Name)
 	}
 	atomic.AddInt64(&c.entryCount, -1)
 
@@ -988,17 +988,13 @@ func (c *Cron) maybeCompactIndexes() {
 		return
 	}
 
-	// Rebuild entryIndex
+	// Rebuild entryIndex (regular map needs periodic compaction)
 	newEntryIndex := make(map[EntryID]*Entry, currentSize)
 	maps.Copy(newEntryIndex, c.entryIndex)
 	c.entryIndex = newEntryIndex
 
-	// Rebuild nameIndex. No mutex needed:
-	// - When running: run loop owns all data exclusively, no concurrent access
-	// - When not running: caller (Remove) already holds runningMu
-	newNameIndex := make(map[string]*Entry, len(c.nameIndex))
-	maps.Copy(newNameIndex, c.nameIndex)
-	c.nameIndex = newNameIndex
+	// Note: nameIndex uses sync.Map which manages its own memory,
+	// so no rebuild is needed for it.
 
 	c.indexDeletions = 0
 }
@@ -1007,20 +1003,24 @@ func (c *Cron) maybeCompactIndexes() {
 // or an invalid Entry (Entry.Valid() == false) if not found.
 //
 // This operation is O(1) in all cases using the internal name index.
+// When running, uses channel-based lookup to safely copy Entry fields
+// that may be modified by the run loop (Next, Prev, etc.).
 func (c *Cron) EntryByName(name string) Entry {
 	c.runningMu.Lock()
 	if c.running {
 		c.runningMu.Unlock()
-		// When running, use dedicated lookup channel for O(1) access
+		// When running, use dedicated lookup channel to safely copy Entry
+		// (Entry fields like Next/Prev are modified by run loop)
 		replyChan := make(chan Entry, 1)
 		c.nameLookup <- nameLookupRequest{name: name, reply: replyChan}
 		return <-replyChan
 	}
-	// When not running, use direct map lookup (O(1))
-	entry, ok := c.nameIndex[name]
 	c.runningMu.Unlock()
-	if ok {
-		return *entry
+	// When not running, safe to read directly
+	if val, ok := c.nameIndex.Load(name); ok {
+		if entry, ok := val.(*Entry); ok {
+			return *entry
+		}
 	}
 	return Entry{}
 }
