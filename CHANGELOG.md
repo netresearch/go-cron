@@ -16,34 +16,75 @@ features, bug fixes, and modernization improvements.
 ## [0.7.0] - 2025-12-16
 
 ### Added
-- **Year field support**: Full year field in cron expressions (e.g., `0 0 1 1 * 2025`) (#229)
-- **Jenkins H hash expressions**: Load distribution with deterministic hashing (e.g., `H H * * *`) (#230)
-- **Extended cron syntax**: Support for `#n` (nth weekday), `#L` (last weekday of month),
-  `L` (last day of month), and `W` (nearest weekday) modifiers
-- **Schedule introspection API**: Query schedule metadata and field constraints (#210)
-- **Validation API**: `Validate()` and `ValidateSpecs()` for cron expression validation (#198)
-- **Run-once jobs**: `WithRunOnce` option for single-execution scheduling
+- **Extended cron syntax** ([#224], [#225]): Quartz/Jenkins-style modifiers as opt-in parser options
+  - `#n` nth weekday of month (e.g., `FRI#3` = 3rd Friday) — see [`ExampleDowNth`]
+  - `#L` last weekday of month (e.g., `FRI#L` = last Friday)
+  - `L` last day of month, `L-n` nth from last — see [`ExampleDomL`]
+  - `nW` nearest weekday, `LW` last weekday — see [`ExampleDomW`], [ADR-007]
+  - New parser options: `DowNth`, `DowLast`, `DomL`, `DomW`, `Extended`
+- **Year field support** ([#229]): Full year field in cron expressions
+  - Sparse map storage for memory efficiency (years 1–2147483647)
+  - Examples: `0 0 1 1 * 2025`, `0 0 * * * 2025-2030` — see [`ExampleNewParser_yearField`]
+- **Jenkins H hash expressions** ([#230]): Deterministic load distribution
+  - Hash-based scheduling: `H H * * *` distributes jobs across time
+  - Configurable hash key: `Parser.WithHashKey()` — see [`ExampleNewParser_hash`]
+- **Schedule introspection API** ([#210]): Query schedule metadata and field constraints
+  - `Bounds()`, `Fields()`, `Matches()` for runtime schedule analysis
+- **Validation API** ([#198]): Validate cron expressions without creating schedules
+  - `Validate(spec)` single expression, `ValidateSpecs(specs...)` bulk validation
+- **Run-once jobs**: Single-execution scheduling with automatic removal
+  - `WithRunOnce()` option, `AddOnceFunc()`, `AddOnceJob()` — see [`ExampleWithRunOnce`]
 - **Schedule.Prev() method**: Calculate previous execution time (inverse of `Next()`)
-- **Entry options**: `WithPrev` and `WithRunImmediately` for fine-grained entry control
-- **IsRunning() method**: Query scheduler running state
+  - Useful for missed job detection — see [`ExampleScheduleWithPrev_Prev_detectMissed`]
+- **Entry options**: Fine-grained entry control
+  - `WithPrev` stores previous run time — see [`ExampleWithPrev`]
+  - `WithRunImmediately` triggers immediate first execution — see [`ExampleWithRunImmediately`]
+- **IsRunning() method**: Query scheduler running state — see [`ExampleCron_IsRunning`]
 - **WithSecondOptional parser option**: Flexible 5 or 6-field cron expressions
-- **Sunday=7 support**: Accept `7` as Sunday in day-of-week field (in addition to `0`)
-- **Jitter wrappers**: `WithJitter` and `WithJitterByHash` to prevent thundering herd
+- **Sunday=7 support**: Accept `7` as Sunday in day-of-week field (POSIX extension)
+  - See [`ExampleParseStandard_sundayFormats`]
+- **Jitter wrappers** ([#227]): Prevent thundering herd with randomized delays
+  - `Jitter(maxJitter)`, `JitterWithLogger()` — see [`ExampleJitter`]
 
 ### Fixed
 - **Test stability**: Eliminated flaky timing in `SkipIfStillRunning` and `StopAndWait` tests
+  using proper channel synchronization
 
 ### Changed
-- **ScheduleWithPrev interface**: Now optional via interface assertion for backward compatibility
-  with custom Schedule implementations that don't implement `Prev()`
+- **ScheduleWithPrev interface**: Now optional via interface assertion for backward
+  compatibility with custom Schedule implementations that don't implement `Prev()`
 - **PanicWithStack**: Added type alias for backward compatibility with code referencing
   the internal panic wrapper type
-- **Year field storage**: Sparse storage for memory efficiency with expanded year bounds
+- **Year field storage**: Sparse map storage for memory efficiency with expanded bounds
 
 ### Documentation
-- Added cookbook with practical recipes for common patterns
-- Added Architecture Decision Records (ADRs) for key design decisions
-- Added real-time integration tests documentation
+- Added [COOKBOOK] with practical recipes for common patterns
+- Added [Architecture Decision Records][ADRs] for key design decisions
+- Added [TESTING_GUIDE] with FakeClock usage and real-time integration tests
+
+[#198]: https://github.com/netresearch/go-cron/issues/198
+[#210]: https://github.com/netresearch/go-cron/issues/210
+[#224]: https://github.com/netresearch/go-cron/issues/224
+[#225]: https://github.com/netresearch/go-cron/issues/225
+[#227]: https://github.com/netresearch/go-cron/issues/227
+[#229]: https://github.com/netresearch/go-cron/issues/229
+[#230]: https://github.com/netresearch/go-cron/issues/230
+[ADR-007]: docs/adr/ADR-007-nw-skip-invalid-days.md
+[ADRs]: docs/adr/
+[COOKBOOK]: docs/COOKBOOK.md
+[TESTING_GUIDE]: docs/TESTING_GUIDE.md
+[`ExampleCron_IsRunning`]: example_test.go#ExampleCron_IsRunning
+[`ExampleDomL`]: example_test.go#ExampleDomL
+[`ExampleDomW`]: example_test.go#ExampleDomW
+[`ExampleDowNth`]: example_test.go#ExampleDowNth
+[`ExampleJitter`]: example_test.go#ExampleJitter
+[`ExampleNewParser_hash`]: example_test.go#ExampleNewParser_hash
+[`ExampleNewParser_yearField`]: example_test.go#ExampleNewParser_yearField
+[`ExampleParseStandard_sundayFormats`]: example_test.go#ExampleParseStandard_sundayFormats
+[`ExampleScheduleWithPrev_Prev_detectMissed`]: example_test.go#ExampleScheduleWithPrev_Prev_detectMissed
+[`ExampleWithPrev`]: example_test.go#ExampleWithPrev
+[`ExampleWithRunImmediately`]: example_test.go#ExampleWithRunImmediately
+[`ExampleWithRunOnce`]: example_test.go#ExampleWithRunOnce
 
 ## [0.6.1] - 2025-12-03
 
