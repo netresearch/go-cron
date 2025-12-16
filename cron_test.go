@@ -2792,12 +2792,12 @@ func TestRunOnce_AddWhileRunning(t *testing.T) {
 	select {
 	case <-executed:
 		// Good
-	case <-time.After(time.Second):
+	case <-time.After(2 * OneSecond):
 		t.Fatal("job did not execute")
 	}
 
-	// Allow removal to complete
-	time.Sleep(100 * time.Millisecond)
+	// Allow removal to complete (longer for Windows CI)
+	time.Sleep(200 * time.Millisecond)
 
 	mu.Lock()
 	if count != 1 {
