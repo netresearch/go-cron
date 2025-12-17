@@ -20,15 +20,14 @@ features, bug fixes, and modernization improvements.
   when adding or removing jobs while the scheduler is running. Operations now use synchronous
   request/reply channels to ensure completion before returning. Thanks to [@jrouzierinverse] for
   the contribution!
-- **Test reliability** ([PR#263]): Fixed flaky `TestRunOnce_AddWhileRunning` test using polling
-  instead of sleep, with increased timeout for Windows CI
+- **Test reliability**: Fixed flaky `TestRunOnce_AddWhileRunning` test using polling instead of
+  sleep, with increased timeout for Windows CI
 
 ### Changed
 - **CI: Skip gitleaks on fork PRs**: Fork PRs now pass CI without requiring secrets, as GitHub
   Actions doesn't expose secrets to forks for security reasons
 
 [#262]: https://github.com/netresearch/go-cron/issues/262
-[PR#263]: https://github.com/netresearch/go-cron/pull/263
 [PR#264]: https://github.com/netresearch/go-cron/pull/264
 [@jrouzierinverse]: https://github.com/jrouzierinverse
 
