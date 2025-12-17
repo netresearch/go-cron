@@ -576,8 +576,8 @@ func (c *Cron) Location() *time.Location {
 // This operation is O(1) in all cases using the internal index map.
 func (c *Cron) Entry(id EntryID) Entry {
 	c.runningMu.Lock()
-	defer c.runningMu.Unlock()
 	if c.running {
+		c.runningMu.Unlock()
 		// When running, use dedicated lookup channel for O(1) access
 		replyChan := make(chan Entry, 1)
 		c.entryLookup <- entryLookupRequest{id: id, reply: replyChan}
@@ -585,6 +585,7 @@ func (c *Cron) Entry(id EntryID) Entry {
 	}
 	// When not running, use direct map lookup (O(1))
 	entry, ok := c.entryIndex[id]
+	c.runningMu.Unlock()
 	if ok {
 		return *entry
 	}
@@ -1027,8 +1028,8 @@ func (c *Cron) maybeCompactIndexes() {
 // This operation is O(1) in all cases using the internal name index.
 func (c *Cron) EntryByName(name string) Entry {
 	c.runningMu.Lock()
-	defer c.runningMu.Unlock()
 	if c.running {
+		c.runningMu.Unlock()
 		// When running, use dedicated lookup channel for O(1) access
 		replyChan := make(chan Entry, 1)
 		c.nameLookup <- nameLookupRequest{name: name, reply: replyChan}
@@ -1036,6 +1037,7 @@ func (c *Cron) EntryByName(name string) Entry {
 	}
 	// When not running, use direct map lookup (O(1))
 	entry, ok := c.nameIndex[name]
+	c.runningMu.Unlock()
 	if ok {
 		return *entry
 	}
