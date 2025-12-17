@@ -13,6 +13,25 @@ features, bug fixes, and modernization improvements.
 ### Planned for v2
 - Context-aware Job interface with graceful shutdown support
 
+## [0.7.1] - 2025-12-17
+
+### Fixed
+- **Synchronize add/remove operations while cron is running** ([#262], [PR#264]): Fixed race condition
+  when adding or removing jobs while the scheduler is running. Operations now use synchronous
+  request/reply channels to ensure completion before returning. Thanks to [@jrouzierinverse] for
+  the contribution!
+- **Test reliability** ([PR#263]): Fixed flaky `TestRunOnce_AddWhileRunning` test using polling
+  instead of sleep, with increased timeout for Windows CI
+
+### Changed
+- **CI: Skip gitleaks on fork PRs**: Fork PRs now pass CI without requiring secrets, as GitHub
+  Actions doesn't expose secrets to forks for security reasons
+
+[#262]: https://github.com/netresearch/go-cron/issues/262
+[PR#263]: https://github.com/netresearch/go-cron/pull/263
+[PR#264]: https://github.com/netresearch/go-cron/pull/264
+[@jrouzierinverse]: https://github.com/jrouzierinverse
+
 ## [0.7.0] - 2025-12-16
 
 ### Added
@@ -255,7 +274,8 @@ This fork includes all features from robfig/cron v3 plus:
    _, err := cron.ParseStandard("*/60 * * * *") // Error: step (60) must be less than range size (60)
    ```
 
-[Unreleased]: https://github.com/netresearch/go-cron/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/netresearch/go-cron/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/netresearch/go-cron/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/netresearch/go-cron/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/netresearch/go-cron/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/netresearch/go-cron/compare/v0.5.0...v0.6.0
