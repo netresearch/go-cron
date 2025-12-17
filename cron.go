@@ -521,7 +521,10 @@ func (c *Cron) ScheduleJob(schedule Schedule, cmd Job, opts ...JobOption) (Entry
 		opt(entry)
 	}
 
-	// Check for duplicate name and reserve atomically
+	// Check for duplicate name and reserve atomically using LoadOrStore.
+	// LoadOrStore returns (existing, true) if name exists, or (entry, false) if stored.
+	// Note: If a concurrent deletion removes an existing entry between our check and store,
+	// the new entry will be stored - this is the correct behavior since the name is now available.
 	if entry.Name != "" {
 		if _, loaded := c.nameIndex.LoadOrStore(entry.Name, entry); loaded {
 			c.nextID-- // Revert ID allocation
@@ -731,11 +734,9 @@ func (c *Cron) run() {
 			case req := <-c.nameLookup:
 				// O(1) entry lookup by name using nameIndex
 				if val, ok := c.nameIndex.Load(req.name); ok {
-					if entry, ok := val.(*Entry); ok {
-						req.reply <- *entry
-					} else {
-						req.reply <- Entry{}
-					}
+					// nameIndex only stores *Entry values
+					entry, _ := val.(*Entry)
+					req.reply <- *entry
 				} else {
 					req.reply <- Entry{}
 				}
@@ -1018,9 +1019,9 @@ func (c *Cron) EntryByName(name string) Entry {
 	c.runningMu.Unlock()
 	// When not running, safe to read directly
 	if val, ok := c.nameIndex.Load(name); ok {
-		if entry, ok := val.(*Entry); ok {
-			return *entry
-		}
+		// nameIndex only stores *Entry values
+		entry, _ := val.(*Entry)
+		return *entry
 	}
 	return Entry{}
 }
