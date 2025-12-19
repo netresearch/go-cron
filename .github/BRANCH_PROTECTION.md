@@ -50,7 +50,7 @@ The following protection rules should be configured in GitHub Settings > Branche
 
 ### Why These Settings?
 
-1. **Required Status Checks**: Ensures all CI tests pass, including security scans (CodeQL, gosec, govulncheck, Trivy) before code reaches main branch.
+1. **Required Status Checks**: Ensures all CI tests pass, including security scans (gosec, govulncheck, Trivy) before code reaches main branch.
 
 2. **Code Review**: Implements the "two pairs of eyes" principle - all code changes must be reviewed by at least one maintainer before merging.
 
@@ -75,9 +75,9 @@ Branch pattern: `main`
 
 This configuration addresses several OpenSSF Scorecard checks:
 
-- **BranchProtectionID**: Protected main branch with required reviews
-- **CodeReviewID**: Mandatory PR reviews before merge
-- **MaintainedID**: Active CI/CD enforcement demonstrates active maintenance
+- **Branch-Protection**: Protected main branch with required reviews
+- **Code-Review**: Mandatory PR reviews before merge
+- **Maintained**: Active CI/CD enforcement demonstrates active maintenance
 
 ## Exceptions
 
