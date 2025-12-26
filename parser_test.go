@@ -1667,3 +1667,249 @@ func TestExtendedEdgeCases(t *testing.T) {
 		}
 	})
 }
+
+func TestFullParser(t *testing.T) {
+	parser := FullParser()
+
+	t.Run("standard 5-field cron", func(t *testing.T) {
+		sched, err := parser.Parse("30 14 * * *")
+		if err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+
+		start := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+		next := sched.Next(start)
+
+		expected := time.Date(2025, 1, 1, 14, 30, 0, 0, time.UTC)
+		if !next.Equal(expected) {
+			t.Errorf("5-field cron: expected %v, got %v", expected, next)
+		}
+	})
+
+	t.Run("6-field cron with seconds", func(t *testing.T) {
+		sched, err := parser.Parse("15 30 14 * * *")
+		if err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+
+		start := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+		next := sched.Next(start)
+
+		expected := time.Date(2025, 1, 1, 14, 30, 15, 0, time.UTC)
+		if !next.Equal(expected) {
+			t.Errorf("6-field cron with seconds: expected %v, got %v", expected, next)
+		}
+	})
+
+	t.Run("6-field cron with year", func(t *testing.T) {
+		sched, err := parser.Parse("30 14 25 12 * 2025")
+		if err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+
+		start := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+		next := sched.Next(start)
+
+		expected := time.Date(2025, 12, 25, 14, 30, 0, 0, time.UTC)
+		if !next.Equal(expected) {
+			t.Errorf("6-field cron with year: expected %v, got %v", expected, next)
+		}
+	})
+
+	t.Run("7-field cron with seconds and year", func(t *testing.T) {
+		sched, err := parser.Parse("0 0 0 1 1 * 2030")
+		if err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+
+		start := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+		next := sched.Next(start)
+
+		expected := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
+		if !next.Equal(expected) {
+			t.Errorf("7-field cron: expected %v, got %v", expected, next)
+		}
+	})
+
+	t.Run("descriptors", func(t *testing.T) {
+		testCases := []struct {
+			desc string
+		}{
+			{"@yearly"},
+			{"@annually"},
+			{"@monthly"},
+			{"@weekly"},
+			{"@daily"},
+			{"@midnight"},
+			{"@hourly"},
+			{"@every 1h"},
+			{"@every 30m"},
+		}
+
+		for _, tc := range testCases {
+			t.Run(tc.desc, func(t *testing.T) {
+				_, err := parser.Parse(tc.desc)
+				if err != nil {
+					t.Errorf("descriptor %s: unexpected error: %v", tc.desc, err)
+				}
+			})
+		}
+	})
+
+	t.Run("hash expressions", func(t *testing.T) {
+		// Hash expressions require a hash key for deterministic scheduling
+		parserWithHash := parser.WithHashKey("test-job")
+		sched, err := parserWithHash.Parse("H H * * *")
+		if err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+
+		if sched == nil {
+			t.Error("hash expression: schedule is nil")
+		}
+	})
+
+	t.Run("extended DOW syntax - nth weekday", func(t *testing.T) {
+		// FRI#3 = third Friday
+		sched, err := parser.Parse("0 12 * * FRI#3")
+		if err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+
+		// Jan 2025: Third Friday is Jan 17
+		start := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+		next := sched.Next(start)
+
+		expected := time.Date(2025, 1, 17, 12, 0, 0, 0, time.UTC)
+		if !next.Equal(expected) {
+			t.Errorf("FRI#3: expected %v, got %v", expected, next)
+		}
+	})
+
+	t.Run("extended DOW syntax - last weekday", func(t *testing.T) {
+		// FRI#L = last Friday
+		sched, err := parser.Parse("0 12 * * FRI#L")
+		if err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+
+		// Jan 2025: Last Friday is Jan 31
+		start := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+		next := sched.Next(start)
+
+		expected := time.Date(2025, 1, 31, 12, 0, 0, 0, time.UTC)
+		if !next.Equal(expected) {
+			t.Errorf("FRI#L: expected %v, got %v", expected, next)
+		}
+	})
+
+	t.Run("extended DOM syntax - last day", func(t *testing.T) {
+		sched, err := parser.Parse("0 12 L * *")
+		if err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+
+		// Jan 2025: Last day is Jan 31
+		start := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+		next := sched.Next(start)
+
+		expected := time.Date(2025, 1, 31, 12, 0, 0, 0, time.UTC)
+		if !next.Equal(expected) {
+			t.Errorf("L: expected %v, got %v", expected, next)
+		}
+	})
+
+	t.Run("extended DOM syntax - nearest weekday", func(t *testing.T) {
+		// 15W = nearest weekday to the 15th
+		sched, err := parser.Parse("0 12 15W * *")
+		if err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+
+		// Jan 2025: 15th is Wednesday, so it matches directly
+		start := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+		next := sched.Next(start)
+
+		expected := time.Date(2025, 1, 15, 12, 0, 0, 0, time.UTC)
+		if !next.Equal(expected) {
+			t.Errorf("15W: expected %v, got %v", expected, next)
+		}
+	})
+
+	t.Run("year range", func(t *testing.T) {
+		sched, err := parser.Parse("0 0 1 1 * 2025-2027")
+		if err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+
+		start := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+		next := sched.Next(start)
+		expected := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+		if !next.Equal(expected) {
+			t.Errorf("year range (first): expected %v, got %v", expected, next)
+		}
+
+		// Next occurrence after 2025
+		next = sched.Next(next)
+		expected = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+		if !next.Equal(expected) {
+			t.Errorf("year range (second): expected %v, got %v", expected, next)
+		}
+	})
+
+	t.Run("specific date and time - Christmas 2025", func(t *testing.T) {
+		sched, err := parser.Parse("0 30 14 25 12 * 2025")
+		if err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+
+		start := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+		next := sched.Next(start)
+
+		expected := time.Date(2025, 12, 25, 14, 30, 0, 0, time.UTC)
+		if !next.Equal(expected) {
+			t.Errorf("Christmas 2025: expected %v, got %v", expected, next)
+		}
+	})
+
+	t.Run("combined extended features", func(t *testing.T) {
+		// At noon on the last Friday of each month in 2025
+		sched, err := parser.Parse("0 12 * * FRI#L 2025")
+		if err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+
+		start := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+		next := sched.Next(start)
+
+		// Last Friday of January 2025 is Jan 31
+		expected := time.Date(2025, 1, 31, 12, 0, 0, 0, time.UTC)
+		if !next.Equal(expected) {
+			t.Errorf("last Friday 2025: expected %v, got %v", expected, next)
+		}
+	})
+}
+
+func TestFullParserReturnsConsistentInstance(t *testing.T) {
+	// FullParser should return the same pre-configured instance
+	p1 := FullParser()
+	p2 := FullParser()
+
+	// Parse the same expression with both
+	spec := "30 14 * * *"
+	s1, err1 := p1.Parse(spec)
+	s2, err2 := p2.Parse(spec)
+
+	if err1 != nil || err2 != nil {
+		t.Fatalf("parse errors: %v, %v", err1, err2)
+	}
+
+	// Both should produce equivalent schedules
+	start := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	n1 := s1.Next(start)
+	n2 := s2.Next(start)
+
+	if !n1.Equal(n2) {
+		t.Errorf("FullParser instances produce different results: %v vs %v", n1, n2)
+	}
+}
