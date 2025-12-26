@@ -29,6 +29,7 @@ const (
 	DowOptional                            // Optional day of week field, default *
 	Descriptor                             // Allow descriptors such as @monthly, @weekly, etc.
 	Year                                   // Year field, default * (any year)
+	YearOptional                           // Optional year field, auto-detected by value >= 100
 	Hash                                   // Allow Jenkins-style 'H' hash expressions for load distribution
 	DowNth                                 // Allow #n syntax in DOW (e.g., FRI#3 for 3rd Friday)
 	DowLast                                // Allow #L syntax in DOW (e.g., FRI#L for last Friday)
@@ -419,19 +420,15 @@ func (p Parser) parse(spec string) (Schedule, error) {
 	// Split on whitespace.
 	fields := strings.Fields(spec)
 
-	// Extract year field if Year option is enabled (it's always the last field)
-	var yearField string
-	if p.options&Year > 0 {
-		var err error
-		fields, yearField, err = extractYearField(fields, p.options)
-		if err != nil {
-			return nil, err
-		}
+	// Extract year field if Year or YearOptional option is enabled (it's always the last field)
+	fields, yearField, err := p.handleYearExtraction(fields)
+	if err != nil {
+		return nil, err
 	}
 
 	// Validate & fill in any omitted or optional fields (excluding Year)
-	// Use options without Year flag for normalizeFields since Year is handled separately
-	normalizeOptions := p.options &^ Year
+	// Use options without Year/YearOptional flags for normalizeFields since Year is handled separately
+	normalizeOptions := p.options &^ Year &^ YearOptional
 	fields, err = normalizeFields(fields, normalizeOptions)
 	if err != nil {
 		return nil, err
@@ -490,9 +487,9 @@ func (p Parser) parse(spec string) (Schedule, error) {
 		return nil, dowErr
 	}
 
-	// Parse year field if Year option is enabled
+	// Parse year field if Year or YearOptional option is enabled
 	var yearSet map[int]struct{} // nil = wildcard (any year)
-	if p.options&Year > 0 && yearField != "" {
+	if (p.options&Year > 0 || p.options&YearOptional > 0) && yearField != "" {
 		var yearErr error
 		yearSet, yearErr = getYearField(yearField)
 		if yearErr != nil {
@@ -676,6 +673,62 @@ func extractYearFieldAmbiguous(fields []string) (remainingFields []string, yearF
 	return fields[:len(fields)-1], lastField, nil
 }
 
+// handleYearExtraction routes to the appropriate year extraction logic based on parser options.
+func (p Parser) handleYearExtraction(fields []string) (remainingFields []string, yearField string, err error) {
+	if p.options&Year > 0 {
+		return extractYearField(fields, p.options)
+	}
+	if p.options&YearOptional > 0 {
+		return extractOptionalYearField(fields, p.options)
+	}
+	return fields, "", nil
+}
+
+// extractOptionalYearField handles the YearOptional case where the year field is auto-detected.
+// The year is only extracted if the last field looks like a year (contains a value >= 100).
+// This allows both standard 5-field cron and 6-field cron with year to be parsed.
+func extractOptionalYearField(fields []string, options ParseOption) (remainingFields []string, yearField string, err error) {
+	// Remove YearOptional from options for field counting
+	nonYearOptions := options &^ YearOptional
+
+	// Process optional flags to get field count range
+	processedOptions, optionals, err := processOptionalFlags(nonYearOptions)
+	if err != nil {
+		return nil, "", err
+	}
+	maxNonYearFields := countConfiguredFields(processedOptions)
+	minNonYearFields := maxNonYearFields - optionals
+
+	// Accept expressions with or without year field
+	// minNonYearFields to maxNonYearFields+1 (the +1 is for optional year)
+	if len(fields) < minNonYearFields || len(fields) > maxNonYearFields+1 {
+		return nil, "", fmt.Errorf("expected %d to %d fields, found %d: %s",
+			minNonYearFields, maxNonYearFields+1, len(fields), fields)
+	}
+
+	// If we have more fields than max non-year fields, the last one must be year
+	if len(fields) > maxNonYearFields {
+		lastField := fields[len(fields)-1]
+		if !looksLikeYear(lastField) {
+			return nil, "", fmt.Errorf("last field %q does not appear to be a year (expected value >= 100)", lastField)
+		}
+		return fields[:len(fields)-1], lastField, nil
+	}
+
+	// We have minNonYearFields to maxNonYearFields
+	// Check if last field looks like a year
+	if len(fields) > 0 {
+		lastField := fields[len(fields)-1]
+		if looksLikeYear(lastField) && len(fields) > minNonYearFields {
+			// Last field looks like year and we have enough fields to spare one
+			return fields[:len(fields)-1], lastField, nil
+		}
+	}
+
+	// No year field detected, use wildcard
+	return fields, "*", nil
+}
+
 var standardParser = NewParser(
 	Minute | Hour | Dom | Month | Dow | Descriptor,
 )
@@ -690,6 +743,33 @@ var standardParser = NewParser(
 //	c := cron.New(cron.WithParser(p))
 func StandardParser() Parser {
 	return standardParser
+}
+
+// fullParser is a pre-configured parser that accepts all cron syntax variants.
+var fullParser = NewParser(
+	SecondOptional | Minute | Hour | Dom | Month | Dow |
+		YearOptional | Descriptor | Extended | Hash,
+)
+
+// FullParser returns a parser that accepts all cron syntax variants including
+// optional seconds, year field, descriptors, hash expressions, and extended
+// day-of-month/day-of-week syntax.
+//
+// This parser supports:
+//   - Standard 5-field cron: minute, hour, day-of-month, month, day-of-week
+//   - Optional seconds prefix (6 fields): second, minute, hour, dom, month, dow
+//   - Optional year suffix (7 fields with seconds, 6 without)
+//   - Descriptors: @yearly, @monthly, @weekly, @daily, @hourly, @every <duration>
+//   - Hash expressions: H for load-distributed scheduling
+//   - Extended syntax: FRI#3 (3rd Friday), MON#L (last Monday), L (last day), 15W (nearest weekday)
+//
+// Example:
+//
+//	c := cron.New(cron.WithParser(cron.FullParser()))
+//	c.AddFunc("0 30 14 25 12 2025", myFunc) // Run at 14:30 on Dec 25, 2025
+//	c.AddFunc("0 0 0 1 1 * 2030", myFunc)   // Run at midnight on Jan 1, 2030
+func FullParser() Parser {
+	return fullParser
 }
 
 // ParseStandard returns a new crontab schedule representing the given
