@@ -154,83 +154,174 @@ func TestChainRecoverWithLogLevel(t *testing.T) {
 	})
 }
 
+// countJob is a test job that tracks start/done counts with optional delay.
+// It supports both delay-based simulation and channel-based synchronization.
 type countJob struct {
-	m       sync.Mutex
-	started int
-	done    int
-	delay   time.Duration
+	m          sync.Mutex
+	started    int
+	done       int
+	delay      time.Duration
+	onStart    chan struct{} // signaled when job starts (optional)
+	onDone     chan struct{} // signaled when job completes (optional)
+	canProceed chan struct{} // blocks job until signaled (optional)
 }
 
 func (j *countJob) Run() {
 	j.m.Lock()
 	j.started++
+	if j.onStart != nil {
+		select {
+		case j.onStart <- struct{}{}:
+		default:
+		}
+	}
 	j.m.Unlock()
-	time.Sleep(j.delay)
+
+	// Wait for permission to proceed if channel is set
+	if j.canProceed != nil {
+		<-j.canProceed
+	}
+
+	// Simulate work with delay if set
+	if j.delay > 0 {
+		time.Sleep(j.delay)
+	}
+
 	j.m.Lock()
 	j.done++
+	if j.onDone != nil {
+		select {
+		case j.onDone <- struct{}{}:
+		default:
+		}
+	}
 	j.m.Unlock()
 }
 
 func (j *countJob) Started() int {
-	defer j.m.Unlock()
 	j.m.Lock()
+	defer j.m.Unlock()
 	return j.started
 }
 
 func (j *countJob) Done() int {
-	defer j.m.Unlock()
 	j.m.Lock()
+	defer j.m.Unlock()
 	return j.done
 }
 
 func TestChainDelayIfStillRunning(t *testing.T) {
 	t.Run("runs immediately", func(t *testing.T) {
-		var j countJob
-		wrappedJob := NewChain(DelayIfStillRunning(DiscardLogger)).Then(&j)
+		j := &countJob{
+			onDone: make(chan struct{}, 1),
+		}
+		wrappedJob := NewChain(DelayIfStillRunning(DiscardLogger)).Then(j)
 		go wrappedJob.Run()
-		time.Sleep(2 * time.Millisecond) // Give the job 2ms to complete.
-		if c := j.Done(); c != 1 {
-			t.Errorf("expected job run once, immediately, got %d", c)
+
+		// Wait for job completion with timeout
+		select {
+		case <-j.onDone:
+			if c := j.Done(); c != 1 {
+				t.Errorf("expected job run once, immediately, got %d", c)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("timeout waiting for job to complete")
 		}
 	})
 
 	t.Run("second run immediate if first done", func(t *testing.T) {
-		var j countJob
-		wrappedJob := NewChain(DelayIfStillRunning(DiscardLogger)).Then(&j)
+		// Use WaitGroup to track both job completions
+		var wg sync.WaitGroup
+		var runCount atomic.Int32
+
+		job := FuncJob(func() {
+			runCount.Add(1)
+			wg.Done()
+		})
+
+		wrappedJob := NewChain(DelayIfStillRunning(DiscardLogger)).Then(job)
+
+		// Run first job synchronously (it completes immediately)
+		wg.Add(1)
+		wrappedJob.Run()
+
+		// Run second job (first is done, so no delay)
+		wg.Add(1)
+		wrappedJob.Run()
+
+		// Both should complete
+		done := make(chan struct{})
 		go func() {
-			go wrappedJob.Run()
-			time.Sleep(time.Millisecond)
-			go wrappedJob.Run()
+			wg.Wait()
+			close(done)
 		}()
-		time.Sleep(3 * time.Millisecond) // Give both jobs 3ms to complete.
-		if c := j.Done(); c != 2 {
-			t.Errorf("expected job run twice, immediately, got %d", c)
+
+		select {
+		case <-done:
+			if c := runCount.Load(); c != 2 {
+				t.Errorf("expected job run twice, got %d", c)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("timeout waiting for jobs to complete")
 		}
 	})
 
 	t.Run("second run delayed if first not done", func(t *testing.T) {
-		var j countJob
-		j.delay = 10 * time.Millisecond
-		wrappedJob := NewChain(DelayIfStillRunning(DiscardLogger)).Then(&j)
-		go func() {
-			go wrappedJob.Run()
-			time.Sleep(time.Millisecond)
-			go wrappedJob.Run()
-		}()
+		// Use channels for synchronization
+		j := &countJob{
+			onStart:    make(chan struct{}, 2),
+			onDone:     make(chan struct{}, 2),
+			canProceed: make(chan struct{}),
+		}
+		wrappedJob := NewChain(DelayIfStillRunning(DiscardLogger)).Then(j)
 
-		// After 5ms, the first job is still in progress, and the second job was
-		// run but should be waiting for it to finish.
-		time.Sleep(5 * time.Millisecond)
-		started, done := j.Started(), j.Done()
-		if started != 1 || done != 0 {
-			t.Error("expected first job started, but not finished, got", started, done)
+		// Start first job - it will block on canProceed
+		go wrappedJob.Run()
+
+		// Wait for first job to start
+		select {
+		case <-j.onStart:
+		case <-time.After(5 * time.Second):
+			t.Fatal("timeout waiting for first job to start")
 		}
 
-		// Verify that the second job completes.
-		time.Sleep(25 * time.Millisecond)
-		started, done = j.Started(), j.Done()
-		if started != 2 || done != 2 {
-			t.Error("expected both jobs done, got", started, done)
+		// Start second job - it should be delayed waiting for mutex
+		secondDone := make(chan struct{})
+		go func() {
+			wrappedJob.Run()
+			close(secondDone)
+		}()
+
+		// Give second job a moment to hit the mutex (it should block)
+		time.Sleep(10 * time.Millisecond)
+
+		// Verify first job started, not done, second hasn't started inner job
+		if s, d := j.Started(), j.Done(); s != 1 || d != 0 {
+			t.Errorf("expected first job started but not done, got started=%d done=%d", s, d)
+		}
+
+		// Allow first job to proceed
+		close(j.canProceed)
+
+		// Wait for both jobs to complete
+		for i := 0; i < 2; i++ {
+			select {
+			case <-j.onDone:
+			case <-time.After(5 * time.Second):
+				t.Fatalf("timeout waiting for job %d to complete", i+1)
+			}
+		}
+
+		// Wait for second goroutine to finish
+		select {
+		case <-secondDone:
+		case <-time.After(5 * time.Second):
+			t.Fatal("timeout waiting for second job goroutine")
+		}
+
+		// Verify both jobs completed
+		if s, d := j.Started(), j.Done(); s != 2 || d != 2 {
+			t.Errorf("expected both jobs done, got started=%d done=%d", s, d)
 		}
 	})
 }
@@ -363,38 +454,188 @@ func TestSkipIfStillRunning_SecondRunSkippedIfFirstNotDone(t *testing.T) {
 
 // TestSkipIfStillRunning_Skip10JobsOnRapidFire tests skipping multiple rapid-fire jobs.
 func TestSkipIfStillRunning_Skip10JobsOnRapidFire(t *testing.T) {
-	var j countJob
-	j.delay = 10 * time.Millisecond
-	wrappedJob := NewChain(SkipIfStillRunning(DiscardLogger)).Then(&j)
+	// Use channels to synchronize: job signals when started, test signals when it can finish
+	// Buffered channels prevent signal drops if send happens before receiver is ready
+	jobStarted := make(chan struct{}, 1)
+	jobCanFinish := make(chan struct{})
+	jobDone := make(chan struct{}, 1)
+
+	var runCount atomic.Int32
+
+	job := FuncJob(func() {
+		runCount.Add(1)
+		// Signal we've started
+		select {
+		case jobStarted <- struct{}{}:
+		default:
+		}
+		// Wait for permission to finish (this holds the semaphore)
+		<-jobCanFinish
+		// Signal we're done
+		select {
+		case jobDone <- struct{}{}:
+		default:
+		}
+	})
+
+	wrappedJob := NewChain(SkipIfStillRunning(DiscardLogger)).Then(job)
+
+	// Track when all wrapper calls complete
+	var wrappersDone sync.WaitGroup
+
+	// Fire 11 jobs rapidly
 	for i := 0; i < 11; i++ {
-		go wrappedJob.Run()
+		wrappersDone.Add(1)
+		go func() {
+			defer wrappersDone.Done()
+			wrappedJob.Run()
+		}()
 	}
-	time.Sleep(200 * time.Millisecond)
-	done := j.Done()
-	if done != 1 {
-		t.Error("expected 1 jobs executed, 10 jobs dropped, got", done)
+
+	// Wait for first job to start (it will hold the semaphore)
+	select {
+	case <-jobStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for job to start")
+	}
+
+	// Give other goroutines time to attempt and get skipped
+	time.Sleep(10 * time.Millisecond)
+
+	// Allow the job to complete
+	close(jobCanFinish)
+
+	// Wait for job to finish
+	select {
+	case <-jobDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for job to complete")
+	}
+
+	// Wait for all wrapper calls to return
+	done := make(chan struct{})
+	go func() {
+		wrappersDone.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for all wrappers to return")
+	}
+
+	if c := runCount.Load(); c != 1 {
+		t.Errorf("expected 1 job executed, 10 jobs dropped, got %d", c)
 	}
 }
 
 // TestSkipIfStillRunning_DifferentJobsIndependent tests that different jobs are independent.
 func TestSkipIfStillRunning_DifferentJobsIndependent(t *testing.T) {
-	var j1, j2 countJob
-	j1.delay = 10 * time.Millisecond
-	j2.delay = 10 * time.Millisecond
+	// Create two jobs with independent synchronization
+	// Use buffered channels to avoid race between signal and receive
+	job1Started := make(chan struct{}, 1)
+	job1CanFinish := make(chan struct{})
+	job1Done := make(chan struct{}, 1)
+	var run1Count atomic.Int32
+
+	job1 := FuncJob(func() {
+		run1Count.Add(1)
+		select {
+		case job1Started <- struct{}{}:
+		default:
+		}
+		<-job1CanFinish
+		select {
+		case job1Done <- struct{}{}:
+		default:
+		}
+	})
+
+	job2Started := make(chan struct{}, 1)
+	job2CanFinish := make(chan struct{})
+	job2Done := make(chan struct{}, 1)
+	var run2Count atomic.Int32
+
+	job2 := FuncJob(func() {
+		run2Count.Add(1)
+		select {
+		case job2Started <- struct{}{}:
+		default:
+		}
+		<-job2CanFinish
+		select {
+		case job2Done <- struct{}{}:
+		default:
+		}
+	})
+
 	chain := NewChain(SkipIfStillRunning(DiscardLogger))
-	wrappedJob1 := chain.Then(&j1)
-	wrappedJob2 := chain.Then(&j2)
+	wrappedJob1 := chain.Then(job1)
+	wrappedJob2 := chain.Then(job2)
+
+	var wrappersDone sync.WaitGroup
+
+	// Fire 11 jobs for each wrapped job
 	for i := 0; i < 11; i++ {
-		go wrappedJob1.Run()
-		go wrappedJob2.Run()
+		wrappersDone.Add(2)
+		go func() {
+			defer wrappersDone.Done()
+			wrappedJob1.Run()
+		}()
+		go func() {
+			defer wrappersDone.Done()
+			wrappedJob2.Run()
+		}()
 	}
-	time.Sleep(100 * time.Millisecond)
-	var (
-		done1 = j1.Done()
-		done2 = j2.Done()
-	)
+
+	// Wait for both jobs to start
+	select {
+	case <-job1Started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for job1 to start")
+	}
+	select {
+	case <-job2Started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for job2 to start")
+	}
+
+	// Give other goroutines time to attempt and get skipped
+	time.Sleep(10 * time.Millisecond)
+
+	// Allow both jobs to complete
+	close(job1CanFinish)
+	close(job2CanFinish)
+
+	// Wait for both jobs to complete
+	select {
+	case <-job1Done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for job1 to complete")
+	}
+	select {
+	case <-job2Done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for job2 to complete")
+	}
+
+	// Wait for all wrappers to return
+	done := make(chan struct{})
+	go func() {
+		wrappersDone.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for all wrappers to return")
+	}
+
+	done1, done2 := run1Count.Load(), run2Count.Load()
 	if done1 != 1 || done2 != 1 {
-		t.Error("expected both jobs executed once, got", done1, "and", done2)
+		t.Errorf("expected both jobs executed once, got %d and %d", done1, done2)
 	}
 }
 
@@ -410,9 +651,11 @@ func TestChainTimeout(t *testing.T) {
 	})
 
 	t.Run("job exceeds timeout", func(t *testing.T) {
-		var j countJob
-		j.delay = 50 * time.Millisecond
-		wrappedJob := NewChain(Timeout(DiscardLogger, 5*time.Millisecond)).Then(&j)
+		j := &countJob{
+			delay:  50 * time.Millisecond,
+			onDone: make(chan struct{}, 1),
+		}
+		wrappedJob := NewChain(Timeout(DiscardLogger, 5*time.Millisecond)).Then(j)
 
 		start := time.Now()
 		wrappedJob.Run()
@@ -428,10 +671,14 @@ func TestChainTimeout(t *testing.T) {
 			t.Errorf("expected job not done yet (abandoned), got %d", c)
 		}
 
-		// Wait for abandoned goroutine to complete
-		time.Sleep(100 * time.Millisecond)
-		if c := j.Done(); c != 1 {
-			t.Errorf("expected abandoned job to eventually complete, got %d", c)
+		// Wait for abandoned goroutine to complete using channel
+		select {
+		case <-j.onDone:
+			if c := j.Done(); c != 1 {
+				t.Errorf("expected abandoned job to eventually complete, got %d", c)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("timeout waiting for abandoned job to complete")
 		}
 	})
 
@@ -456,14 +703,19 @@ func TestChainTimeout(t *testing.T) {
 	})
 
 	t.Run("multiple jobs with different timeouts", func(t *testing.T) {
-		var j1, j2 countJob
-		j1.delay = 5 * time.Millisecond
-		j2.delay = 100 * time.Millisecond
+		j1 := &countJob{
+			delay:  5 * time.Millisecond,
+			onDone: make(chan struct{}, 1),
+		}
+		j2 := &countJob{
+			delay:  100 * time.Millisecond,
+			onDone: make(chan struct{}, 1),
+		}
 
 		// Short timeout - j1 should complete, j2 should timeout
 		chain := NewChain(Timeout(DiscardLogger, 20*time.Millisecond))
-		wrappedJob1 := chain.Then(&j1)
-		wrappedJob2 := chain.Then(&j2)
+		wrappedJob1 := chain.Then(j1)
+		wrappedJob2 := chain.Then(j2)
 
 		wrappedJob1.Run()
 		wrappedJob2.Run()
@@ -475,10 +727,14 @@ func TestChainTimeout(t *testing.T) {
 			t.Errorf("expected j2 to timeout (not done yet), got %d", c)
 		}
 
-		// Wait for abandoned j2 to complete
-		time.Sleep(150 * time.Millisecond)
-		if c := j2.Done(); c != 1 {
-			t.Errorf("expected j2 to eventually complete, got %d", c)
+		// Wait for abandoned j2 to complete using channel
+		select {
+		case <-j2.onDone:
+			if c := j2.Done(); c != 1 {
+				t.Errorf("expected j2 to eventually complete, got %d", c)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("timeout waiting for j2 to complete")
 		}
 	})
 
@@ -504,15 +760,22 @@ func TestChainTimeout(t *testing.T) {
 	})
 
 	t.Run("panic after timeout does not propagate", func(t *testing.T) {
+		jobDone := make(chan struct{})
 		panicJob := FuncJob(func() {
+			defer close(jobDone)
 			time.Sleep(20 * time.Millisecond)
 			panic("delayed panic")
 		})
 		// Timeout returns before panic occurs
 		wrappedJob := NewChain(Recover(DiscardLogger), Timeout(DiscardLogger, 5*time.Millisecond)).Then(panicJob)
 		wrappedJob.Run()
-		// Wait for abandoned goroutine's panic (won't propagate)
-		time.Sleep(50 * time.Millisecond)
+		// Wait for abandoned goroutine's panic (won't propagate) using channel
+		select {
+		case <-jobDone:
+			// Goroutine finished (panicked and recovered by runtime)
+		case <-time.After(5 * time.Second):
+			t.Fatal("timeout waiting for abandoned goroutine")
+		}
 	})
 
 	t.Run("callback invoked on timeout", func(t *testing.T) {
@@ -524,9 +787,11 @@ func TestChainTimeout(t *testing.T) {
 			callbackTimeout = timeout
 		}
 
-		var j countJob
-		j.delay = 50 * time.Millisecond
-		wrappedJob := NewChain(Timeout(DiscardLogger, 5*time.Millisecond, WithTimeoutCallback(callback))).Then(&j)
+		j := &countJob{
+			delay:  50 * time.Millisecond,
+			onDone: make(chan struct{}, 1),
+		}
+		wrappedJob := NewChain(Timeout(DiscardLogger, 5*time.Millisecond, WithTimeoutCallback(callback))).Then(j)
 		wrappedJob.Run()
 
 		// Callback should have been invoked
@@ -537,8 +802,12 @@ func TestChainTimeout(t *testing.T) {
 			t.Errorf("expected callback to receive timeout of 5ms, got %v", callbackTimeout)
 		}
 
-		// Wait for abandoned goroutine
-		time.Sleep(100 * time.Millisecond)
+		// Wait for abandoned goroutine using channel
+		select {
+		case <-j.onDone:
+		case <-time.After(5 * time.Second):
+			t.Fatal("timeout waiting for abandoned goroutine")
+		}
 	})
 
 	t.Run("callback not invoked when job completes in time", func(t *testing.T) {
@@ -636,8 +905,10 @@ func TestTimeoutWithContextCancellation(t *testing.T) {
 
 		logger := &testLogCapture{}
 
-		// Create a job that takes longer than timeout
+		// Create a job that takes longer than timeout with completion signal
+		jobDone := make(chan struct{})
 		job := FuncJob(func() {
+			defer close(jobDone)
 			time.Sleep(100 * time.Millisecond)
 		})
 
@@ -646,8 +917,12 @@ func TestTimeoutWithContextCancellation(t *testing.T) {
 
 		wrappedJob.Run()
 
-		// Wait for any cleanup
-		time.Sleep(50 * time.Millisecond)
+		// Wait for abandoned goroutine to complete
+		select {
+		case <-jobDone:
+		case <-time.After(5 * time.Second):
+			t.Fatal("timeout waiting for job goroutine to complete")
+		}
 
 		// Callback SHOULD be called because job actually timed out
 		if c := atomic.LoadInt32(&callbackCalled); c != 1 {
