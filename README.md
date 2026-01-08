@@ -3,6 +3,7 @@
 [![CodeQL](https://img.shields.io/github/actions/workflow/status/netresearch/go-cron/codeql.yml?label=CodeQL)](https://github.com/netresearch/go-cron/security/code-scanning)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/netresearch/go-cron/badge)](https://scorecard.dev/viewer/?uri=github.com/netresearch/go-cron)
 [![Go Report Card](https://goreportcard.com/badge/github.com/netresearch/go-cron)](https://goreportcard.com/report/github.com/netresearch/go-cron)
+[![Latest Release](https://img.shields.io/github/v/release/netresearch/go-cron)](https://github.com/netresearch/go-cron/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 # go-cron
