@@ -1,5 +1,6 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/netresearch/go-cron.svg)](https://pkg.go.dev/github.com/netresearch/go-cron)
 [![CI](https://github.com/netresearch/go-cron/actions/workflows/ci.yml/badge.svg)](https://github.com/netresearch/go-cron/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/netresearch/go-cron/graph/badge.svg)](https://codecov.io/gh/netresearch/go-cron)
 [![CodeQL](https://img.shields.io/github/actions/workflow/status/netresearch/go-cron/codeql.yml?label=CodeQL)](https://github.com/netresearch/go-cron/security/code-scanning)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/netresearch/go-cron/badge)](https://scorecard.dev/viewer/?uri=github.com/netresearch/go-cron)
 [![Go Report Card](https://goreportcard.com/badge/github.com/netresearch/go-cron)](https://goreportcard.com/report/github.com/netresearch/go-cron)
