@@ -3,10 +3,13 @@
 [![codecov](https://codecov.io/gh/netresearch/go-cron/graph/badge.svg)](https://codecov.io/gh/netresearch/go-cron)
 [![CodeQL](https://img.shields.io/github/actions/workflow/status/netresearch/go-cron/codeql.yml?label=CodeQL)](https://github.com/netresearch/go-cron/security/code-scanning)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/netresearch/go-cron/badge)](https://scorecard.dev/viewer/?uri=github.com/netresearch/go-cron)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/11696/badge)](https://www.bestpractices.dev/projects/11696)
 [![Go Report Card](https://goreportcard.com/badge/github.com/netresearch/go-cron)](https://goreportcard.com/report/github.com/netresearch/go-cron)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/netresearch/go-cron)](go.mod)
 [![Latest Release](https://img.shields.io/github/v/release/netresearch/go-cron)](https://github.com/netresearch/go-cron/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg)](CODE_OF_CONDUCT.md)
+[![SLSA 3](https://slsa.dev/images/gh-badge-level3.svg)](https://slsa.dev)
 
 # go-cron
 
