@@ -1,0 +1,16 @@
+# Codecov configuration
+# https://docs.codecov.com/docs/codecov-yaml
+
+codecov:
+  branch: main
+
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 1%
+    patch:
+      default:
+        target: auto
+        threshold: 1%
