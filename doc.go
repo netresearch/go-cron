@@ -100,6 +100,29 @@ Hyphen ( - )
 Hyphens are used to define ranges. For example, 9-17 would indicate every
 hour between 9am and 5pm inclusive.
 
+# Wraparound Ranges
+
+For cyclic fields (seconds, minutes, hours, day-of-week, month), ranges where
+the start value is greater than the end value are interpreted as wraparound
+ranges that span across the field boundary. For example:
+
+	22-2    (hours)   = 22, 23, 0, 1, 2 (spans midnight)
+	FRI-MON (dow)     = FRI, SAT, SUN, MON (spans the weekend)
+	NOV-FEB (month)   = NOV, DEC, JAN, FEB (spans year boundary)
+	55-5    (minutes) = 55, 56, 57, 58, 59, 0, 1, 2, 3, 4, 5
+
+This is useful for schedules that span midnight, weekends, or year boundaries.
+
+Wraparound ranges also support step values:
+
+	22-2/2  (hours)   = 22, 0, 2 (every 2 hours from 10pm to 2am)
+
+Day-of-month wraparound works correctly even for months with fewer days:
+
+	25-5    (dom)     = 25, 26, 27, 28, 29, 30, 31, 1, 2, 3, 4, 5
+
+In February (28 days), days 29-31 simply don't match and are skipped.
+
 Question mark ( ? )
 
 Question mark may be used instead of '*' for leaving either day-of-month or

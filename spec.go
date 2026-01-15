@@ -60,8 +60,9 @@ type DowConstraint struct {
 
 // bounds provides a range of acceptable values (plus a map of name to value).
 type bounds struct {
-	min, max uint
-	names    map[string]uint
+	min, max   uint
+	names      map[string]uint
+	wraparound bool // whether this field supports wraparound ranges (e.g., 22-2 for hours)
 }
 
 // YearBase is the minimum valid year for the Year field.
@@ -75,12 +76,13 @@ const YearBase = 1
 const YearMax = 1<<31 - 1 // 2147483647
 
 // The bounds for each field.
+// Fields with wraparound=true support ranges where start > end (e.g., 22-2 for hours).
 var (
-	seconds = bounds{0, 59, nil}
-	minutes = bounds{0, 59, nil}
-	hours   = bounds{0, 23, nil}
-	dom     = bounds{1, 31, nil}
-	years   = bounds{YearBase, YearMax, nil}
+	seconds = bounds{0, 59, nil, true}              // cyclic: supports wraparound
+	minutes = bounds{0, 59, nil, true}              // cyclic: supports wraparound
+	hours   = bounds{0, 23, nil, true}              // cyclic: supports wraparound
+	dom     = bounds{1, 31, nil, true}              // cyclic: supports wraparound (non-existent days skipped)
+	years   = bounds{YearBase, YearMax, nil, false} // non-cyclic: no wraparound
 	months  = bounds{1, 12, map[string]uint{
 		"jan": 1,
 		"feb": 2,
@@ -94,7 +96,7 @@ var (
 		"oct": 10,
 		"nov": 11,
 		"dec": 12,
-	}}
+	}, true} // cyclic: supports wraparound (e.g., NOV-FEB)
 	dow = bounds{0, 7, map[string]uint{
 		"sun": 0,
 		"mon": 1,
@@ -103,7 +105,7 @@ var (
 		"thu": 4,
 		"fri": 5,
 		"sat": 6,
-	}}
+	}, true} // cyclic: supports wraparound (e.g., FRI-MON)
 )
 
 const (
