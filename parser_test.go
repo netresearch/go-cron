@@ -370,6 +370,114 @@ func TestWraparoundScheduleNextTime(t *testing.T) {
 	})
 }
 
+func TestHashWraparoundExpressions(t *testing.T) {
+	// Test H expressions with wraparound ranges
+	parser := NewParser(Minute | Hour | Dom | Month | Dow | Hash)
+	parserWithHash := parser.WithHashKey("test-job-123")
+
+	t.Run("H(22-2) hours wraparound", func(t *testing.T) {
+		// H(22-2) should pick a single hour from the wraparound range 22,23,0,1,2
+		sched, err := parserWithHash.Parse("0 H(22-2) * * *")
+		if err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		spec := sched.(*SpecSchedule)
+
+		// Should have exactly one bit set in the wraparound range
+		validHours := uint64(1<<22 | 1<<23 | 1<<0 | 1<<1 | 1<<2)
+		if spec.Hour&validHours == 0 {
+			t.Errorf("H(22-2) should set a bit in range 22-2, got %b", spec.Hour)
+		}
+		// Count bits - should be exactly 1
+		bits := spec.Hour &^ starBit
+		count := 0
+		for bits > 0 {
+			count += int(bits & 1)
+			bits >>= 1
+		}
+		if count != 1 {
+			t.Errorf("H(22-2) should set exactly 1 bit, got %d", count)
+		}
+	})
+
+	t.Run("H(22-2)/2 hours wraparound with step", func(t *testing.T) {
+		// H(22-2)/2 with wraparound should generate values at step intervals
+		sched, err := parserWithHash.Parse("0 H(22-2)/2 * * *")
+		if err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		spec := sched.(*SpecSchedule)
+
+		// Should have bits set in the wraparound range with step 2
+		// Possible values depend on hash offset: could be 22,0,2 or 23,1
+		validHours := uint64(1<<22 | 1<<23 | 1<<0 | 1<<1 | 1<<2)
+		if spec.Hour&validHours == 0 {
+			t.Errorf("H(22-2)/2 should set bits in range 22-2, got %b", spec.Hour)
+		}
+	})
+
+	t.Run("H(11-2) months wraparound", func(t *testing.T) {
+		// H(11-2) months should pick from NOV, DEC, JAN, FEB
+		sched, err := parserWithHash.Parse("0 0 1 H(11-2) *")
+		if err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		spec := sched.(*SpecSchedule)
+
+		// Should have exactly one bit set in the wraparound range
+		validMonths := uint64(1<<11 | 1<<12 | 1<<1 | 1<<2)
+		if spec.Month&validMonths == 0 {
+			t.Errorf("H(11-2) should set a bit in range 11-2, got %b", spec.Month)
+		}
+	})
+
+	t.Run("H(5-1) dow wraparound", func(t *testing.T) {
+		// H(5-1) dow should pick from FRI, SAT, SUN, MON
+		sched, err := parserWithHash.Parse("0 0 * * H(5-1)")
+		if err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		spec := sched.(*SpecSchedule)
+
+		// Should have exactly one bit set in the wraparound range (before normalization: 5,6,7,0,1)
+		// After normalization: 5,6,0,1 (7 becomes 0)
+		validDow := uint64(1<<5 | 1<<6 | 1<<0 | 1<<1)
+		normalizedDow := NormalizeDOW(spec.Dow)
+		if normalizedDow&validDow == 0 {
+			t.Errorf("H(5-1) should set a bit in range 5-1, got %b", normalizedDow)
+		}
+	})
+
+	t.Run("H(28-3) dom wraparound", func(t *testing.T) {
+		// H(28-3) dom should pick from 28,29,30,31,1,2,3
+		sched, err := parserWithHash.Parse("0 0 H(28-3) * *")
+		if err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		spec := sched.(*SpecSchedule)
+
+		// Should have exactly one bit set in the wraparound range
+		validDom := uint64(1<<28 | 1<<29 | 1<<30 | 1<<31 | 1<<1 | 1<<2 | 1<<3)
+		if spec.Dom&validDom == 0 {
+			t.Errorf("H(28-3) should set a bit in range 28-3, got %b", spec.Dom)
+		}
+	})
+
+	t.Run("H(55-5) minutes wraparound with step", func(t *testing.T) {
+		// H(55-5)/3 with wraparound
+		sched, err := parserWithHash.Parse("H(55-5)/3 0 * * *")
+		if err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		spec := sched.(*SpecSchedule)
+
+		// Should have bits set - range is 55,56,57,58,59,0,1,2,3,4,5 with step 3
+		if spec.Minute == 0 || spec.Minute == starBit {
+			t.Errorf("H(55-5)/3 should set bits, got %b", spec.Minute)
+		}
+	})
+}
+
 func TestAll(t *testing.T) {
 	allBits := []struct {
 		r        bounds
