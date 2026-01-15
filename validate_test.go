@@ -97,10 +97,10 @@ func TestValidateSpec(t *testing.T) {
 			errMsg:  "above maximum",
 		},
 		{
-			name:    "invalid range",
-			spec:    "5-3 * * * *",
+			name:    "invalid step larger than range",
+			spec:    "0-2/5 * * * *",
 			wantErr: true,
-			errMsg:  "beyond end of range",
+			errMsg:  "step (5) must be less than range size (3)",
 		},
 		{
 			name:    "invalid timezone",

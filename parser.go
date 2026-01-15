@@ -1129,6 +1129,7 @@ func parseRangeBounds(lowAndHigh []string, r bounds) (start, end uint, extra uin
 }
 
 // validateRangeParams validates the parsed range parameters.
+// Uses r.wraparound to determine if start > end is allowed for cyclic fields.
 func validateRangeParams(start, end, step uint, r bounds, expr string) error {
 	if start < r.min {
 		return fmt.Errorf("beginning of range (%d) below minimum (%d): %q", start, r.min, expr)
@@ -1136,14 +1137,22 @@ func validateRangeParams(start, end, step uint, r bounds, expr string) error {
 	if end > r.max {
 		return fmt.Errorf("end of range (%d) above maximum (%d): %q", end, r.max, expr)
 	}
-	if start > end {
+	if start > end && !r.wraparound {
 		return fmt.Errorf("beginning of range (%d) beyond end of range (%d): %q", start, end, expr)
 	}
 	if step == 0 {
 		return fmt.Errorf("step of range must be a positive number: %q", expr)
 	}
-	if step > 1 && step >= end-start+1 {
-		return fmt.Errorf("step (%d) must be less than range size (%d): %q", step, end-start+1, expr)
+	// Calculate effective range size (accounting for wraparound)
+	var rangeSize uint
+	if start > end {
+		// Wraparound: [start..max] + [min..end]
+		rangeSize = (r.max - start + 1) + (end - r.min + 1)
+	} else {
+		rangeSize = end - start + 1
+	}
+	if step > 1 && step >= rangeSize {
+		return fmt.Errorf("step (%d) must be less than range size (%d): %q", step, rangeSize, expr)
 	}
 	return nil
 }
@@ -1180,6 +1189,11 @@ func getRange(expr string, r bounds) (uint64, error) {
 
 	if err := validateRangeParams(start, end, step, r, expr); err != nil {
 		return 0, err
+	}
+
+	// Handle wraparound ranges (e.g., 22-2 for hours)
+	if start > end && r.wraparound {
+		return getWraparoundBits(start, end, step, r) | extra, nil
 	}
 
 	return getBits(start, end, step) | extra, nil
@@ -1240,7 +1254,7 @@ func getRangeWithHash(expr string, r bounds, hashKey string, hashEnabled bool) (
 	if end > r.max {
 		return 0, fmt.Errorf("range end (%d) above maximum (%d): %q", end, r.max, expr)
 	}
-	if start > end {
+	if start > end && !r.wraparound {
 		return 0, fmt.Errorf("range start (%d) beyond end (%d): %q", start, end, expr)
 	}
 
@@ -1259,30 +1273,69 @@ func getRangeWithHash(expr string, r bounds, hashKey string, hashEnabled bool) (
 		return 0, fmt.Errorf("too many slashes: %q", expr)
 	}
 
+	// Calculate effective range size (accounting for wraparound)
+	var rangeSize uint
+	if start > end {
+		// Wraparound: [start..max] + [min..end]
+		rangeSize = (r.max - start + 1) + (end - r.min + 1)
+	} else {
+		rangeSize = end - start + 1
+	}
+
 	// Compute hash-based offset
 	hashValue := computeHash(hashKey)
 
 	if step > 1 {
-		// H/step: Generate values at step intervals starting from hash offset
-		// The offset determines where within the step cycle we start
-		stepOffset := uint(hashValue % uint64(step))
-		firstValue := start + stepOffset
+		return getHashStepBits(start, end, step, r, hashValue)
+	}
 
-		// Generate all values: firstValue, firstValue+step, firstValue+2*step, ...
-		// until we exceed end
+	// Simple H: hash selects a single value within the range
+	return getHashSingleBit(start, end, rangeSize, r, hashValue)
+}
+
+// getHashStepBits generates bits for H/step expression with optional wraparound.
+func getHashStepBits(start, end, step uint, r bounds, hashValue uint64) (uint64, error) {
+	stepOffset := uint(hashValue % uint64(step))
+	firstValue := start + stepOffset
+
+	// Handle wraparound case
+	if start > end {
 		var bits uint64
-		for v := firstValue; v <= end; v += step {
-			bits |= 1 << v
+		fieldSize := r.max - r.min + 1
+		extendedEnd := end + fieldSize
+		for v := firstValue; v <= extendedEnd; v += step {
+			val := v
+			if val > r.max {
+				val = (val-r.min)%fieldSize + r.min
+			}
+			bits |= 1 << val
 		}
 		return bits, nil
 	}
 
-	// Simple H: hash selects a single value within the range
-	rangeSize := end - start + 1
-	hashOffset := uint(hashValue % uint64(rangeSize))
-	hashValue1 := start + hashOffset
+	// Normal case: generate values from firstValue to end with step
+	var bits uint64
+	for v := firstValue; v <= end; v += step {
+		bits |= 1 << v
+	}
+	return bits, nil
+}
 
-	return 1 << hashValue1, nil
+// getHashSingleBit generates a single bit for simple H expression with optional wraparound.
+func getHashSingleBit(start, end, rangeSize uint, r bounds, hashValue uint64) (uint64, error) {
+	hashOffset := uint(hashValue % uint64(rangeSize))
+
+	// Handle wraparound case
+	if start > end {
+		fieldSize := r.max - r.min + 1
+		val := start + hashOffset
+		if val > r.max {
+			val = (val-r.min)%fieldSize + r.min
+		}
+		return 1 << val, nil
+	}
+
+	return 1 << (start + hashOffset), nil
 }
 
 // parseIntOrName returns the (possibly-named) integer contained in expr.
@@ -1357,6 +1410,31 @@ func getBits(low, high, step uint) uint64 {
 	// Else, use a simple loop.
 	for i := low; i <= high; i += step {
 		bits |= 1 << i
+	}
+	return bits
+}
+
+// getWraparoundBits generates bits for a wraparound range where start > end.
+// For example, 22-2 with bounds 0-23 generates bits for [22,23,0,1,2].
+//
+// Algorithm (based on Quartz scheduler):
+//  1. Extend end by rangeSize to create virtual contiguous range
+//  2. Iterate from start to extendedEnd with step
+//  3. Normalize values back to valid range using modulo
+func getWraparoundBits(start, end, step uint, r bounds) uint64 {
+	var bits uint64
+	rangeSize := r.max - r.min + 1
+
+	// Extend end to create virtual contiguous range
+	extendedEnd := end + rangeSize
+
+	for i := start; i <= extendedEnd; i += step {
+		val := i
+		if val > r.max {
+			// Normalize: (val - min) % rangeSize + min
+			val = (val-r.min)%rangeSize + r.min
+		}
+		bits |= 1 << val
 	}
 	return bits
 }

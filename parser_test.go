@@ -57,7 +57,7 @@ func TestRange(t *testing.T) {
 	}
 
 	for _, c := range ranges {
-		actual, err := getRange(c.expr, bounds{c.min, c.max, nil})
+		actual, err := getRange(c.expr, bounds{c.min, c.max, nil, false})
 		if len(c.err) != 0 && (err == nil || !strings.Contains(err.Error(), c.err)) {
 			t.Errorf("%s => expected %v, got %v", c.expr, c.err, err)
 		}
@@ -83,11 +83,291 @@ func TestField(t *testing.T) {
 	}
 
 	for _, c := range fields {
-		actual, _ := getField(c.expr, bounds{c.min, c.max, nil})
+		actual, _ := getField(c.expr, bounds{c.min, c.max, nil, false})
 		if actual != c.expected {
 			t.Errorf("%s => expected %d, got %d", c.expr, c.expected, actual)
 		}
 	}
+}
+
+func TestWraparoundBits(t *testing.T) {
+	tests := []struct {
+		name     string
+		start    uint
+		end      uint
+		step     uint
+		r        bounds
+		expected uint64
+	}{
+		// Hours wraparound (0-23)
+		{"hours 22-2", 22, 2, 1, hours, 1<<22 | 1<<23 | 1<<0 | 1<<1 | 1<<2},
+		{"hours 23-0", 23, 0, 1, hours, 1<<23 | 1<<0},
+		{"hours 22-2/2", 22, 2, 2, hours, 1<<22 | 1<<0 | 1<<2},
+		{"hours 21-3/3", 21, 3, 3, hours, 1<<21 | 1<<0 | 1<<3},
+
+		// Minutes wraparound (0-59)
+		{"minutes 55-5", 55, 5, 1, minutes, 1<<55 | 1<<56 | 1<<57 | 1<<58 | 1<<59 | 1<<0 | 1<<1 | 1<<2 | 1<<3 | 1<<4 | 1<<5},
+		{"minutes 58-2", 58, 2, 1, minutes, 1<<58 | 1<<59 | 1<<0 | 1<<1 | 1<<2},
+
+		// DOW wraparound (0-7, 7 will be normalized later)
+		{"dow FRI-MON (5-1)", 5, 1, 1, dow, 1<<5 | 1<<6 | 1<<7 | 1<<0 | 1<<1},
+		{"dow SAT-SUN (6-0)", 6, 0, 1, dow, 1<<6 | 1<<7 | 1<<0},
+
+		// Month wraparound (1-12)
+		{"month NOV-FEB (11-2)", 11, 2, 1, months, 1<<11 | 1<<12 | 1<<1 | 1<<2},
+		{"month DEC-JAN (12-1)", 12, 1, 1, months, 1<<12 | 1<<1},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			actual := getWraparoundBits(tc.start, tc.end, tc.step, tc.r)
+			if actual != tc.expected {
+				t.Errorf("getWraparoundBits(%d, %d, %d, %v) = %b, want %b",
+					tc.start, tc.end, tc.step, tc.r, actual, tc.expected)
+			}
+		})
+	}
+}
+
+func TestWraparoundRange(t *testing.T) {
+	tests := []struct {
+		name     string
+		expr     string
+		r        bounds
+		expected uint64
+		wantErr  string
+	}{
+		// Hours wraparound
+		{"hours 22-2", "22-2", hours, 1<<22 | 1<<23 | 1<<0 | 1<<1 | 1<<2, ""},
+		{"hours 23-0", "23-0", hours, 1<<23 | 1<<0, ""},
+		{"hours 22-2/2", "22-2/2", hours, 1<<22 | 1<<0 | 1<<2, ""},
+
+		// Minutes wraparound
+		{"minutes 58-2", "58-2", minutes, 1<<58 | 1<<59 | 1<<0 | 1<<1 | 1<<2, ""},
+
+		// DOW wraparound (before normalization)
+		{"dow 5-1", "5-1", dow, 1<<5 | 1<<6 | 1<<7 | 1<<0 | 1<<1, ""},
+		{"dow 6-0", "6-0", dow, 1<<6 | 1<<7 | 1<<0, ""},
+
+		// Month wraparound
+		{"month 11-2", "11-2", months, 1<<11 | 1<<12 | 1<<1 | 1<<2, ""},
+
+		// DOM should NOT allow wraparound
+		// DOM wraparound now supported (non-existent days like Feb 31 are simply skipped)
+		{"dom 25-5", "25-5", dom, 1<<25 | 1<<26 | 1<<27 | 1<<28 | 1<<29 | 1<<30 | 1<<31 | 1<<1 | 1<<2 | 1<<3 | 1<<4 | 1<<5, ""},
+
+		// Edge cases
+		{"hours 0-0 not wraparound", "0-0", hours, 1 << 0, ""},
+		{"hours 23-23 not wraparound", "23-23", hours, 1 << 23, ""},
+
+		// Normal ranges still work
+		{"hours 9-17", "9-17", hours, 1<<9 | 1<<10 | 1<<11 | 1<<12 | 1<<13 | 1<<14 | 1<<15 | 1<<16 | 1<<17, ""},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			actual, err := getRange(tc.expr, tc.r)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Errorf("getRange(%q, %v) expected error containing %q, got %v",
+						tc.expr, tc.r, tc.wantErr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("getRange(%q, %v) unexpected error: %v", tc.expr, tc.r, err)
+				return
+			}
+			if actual != tc.expected {
+				t.Errorf("getRange(%q, %v) = %b, want %b", tc.expr, tc.r, actual, tc.expected)
+			}
+		})
+	}
+}
+
+func TestWraparoundScheduleParsing(t *testing.T) {
+	parser := NewParser(Minute | Hour | Dom | Month | Dow)
+
+	tests := []struct {
+		name    string
+		spec    string
+		wantErr bool
+	}{
+		// Valid wraparound expressions
+		{"hours wraparound", "0 22-2 * * *", false},
+		{"month wraparound", "0 0 * 11-2 *", false},
+		{"dow wraparound FRI-MON", "0 0 * * 5-1", false},
+		{"dow wraparound named", "0 0 * * FRI-MON", false},
+		{"month wraparound named", "0 0 * NOV-FEB *", false},
+
+		// DOM wraparound should fail
+		{"dom wraparound", "0 0 25-5 * *", false},
+
+		// Normal expressions still work
+		{"normal hours", "0 9-17 * * *", false},
+		{"normal dow", "0 0 * * 1-5", false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := parser.Parse(tc.spec)
+			if tc.wantErr {
+				if err == nil {
+					t.Errorf("Parse(%q) expected error, got nil", tc.spec)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Parse(%q) unexpected error: %v", tc.spec, err)
+				}
+			}
+		})
+	}
+}
+
+func TestWraparoundScheduleNextTime(t *testing.T) {
+	parser := NewParser(Minute | Hour | Dom | Month | Dow)
+
+	t.Run("hours 22-2", func(t *testing.T) {
+		// Run at 22:00, 23:00, 00:00, 01:00, 02:00
+		sched, err := parser.Parse("0 22-2 * * *")
+		if err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+
+		// Start at 21:00 on Jan 1, 2025
+		start := time.Date(2025, 1, 1, 21, 0, 0, 0, time.UTC)
+		next := sched.Next(start)
+
+		// Should be 22:00 on Jan 1
+		expected := time.Date(2025, 1, 1, 22, 0, 0, 0, time.UTC)
+		if !next.Equal(expected) {
+			t.Errorf("Next(%v) = %v, want %v", start, next, expected)
+		}
+
+		// Continue to verify the wraparound
+		times := []time.Time{next}
+		for i := 0; i < 4; i++ {
+			next = sched.Next(next)
+			times = append(times, next)
+		}
+
+		// Expected sequence: 22:00, 23:00, 00:00, 01:00, 02:00
+		expectedHours := []int{22, 23, 0, 1, 2}
+		for i, tm := range times {
+			if tm.Hour() != expectedHours[i] {
+				t.Errorf("times[%d].Hour() = %d, want %d (full time: %v)",
+					i, tm.Hour(), expectedHours[i], tm)
+			}
+		}
+	})
+
+	t.Run("month NOV-FEB", func(t *testing.T) {
+		// Run on 1st day of Nov, Dec, Jan, Feb at 00:00
+		sched, err := parser.Parse("0 0 1 11-2 *")
+		if err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+
+		// Start at Oct 15, 2025
+		start := time.Date(2025, 10, 15, 0, 0, 0, 0, time.UTC)
+		next := sched.Next(start)
+
+		// Should be Nov 1, 2025
+		expected := time.Date(2025, 11, 1, 0, 0, 0, 0, time.UTC)
+		if !next.Equal(expected) {
+			t.Errorf("Next(%v) = %v, want %v", start, next, expected)
+		}
+
+		// Continue through the year boundary
+		times := []time.Time{next}
+		for i := 0; i < 3; i++ {
+			next = sched.Next(next)
+			times = append(times, next)
+		}
+
+		// Expected sequence: Nov, Dec, Jan, Feb
+		expectedMonths := []time.Month{11, 12, 1, 2}
+		for i, tm := range times {
+			if tm.Month() != expectedMonths[i] {
+				t.Errorf("times[%d].Month() = %v, want %v (full time: %v)",
+					i, tm.Month(), expectedMonths[i], tm)
+			}
+		}
+	})
+
+	t.Run("dow FRI-MON", func(t *testing.T) {
+		// Run on Fri, Sat, Sun, Mon at 00:00
+		sched, err := parser.Parse("0 0 * * FRI-MON")
+		if err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+
+		// Start at Thursday Jan 2, 2025
+		start := time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC)
+		next := sched.Next(start)
+
+		// Should be Friday Jan 3, 2025
+		expected := time.Date(2025, 1, 3, 0, 0, 0, 0, time.UTC)
+		if !next.Equal(expected) {
+			t.Errorf("Next(%v) = %v, want %v", start, next, expected)
+		}
+
+		// Verify it's a Friday
+		if next.Weekday() != time.Friday {
+			t.Errorf("Expected Friday, got %v", next.Weekday())
+		}
+
+		// Continue through the weekend
+		times := []time.Time{next}
+		for i := 0; i < 3; i++ {
+			next = sched.Next(next)
+			times = append(times, next)
+		}
+
+		// Expected sequence: Fri, Sat, Sun, Mon
+		expectedDays := []time.Weekday{time.Friday, time.Saturday, time.Sunday, time.Monday}
+		for i, tm := range times {
+			if tm.Weekday() != expectedDays[i] {
+				t.Errorf("times[%d].Weekday() = %v, want %v (full time: %v)",
+					i, tm.Weekday(), expectedDays[i], tm)
+			}
+		}
+	})
+
+	t.Run("dom 28-3 in February", func(t *testing.T) {
+		// Run on days 28, 29, 30, 31, 1, 2, 3 - but Feb only has 28 days (2025)
+		sched, err := parser.Parse("0 0 28-3 * *")
+		if err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+
+		// Start at Feb 27, 2025
+		start := time.Date(2025, 2, 27, 0, 0, 0, 0, time.UTC)
+		next := sched.Next(start)
+
+		// Should be Feb 28, 2025 (day 28 exists)
+		expected := time.Date(2025, 2, 28, 0, 0, 0, 0, time.UTC)
+		if !next.Equal(expected) {
+			t.Errorf("Next(%v) = %v, want %v", start, next, expected)
+		}
+
+		// Next should skip Feb 29, 30, 31 (don't exist in 2025) and go to Mar 1
+		next = sched.Next(next)
+		expected = time.Date(2025, 3, 1, 0, 0, 0, 0, time.UTC)
+		if !next.Equal(expected) {
+			t.Errorf("After Feb 28: Next() = %v, want %v", next, expected)
+		}
+
+		// Continue: Mar 2, Mar 3
+		next = sched.Next(next)
+		if next.Day() != 2 {
+			t.Errorf("Expected Mar 2, got %v", next)
+		}
+		next = sched.Next(next)
+		if next.Day() != 3 {
+			t.Errorf("Expected Mar 3, got %v", next)
+		}
+	})
 }
 
 func TestAll(t *testing.T) {

@@ -116,6 +116,24 @@ Standard 5-field cron format (minute-first):
 | `@hourly` | Once an hour, beginning of hour | `0 * * * *` |
 | `@every <duration>` | Every interval | e.g., `@every 1h30m` |
 
+### Wraparound Ranges
+
+For cyclic fields, ranges where start > end wrap around the boundary:
+
+```go
+// Run from 10pm to 2am (spans midnight)
+c.AddFunc("0 22-2 * * *", nightJob)
+
+// Run Friday through Monday (spans weekend)
+c.AddFunc("0 9 * * FRI-MON", weekendJob)
+
+// Run November through February (spans year boundary)
+c.AddFunc("0 0 1 NOV-FEB *", winterJob)
+```
+
+Supported fields: seconds, minutes, hours, day-of-month, day-of-week, month.
+Non-existent days (e.g., Feb 31) are simply skipped.
+
 ### Seconds Field (Optional)
 
 Enable Quartz-compatible seconds field:
