@@ -144,6 +144,10 @@ jobs:
             --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
             checksums.txt
 
+      # GitHub artifact attestations provide SLSA provenance (build origin proof).
+      # This complements Cosign signatures: Cosign proves artifact integrity,
+      # attestations prove WHERE/HOW artifacts were built. Both are needed for
+      # full supply chain security and OpenSSF Scorecard compliance.
       - name: Generate artifact attestations
         uses: actions/attest-build-provenance@ef244123eb79f2f7a7e75d99086184180e6d0018 # v2.1.0
         with:
@@ -167,8 +171,18 @@ jobs:
             - **SBOM**: Software Bill of Materials in CycloneDX and SPDX formats
             - **Checksums**: SHA256 checksums for all artifacts
             - **Signatures**: Keyless Sigstore/Cosign signatures for verification
+            - **Attestations**: GitHub artifact attestations with SLSA provenance
 
-            ### Verify Release Integrity
+            ### Verify with GitHub CLI (Recommended)
+
+            ```bash
+            # Verify artifact attestations (proves build origin)
+            gh attestation verify sbom.cyclonedx.json -R ${{ github.repository }}
+            gh attestation verify sbom.spdx.json -R ${{ github.repository }}
+            gh attestation verify checksums.txt -R ${{ github.repository }}
+            ```
+
+            ### Verify with Cosign
 
             ```bash
             # Install cosign: https://docs.sigstore.dev/cosign/installation/
