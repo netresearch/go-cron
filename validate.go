@@ -38,6 +38,11 @@ type SpecAnalysis struct {
 	// Schedule is the parsed schedule, available for further introspection.
 	// Nil if the spec is invalid.
 	Schedule Schedule
+
+	// Warnings contains non-fatal warnings about the schedule.
+	// These don't prevent parsing but may indicate unexpected behavior.
+	// Example: "DOM and DOW both restricted - using AND logic (use DowOrDom for OR)"
+	Warnings []string
 }
 
 // ValidateSpec validates a cron expression without scheduling a job.
@@ -148,6 +153,9 @@ func AnalyzeSpec(spec string, options ...ParseOption) SpecAnalysis {
 	// Extract location and analyze the spec
 	result.analyzeSpec(spec)
 
+	// Check for DOM/DOW AND logic warning
+	result.checkDomDowWarning()
+
 	// Calculate next run time
 	result.NextRun = schedule.Next(time.Now())
 
@@ -187,9 +195,31 @@ func AnalyzeSpecWithHash(spec string, options ParseOption, hashSeed string) Spec
 	result.Schedule = schedule
 
 	result.analyzeSpec(spec)
+	result.checkDomDowWarning()
 	result.NextRun = schedule.Next(time.Now())
 
 	return result
+}
+
+// checkDomDowWarning adds a warning if both DOM and DOW are restricted.
+// This helps users understand that AND logic is used (both must match).
+func (r *SpecAnalysis) checkDomDowWarning() {
+	if r.Schedule == nil {
+		return
+	}
+
+	spec, ok := r.Schedule.(*SpecSchedule)
+	if !ok {
+		return
+	}
+
+	// Check if both DOM and DOW are restricted (neither has starBit)
+	// and DowOrDom is not enabled (meaning AND logic is in effect)
+	if spec.Dom&starBit == 0 && spec.Dow&starBit == 0 && !spec.DowOrDom {
+		r.Warnings = append(r.Warnings,
+			"both day-of-month and day-of-week are restricted - using AND logic "+
+				"(both must match); use DowOrDom parser option for legacy OR behavior")
+	}
 }
 
 // analyzeSpec extracts metadata from the spec string.

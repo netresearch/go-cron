@@ -532,6 +532,16 @@ func (c *Cron) ScheduleJob(schedule Schedule, cmd Job, opts ...JobOption) (Entry
 		opt(entry)
 	}
 
+	// Log info if both DOM and DOW are restricted (AND logic in effect)
+	if spec, ok := schedule.(*SpecSchedule); ok {
+		if spec.Dom&starBit == 0 && spec.Dow&starBit == 0 && !spec.DowOrDom {
+			c.logger.Info("schedule uses AND logic for day matching",
+				"reason", "both day-of-month and day-of-week are restricted",
+				"hint", "use DowOrDom parser option for legacy OR behavior",
+				"entry", entry.Name)
+		}
+	}
+
 	// Check for duplicate name
 	if entry.Name != "" {
 		if _, exists := c.nameIndex[entry.Name]; exists {

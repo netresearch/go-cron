@@ -698,3 +698,134 @@ func TestValidateSpecsConcurrent(t *testing.T) {
 		<-done
 	}
 }
+
+// TestAnalyzeSpecDomDowWarning tests that AnalyzeSpec adds a warning when both
+// day-of-month and day-of-week are restricted (AND logic in effect).
+func TestAnalyzeSpecDomDowWarning(t *testing.T) {
+	tests := []struct {
+		name        string
+		spec        string
+		options     []ParseOption
+		wantWarning bool
+	}{
+		{
+			name:        "both DOM and DOW restricted - should warn",
+			spec:        "0 9 15 * FRI",
+			wantWarning: true,
+		},
+		{
+			name:        "Friday the 13th - should warn",
+			spec:        "0 0 13 * FRI",
+			wantWarning: true,
+		},
+		{
+			name:        "last Friday of month pattern - should warn",
+			spec:        "0 0 25-31 * FRI",
+			wantWarning: true,
+		},
+		{
+			name:        "first Monday of month pattern - should warn",
+			spec:        "0 9 1-7 * MON",
+			wantWarning: true,
+		},
+		{
+			name:        "only DOM restricted (DOW is *) - no warning",
+			spec:        "0 9 15 * *",
+			wantWarning: false,
+		},
+		{
+			name:        "only DOW restricted (DOM is *) - no warning",
+			spec:        "0 9 * * FRI",
+			wantWarning: false,
+		},
+		{
+			name:        "both DOM and DOW are * - no warning",
+			spec:        "0 9 * * *",
+			wantWarning: false,
+		},
+		{
+			name:        "DOM is ? (any) and DOW restricted - no warning",
+			spec:        "0 9 ? * FRI",
+			wantWarning: false,
+		},
+		{
+			name:        "DOM restricted and DOW is ? (any) - no warning",
+			spec:        "0 9 15 * ?",
+			wantWarning: false,
+		},
+		{
+			name:        "descriptor - no warning",
+			spec:        "@daily",
+			wantWarning: false,
+		},
+		{
+			name:        "every interval - no warning",
+			spec:        "@every 1h",
+			wantWarning: false,
+		},
+		{
+			name:        "with DowOrDom option - no warning even with both restricted",
+			spec:        "0 9 15 * FRI",
+			options:     []ParseOption{Minute | Hour | Dom | Month | Dow | DowOrDom | Descriptor},
+			wantWarning: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var result SpecAnalysis
+			if len(tt.options) > 0 {
+				result = AnalyzeSpec(tt.spec, tt.options[0])
+			} else {
+				result = AnalyzeSpec(tt.spec)
+			}
+
+			if !result.Valid {
+				t.Fatalf("AnalyzeSpec(%q) unexpectedly invalid: %v", tt.spec, result.Error)
+			}
+
+			hasWarning := len(result.Warnings) > 0
+			if hasWarning != tt.wantWarning {
+				t.Errorf("AnalyzeSpec(%q) warnings = %v, wantWarning = %v",
+					tt.spec, result.Warnings, tt.wantWarning)
+			}
+
+			if tt.wantWarning && hasWarning {
+				// Verify warning message content
+				found := false
+				for _, w := range result.Warnings {
+					if strings.Contains(w, "AND logic") && strings.Contains(w, "day-of-month") {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("expected warning about AND logic for DOM/DOW, got: %v", result.Warnings)
+				}
+			}
+		})
+	}
+}
+
+// TestAnalyzeSpecWithHashDomDowWarning tests that AnalyzeSpecWithHash also adds warnings.
+func TestAnalyzeSpecWithHashDomDowWarning(t *testing.T) {
+	// Test with hash that results in both DOM and DOW restricted
+	result := AnalyzeSpecWithHash("H H 15 * FRI", Minute|Hour|Dom|Month|Dow|Hash, "test-job")
+	if !result.Valid {
+		t.Fatalf("AnalyzeSpecWithHash failed: %v", result.Error)
+	}
+
+	if len(result.Warnings) == 0 {
+		t.Error("expected warning for DOM+DOW restricted, got none")
+	}
+
+	// Test with hash that leaves DOW as wildcard
+	result = AnalyzeSpecWithHash("H H 15 * *", Minute|Hour|Dom|Month|Dow|Hash, "test-job")
+	if !result.Valid {
+		t.Fatalf("AnalyzeSpecWithHash failed: %v", result.Error)
+	}
+
+	if len(result.Warnings) > 0 {
+		t.Errorf("expected no warning when DOW is *, got: %v", result.Warnings)
+	}
+}
