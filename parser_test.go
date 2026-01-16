@@ -755,7 +755,7 @@ func TestStandardSpecSchedule(t *testing.T) {
 	}{
 		{
 			expr:     "5 * * * *",
-			expected: &SpecSchedule{1 << seconds.min, 1 << 5, all(hours), all(dom), all(months), allDowNormalized(), nil, time.Local, 0, nil, nil},
+			expected: &SpecSchedule{1 << seconds.min, 1 << 5, all(hours), all(dom), all(months), allDowNormalized(), nil, time.Local, 0, nil, nil, false},
 		},
 		{
 			expr:     "@every 5m",
@@ -987,15 +987,15 @@ func allDowNormalized() uint64 {
 }
 
 func every5min(loc *time.Location) *SpecSchedule {
-	return &SpecSchedule{1 << 0, 1 << 5, all(hours), all(dom), all(months), allDowNormalized(), nil, loc, 0, nil, nil}
+	return &SpecSchedule{1 << 0, 1 << 5, all(hours), all(dom), all(months), allDowNormalized(), nil, loc, 0, nil, nil, false}
 }
 
 func every5min5s(loc *time.Location) *SpecSchedule {
-	return &SpecSchedule{1 << 5, 1 << 5, all(hours), all(dom), all(months), allDowNormalized(), nil, loc, 0, nil, nil}
+	return &SpecSchedule{1 << 5, 1 << 5, all(hours), all(dom), all(months), allDowNormalized(), nil, loc, 0, nil, nil, false}
 }
 
 func midnight(loc *time.Location) *SpecSchedule {
-	return &SpecSchedule{1, 1, 1, all(dom), all(months), allDowNormalized(), nil, loc, 0, nil, nil}
+	return &SpecSchedule{1, 1, 1, all(dom), all(months), allDowNormalized(), nil, loc, 0, nil, nil, false}
 }
 
 func annual(loc *time.Location) *SpecSchedule {

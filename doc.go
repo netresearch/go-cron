@@ -128,6 +128,29 @@ Question mark ( ? )
 Question mark may be used instead of '*' for leaving either day-of-month or
 day-of-week blank.
 
+# Day Matching (DOM/DOW)
+
+When both day-of-month and day-of-week are specified (non-wildcard), both must
+match (AND logic). This is consistent with how all other cron fields work.
+
+	0 0 25-31 * FRI   - Last Friday of month (days 25-31 AND Friday)
+	0 0 1-7 * MON     - First Monday of month (days 1-7 AND Monday)
+	0 0 13 * FRI      - Friday the 13th
+
+When either field is a wildcard (*), only the restricted field matters:
+
+	0 0 * * FRI       - Every Friday (any day-of-month that is Friday)
+	0 0 15 * *        - 15th of every month (any day-of-week)
+
+This differs from some cron implementations (Vixie cron, robfig/cron) that use
+OR logic when both fields are restricted. For legacy OR behavior:
+
+	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.DowOrDom)
+
+With DowOrDom enabled, the schedule matches if either field matches (OR logic):
+
+	0 0 15 * FRI      - 15th of month OR any Friday (legacy behavior)
+
 # Extended Syntax (Optional)
 
 The following extended syntax is available when enabled via parser options.

@@ -29,6 +29,12 @@ type SpecSchedule struct {
 	// These are evaluated at match time because they depend on which dates
 	// fall on which weekdays in the specific month.
 	DowConstraints []DowConstraint
+
+	// DowOrDom enables legacy OR logic for day-of-week and day-of-month matching.
+	// When false (default), both DOM and DOW must match (AND logic), consistent
+	// with all other cron fields. When true, the schedule matches if either
+	// DOM or DOW matches (OR logic), for robfig/cron compatibility.
+	DowOrDom bool
 }
 
 // DomConstraintType identifies the type of day-of-month constraint.
@@ -460,6 +466,14 @@ WRAP:
 
 // dayMatches returns true if the schedule's day-of-week and day-of-month
 // restrictions are satisfied by the given time.
+//
+// By default, both DOM and DOW must match (AND logic), consistent with how
+// all other cron fields work. This enables useful patterns like:
+//   - "0 0 25-31 * FRI" = last Friday of month
+//   - "0 0 1-7 * MON" = first Monday of month
+//
+// When DowOrDom is true (legacy mode), the behavior matches robfig/cron:
+// OR logic when both fields are restricted, AND when either is wildcard.
 func dayMatches(s *SpecSchedule, t time.Time) bool {
 	// #nosec G115 -- Day() returns 1-31, Weekday() returns 0-6, safe for uint
 	var (
@@ -475,10 +489,17 @@ func dayMatches(s *SpecSchedule, t time.Time) bool {
 		dowMatch = true
 	}
 
-	if s.Dom&starBit > 0 || s.Dow&starBit > 0 {
-		return domMatch && dowMatch
+	// Legacy OR mode (robfig/cron compatibility): OR when both fields are
+	// restricted, AND when either is wildcard
+	if s.DowOrDom {
+		if s.Dom&starBit > 0 || s.Dow&starBit > 0 {
+			return domMatch && dowMatch
+		}
+		return domMatch || dowMatch
 	}
-	return domMatch || dowMatch
+
+	// Default AND mode: both must match (consistent with other fields)
+	return domMatch && dowMatch
 }
 
 // prepareTimeForPrevSchedule converts time to schedule timezone and prepares for backwards matching.

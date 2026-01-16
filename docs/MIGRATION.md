@@ -42,6 +42,7 @@ While the API is compatible, there are intentional behavioral changes that fix b
 | **TZ= parsing panics** | Crashes on empty or malformed timezone | Returns descriptive error |
 | **Entry.Run() bypasses chains** | `entry.Run()` calls job directly | `entry.Run()` honors chain wrappers |
 | **DST spring-forward** | Jobs silently skipped | Jobs run immediately after transition (ISC behavior) |
+| **DOM/DOW logic** | OR when both restricted | AND (logical, consistent with other fields) |
 | **NewParser with no fields** | Panics | Returns error |
 
 #### TZ= Panic Fixes (#554, #555)
@@ -106,6 +107,45 @@ Result: Job runs at 3:00 AM (immediately after transition)
 ```
 
 This follows ISC cron behavior used by most Unix systems.
+
+#### DOM/DOW AND Logic (#277)
+
+**Before (robfig/cron):**
+```
+Expression: "0 0 15 * FRI"
+Behavior: Runs on the 15th OR any Friday (OR logic)
+Result: ~4-5 runs per month
+```
+
+**After (netresearch/go-cron):**
+```
+Expression: "0 0 15 * FRI"
+Behavior: Runs on the 15th that is ALSO a Friday (AND logic)
+Result: Runs only when the 15th is a Friday (~once per 7 months)
+```
+
+The AND logic is consistent with how all other cron fields work and enables useful patterns:
+
+```go
+// Last Friday of month (days 25-31 AND Friday)
+c.AddFunc("0 0 25-31 * FRI", lastFridayJob)
+
+// First Monday of month (days 1-7 AND Monday)
+c.AddFunc("0 0 1-7 * MON", firstMondayJob)
+
+// Friday the 13th
+c.AddFunc("0 0 13 * FRI", unluckyJob)
+```
+
+**Migration option:** For legacy OR behavior, use the `DowOrDom` parser option:
+
+```go
+parser := cron.NewParser(
+    cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.DowOrDom,
+)
+c := cron.New(cron.WithParser(parser))
+// Now "0 0 15 * FRI" means "15th OR any Friday" (legacy behavior)
+```
 
 ### Validation Improvements
 

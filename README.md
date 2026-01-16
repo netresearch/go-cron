@@ -24,6 +24,7 @@ The original `robfig/cron` has been unmaintained since 2020, accumulating 50+ op
 | TZ= parsing panics | Crashes on malformed input | Fixed (#554, #555) |
 | Chain decorators | `Entry.Run()` bypasses chains | Properly invokes wrappers (#551) |
 | DST spring-forward | Jobs silently skipped | Runs immediately (ISC behavior, #541) |
+| DOM/DOW logic | OR (confusing) | AND (logical, consistent) |
 | Go version | Stuck on 1.13 | Go 1.25+ with modern toolchain |
 
 ## Installation
@@ -148,6 +149,25 @@ cron.New(cron.WithParser(cron.NewParser(
     cron.Dom | cron.Month | cron.Dow | cron.Descriptor,
 )))
 ```
+
+### Day Matching (DOM/DOW)
+
+When both day-of-month and day-of-week are specified, **both must match** (AND logic). This is consistent with all other cron fields and enables useful patterns:
+
+```go
+// Last Friday of month (days 25-31 AND Friday)
+c.AddFunc("0 0 25-31 * FRI", lastFridayJob)
+
+// First Monday of month (days 1-7 AND Monday)
+c.AddFunc("0 0 1-7 * MON", firstMondayJob)
+
+// Friday the 13th
+c.AddFunc("0 0 13 * FRI", unluckyJob)
+```
+
+> [!NOTE]
+> This differs from robfig/cron which uses OR logic. For migration compatibility,
+> use the `DowOrDom` option or see [docs/MIGRATION.md](docs/MIGRATION.md).
 
 ## Timezone Support
 
