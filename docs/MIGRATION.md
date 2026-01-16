@@ -203,9 +203,9 @@ _, err := c.AddFunc(veryLongString, myFunc)
 // err: "spec exceeds maximum length of 1024 characters"
 ```
 
-#### RetryWithBackoff Semantics (v1.0)
+#### RetryWithBackoff Semantics (v0.6.0)
 
-**Before (v0.x):**
+**Before (robfig/cron):**
 ```go
 // maxRetries=0 meant unlimited retries (DoS risk)
 c := cron.New(cron.WithChain(
@@ -214,7 +214,7 @@ c := cron.New(cron.WithChain(
 // A failing job would retry forever
 ```
 
-**After (v1.0+):**
+**After (netresearch/go-cron v0.6.0+):**
 ```go
 // maxRetries=0 now means no retries (safe default)
 c := cron.New(cron.WithChain(
