@@ -2889,3 +2889,142 @@ func TestRunOnce_EntryCountDecrements(t *testing.T) {
 		t.Errorf("expected 2 run-once executions, got %d", got)
 	}
 }
+
+// ============================================================================
+// DOM/DOW Warning Tests
+// ============================================================================
+
+// TestScheduleJobDomDowWarning tests that scheduling a job with both DOM and DOW
+// restricted logs an info message about AND logic.
+func TestScheduleJobDomDowWarning(t *testing.T) {
+	tests := []struct {
+		name        string
+		spec        string
+		wantWarning bool
+	}{
+		{
+			name:        "both DOM and DOW restricted - should log warning",
+			spec:        "0 9 15 * FRI",
+			wantWarning: true,
+		},
+		{
+			name:        "Friday the 13th - should log warning",
+			spec:        "0 0 13 * FRI",
+			wantWarning: true,
+		},
+		{
+			name:        "only DOM restricted - no warning",
+			spec:        "0 9 15 * *",
+			wantWarning: false,
+		},
+		{
+			name:        "only DOW restricted - no warning",
+			spec:        "0 9 * * FRI",
+			wantWarning: false,
+		},
+		{
+			name:        "both wildcards - no warning",
+			spec:        "0 9 * * *",
+			wantWarning: false,
+		},
+		{
+			name:        "descriptor - no warning",
+			spec:        "@daily",
+			wantWarning: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logger := &testLogCapture{}
+			c := New(WithLogger(logger))
+			defer c.Stop()
+
+			_, err := c.AddFunc(tt.spec, func() {})
+			if err != nil {
+				t.Fatalf("AddFunc failed: %v", err)
+			}
+
+			// Check if warning was logged
+			logger.mu.Lock()
+			var foundWarning bool
+			for _, msg := range logger.infoCalls {
+				if strings.Contains(msg, "AND logic") {
+					foundWarning = true
+					break
+				}
+			}
+			logger.mu.Unlock()
+
+			if foundWarning != tt.wantWarning {
+				logger.mu.Lock()
+				t.Errorf("AddFunc(%q) warning logged = %v, want %v; infoCalls = %v",
+					tt.spec, foundWarning, tt.wantWarning, logger.infoCalls)
+				logger.mu.Unlock()
+			}
+		})
+	}
+}
+
+// TestScheduleJobDomDowWarningWithDowOrDom tests that the warning is not logged
+// when DowOrDom parser option is used (legacy OR behavior).
+func TestScheduleJobDomDowWarningWithDowOrDom(t *testing.T) {
+	logger := &testLogCapture{}
+	parser := NewParser(Minute | Hour | Dom | Month | Dow | DowOrDom | Descriptor)
+	c := New(WithLogger(logger), WithParser(parser))
+	defer c.Stop()
+
+	// This would normally trigger a warning, but DowOrDom means OR logic
+	_, err := c.AddFunc("0 9 15 * FRI", func() {})
+	if err != nil {
+		t.Fatalf("AddFunc failed: %v", err)
+	}
+
+	// Should NOT log warning because DowOrDom option is used
+	logger.mu.Lock()
+	var foundWarning bool
+	for _, msg := range logger.infoCalls {
+		if strings.Contains(msg, "AND logic") {
+			foundWarning = true
+			break
+		}
+	}
+	logger.mu.Unlock()
+
+	if foundWarning {
+		t.Error("expected no warning when DowOrDom option is used")
+	}
+}
+
+// TestScheduleJobDomDowWarningViaScheduleJob tests the warning via ScheduleJob directly.
+func TestScheduleJobDomDowWarningViaScheduleJob(t *testing.T) {
+	logger := &testLogCapture{}
+	c := New(WithLogger(logger))
+	defer c.Stop()
+
+	// Parse a spec with both DOM and DOW restricted
+	schedule, err := standardParser.Parse("0 9 15 * FRI")
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+
+	_, err = c.ScheduleJob(schedule, FuncJob(func() {}), WithName("test-job"))
+	if err != nil {
+		t.Fatalf("ScheduleJob failed: %v", err)
+	}
+
+	// Check if warning was logged
+	logger.mu.Lock()
+	var foundWarning bool
+	for _, msg := range logger.infoCalls {
+		if strings.Contains(msg, "AND logic") {
+			foundWarning = true
+			break
+		}
+	}
+	logger.mu.Unlock()
+
+	if !foundWarning {
+		t.Error("expected warning for DOM+DOW restricted schedule")
+	}
+}
