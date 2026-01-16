@@ -474,11 +474,12 @@ func TestSecondOptionalWithYear(t *testing.T) {
 		{
 			// 6 fields ending with number < 100 - treated as dow, not year
 			// "30 15 10 1 1 5" is [sec=30 min=15 hour=10 dom=1 month=1 dow=5] year=any
+			// With AND logic: Jan 1 must be a Friday. Jan 1, 2027 is the next Friday-Jan-1.
 			name:       "6 fields with dow - prefers seconds",
 			spec:       "30 15 10 1 1 5",
 			wantErr:    false,
 			from:       time.Date(2024, 12, 1, 0, 0, 0, 0, loc),
-			wantYear:   2025,
+			wantYear:   2027,
 			wantSecond: 30,
 		},
 		{

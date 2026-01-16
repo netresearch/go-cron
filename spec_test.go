@@ -44,17 +44,17 @@ func TestActivation(t *testing.T) {
 		{"Sun Jul 1 00:00 2012", "@monthly", true},
 
 		// Test interaction of DOW and DOM.
-		// If both are restricted, then only one needs to match.
-		{"Sun Jul 15 00:00 2012", "* * 1,15 * Sun", true},
-		{"Fri Jun 15 00:00 2012", "* * 1,15 * Sun", true},
-		{"Wed Aug 1 00:00 2012", "* * 1,15 * Sun", true},
-		{"Sun Jul 15 00:00 2012", "* * */10 * Sun", true}, // verifies #70
+		// Both must match (AND logic), consistent with all other cron fields.
+		{"Sun Jul 15 00:00 2012", "* * 1,15 * Sun", true},  // DOM=15 matches, DOW=Sun matches
+		{"Fri Jun 15 00:00 2012", "* * 1,15 * Sun", false}, // DOM=15 matches, but Friday != Sun
+		{"Wed Aug 1 00:00 2012", "* * 1,15 * Sun", false},  // DOM=1 matches, but Wednesday != Sun
+		{"Sun Jul 15 00:00 2012", "* * */10 * Sun", false}, // DOW=Sun matches, but 15 not in 1,11,21,31
 
-		// However, if one has a star, then both need to match.
+		// Wildcard behavior unchanged: star means "any", so only the restricted field matters.
 		{"Sun Jul 15 00:00 2012", "* * * * Mon", false},
 		{"Mon Jul 9 00:00 2012", "* * 1,15 * *", false},
 		{"Sun Jul 15 00:00 2012", "* * 1,15 * *", true},
-		{"Sun Jul 15 00:00 2012", "* * */2 * Sun", true},
+		{"Sun Jul 15 00:00 2012", "* * */2 * Sun", true}, // */2 includes 15 (1,3,5,...,15,...), DOW=Sun
 	}
 
 	for _, test := range tests {
@@ -100,7 +100,7 @@ func TestNext(t *testing.T) {
 
 		// Wrap around months
 		{"Mon Jul 9 23:35 2012", "0 0 0 9 Apr-Oct ?", "Thu Aug 9 00:00 2012"},
-		{"Mon Jul 9 23:35 2012", "0 0 0 */5 Apr,Aug,Oct Mon", "Tue Aug 1 00:00 2012"},
+		{"Mon Jul 9 23:35 2012", "0 0 0 */5 Apr,Aug,Oct Mon", "Mon Aug 6 00:00 2012"}, // DOM AND DOW
 		{"Mon Jul 9 23:35 2012", "0 0 0 */5 Oct Mon", "Mon Oct 1 00:00 2012"},
 
 		// Wrap around years
@@ -649,6 +649,206 @@ func TestPrevAndNextSymmetry(t *testing.T) {
 			nextTime := sched.Next(scheduledTime.Add(-time.Second))
 			if !nextTime.Equal(scheduledTime) {
 				t.Errorf("Next(scheduled-1s) = %v, want %v", nextTime, scheduledTime)
+			}
+		})
+	}
+}
+
+// TestDayMatchesANDMode tests the default AND logic for DOM/DOW matching.
+func TestDayMatchesANDMode(t *testing.T) {
+	tests := []struct {
+		name     string
+		spec     string
+		time     string
+		expected bool
+	}{
+		// Both DOM and DOW must match (AND logic)
+		{"both match - Sunday the 15th", "* * 15 * Sun", "Sun Jul 15 12:00 2012", true},
+		{"only DOM matches", "* * 15 * Sun", "Fri Jun 15 12:00 2012", false},
+		{"only DOW matches", "* * 15 * Sun", "Sun Jul 8 12:00 2012", false},
+		{"neither matches", "* * 15 * Sun", "Sat Jul 14 12:00 2012", false},
+
+		// Useful AND patterns
+		{"last Friday of month", "* * 25-31 * Fri", "Fri Aug 31 12:00 2012", true},
+		{"last Friday of month - not Friday", "* * 25-31 * Fri", "Sat Aug 25 12:00 2012", false},
+		{"first Monday of month", "* * 1-7 * Mon", "Mon Aug 6 12:00 2012", true},
+		{"first Monday of month - wrong week", "* * 1-7 * Mon", "Mon Aug 13 12:00 2012", false},
+
+		// Wildcard cases (unchanged behavior - star means "any")
+		{"DOM wildcard - DOW restricted", "* * * * Mon", "Mon Aug 6 12:00 2012", true},
+		{"DOM wildcard - DOW restricted - wrong day", "* * * * Mon", "Tue Aug 7 12:00 2012", false},
+		{"DOW wildcard - DOM restricted", "* * 15 * *", "Wed Aug 15 12:00 2012", true},
+		{"DOW wildcard - DOM restricted - wrong day", "* * 15 * *", "Wed Aug 14 12:00 2012", false},
+		{"both wildcards", "* * * * *", "Wed Aug 15 12:00 2012", true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sched, err := ParseStandard(tc.spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tm := getTime(tc.time)
+			// Next from 1 second before should return the time if it matches
+			next := sched.Next(tm.Add(-time.Second))
+			actual := next.Equal(tm)
+			if actual != tc.expected {
+				t.Errorf("spec %q at %s: got match=%v, want %v (next=%v)",
+					tc.spec, tc.time, actual, tc.expected, next)
+			}
+		})
+	}
+}
+
+// TestDayMatchesORMode tests the legacy OR logic for DOM/DOW matching.
+func TestDayMatchesORMode(t *testing.T) {
+	// Create parser with legacy OR mode
+	parser := NewParser(Minute | Hour | Dom | Month | Dow | DowOrDom)
+
+	tests := []struct {
+		name     string
+		spec     string
+		time     string
+		expected bool
+	}{
+		// Either DOM or DOW needs to match (OR logic)
+		{"both match", "* * 15 * Sun", "Sun Jul 15 12:00 2012", true},
+		{"only DOM matches", "* * 15 * Sun", "Fri Jun 15 12:00 2012", true},
+		{"only DOW matches", "* * 15 * Sun", "Sun Jul 8 12:00 2012", true},
+		{"neither matches", "* * 15 * Sun", "Sat Jul 14 12:00 2012", false},
+
+		// Wildcard cases (unchanged - star means "any", both must match)
+		{"DOM wildcard - DOW restricted", "* * * * Mon", "Mon Aug 6 12:00 2012", true},
+		{"DOM wildcard - wrong day", "* * * * Mon", "Tue Aug 7 12:00 2012", false},
+		{"DOW wildcard - DOM restricted", "* * 15 * *", "Wed Aug 15 12:00 2012", true},
+		{"DOW wildcard - wrong day", "* * 15 * *", "Wed Aug 14 12:00 2012", false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sched, err := parser.Parse(tc.spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tm := getTime(tc.time)
+			next := sched.Next(tm.Add(-time.Second))
+			actual := next.Equal(tm)
+			if actual != tc.expected {
+				t.Errorf("spec %q at %s: got match=%v, want %v (next=%v)",
+					tc.spec, tc.time, actual, tc.expected, next)
+			}
+		})
+	}
+}
+
+// TestDowOrDomParseOption verifies the DowOrDom ParseOption is correctly applied.
+func TestDowOrDomParseOption(t *testing.T) {
+	// Default parser (AND mode)
+	defaultParser := NewParser(Minute | Hour | Dom | Month | Dow)
+	andSched, err := defaultParser.Parse("0 0 15 * Fri")
+	if err != nil {
+		t.Fatal(err)
+	}
+	andSpec := andSched.(*SpecSchedule)
+	if andSpec.DowOrDom {
+		t.Error("Default parser should have DowOrDom=false")
+	}
+
+	// Parser with DowOrDom option (OR mode)
+	orParser := NewParser(Minute | Hour | Dom | Month | Dow | DowOrDom)
+	orSched, err := orParser.Parse("0 0 15 * Fri")
+	if err != nil {
+		t.Fatal(err)
+	}
+	orSpec := orSched.(*SpecSchedule)
+	if !orSpec.DowOrDom {
+		t.Error("Parser with DowOrDom option should have DowOrDom=true")
+	}
+}
+
+// TestANDModeNextSchedule tests Next() with various AND mode scenarios.
+func TestANDModeNextSchedule(t *testing.T) {
+	tests := []struct {
+		name     string
+		spec     string
+		from     string
+		expected string
+	}{
+		{
+			name:     "last Friday of month",
+			spec:     "0 0 25-31 * Fri",
+			from:     "Mon Aug 1 00:00 2012",
+			expected: "Fri Aug 31 00:00 2012",
+		},
+		{
+			name:     "first Monday of month",
+			spec:     "0 0 1-7 * Mon",
+			from:     "Mon Aug 1 00:00 2012",
+			expected: "Mon Aug 6 00:00 2012",
+		},
+		{
+			name:     "Friday the 13th",
+			spec:     "0 0 13 * Fri",
+			from:     "Mon Jul 9 00:00 2012",
+			expected: "Fri Jul 13 00:00 2012",
+		},
+		{
+			name:     "second Tuesday of month",
+			spec:     "0 0 8-14 * Tue",
+			from:     "Mon Aug 1 00:00 2012",
+			expected: "Tue Aug 14 00:00 2012",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sched, err := ParseStandard(tc.spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			from := getTime(tc.from)
+			expected := getTime(tc.expected)
+			actual := sched.Next(from)
+			if !actual.Equal(expected) {
+				t.Errorf("Next(%s) = %v, want %v", tc.from, actual, expected)
+			}
+		})
+	}
+}
+
+// TestANDModePrevSchedule tests Prev() with AND mode scenarios.
+func TestANDModePrevSchedule(t *testing.T) {
+	tests := []struct {
+		name     string
+		spec     string
+		from     string
+		expected string
+	}{
+		{
+			name:     "last Friday of month - backwards",
+			spec:     "0 0 25-31 * Fri",
+			from:     "Sat Sep 1 00:00 2012",
+			expected: "Fri Aug 31 00:00 2012",
+		},
+		{
+			name:     "first Monday of month - backwards",
+			spec:     "0 0 1-7 * Mon",
+			from:     "Tue Aug 7 00:00 2012",
+			expected: "Mon Aug 6 00:00 2012",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sched, err := ParseStandard(tc.spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			from := getTime(tc.from)
+			expected := getTime(tc.expected)
+			actual := sched.(ScheduleWithPrev).Prev(from)
+			if !actual.Equal(expected) {
+				t.Errorf("Prev(%s) = %v, want %v", tc.from, actual, expected)
 			}
 		})
 	}

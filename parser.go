@@ -35,6 +35,7 @@ const (
 	DowLast                                // Allow #L syntax in DOW (e.g., FRI#L for last Friday)
 	DomL                                   // Allow L syntax in DOM (e.g., L for last day, L-3 for 3rd last day)
 	DomW                                   // Allow W syntax in DOM (e.g., 15W for nearest weekday, LW for last weekday)
+	DowOrDom                               // Use legacy OR logic for DOW/DOM (default: AND)
 )
 
 // Extended is a convenience flag that enables all extended cron syntax options:
@@ -512,6 +513,7 @@ func (p Parser) parse(spec string) (Schedule, error) {
 		MaxSearchYears: p.maxSearchYears,
 		DomConstraints: domConstraints,
 		DowConstraints: dowConstraints,
+		DowOrDom:       p.options&DowOrDom > 0,
 	}, nil
 }
 
