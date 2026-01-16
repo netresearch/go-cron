@@ -2,6 +2,12 @@
 
 This guide helps you migrate from [robfig/cron](https://github.com/robfig/cron) v3 to [netresearch/go-cron](https://github.com/netresearch/go-cron).
 
+> [!WARNING]
+> **This fork includes knowingly accepted behavior changes.** While the API is 100%
+> compatible, runtime behavior differs in several areas to fix bugs and inconsistencies
+> in the unmaintained upstream. Review the [Behavioral Differences](#behavioral-differences)
+> section before upgrading production systems.
+
 ## Quick Start
 
 For most users, migration requires only two changes:
@@ -33,7 +39,7 @@ The API is 100% compatible with robfig/cron v3 — no code changes required for 
 
 ## Behavioral Differences
 
-While the API is compatible, there are intentional behavioral changes that fix bugs or improve reliability. These changes may affect your application if you were (knowingly or unknowingly) depending on the original behavior.
+While the API is compatible, there are knowingly accepted behavior changes that fix bugs or improve reliability. These changes may affect your application if you were (knowingly or unknowingly) depending on the original behavior.
 
 ### Bug Fixes That Change Behavior
 
@@ -197,9 +203,9 @@ _, err := c.AddFunc(veryLongString, myFunc)
 // err: "spec exceeds maximum length of 1024 characters"
 ```
 
-#### RetryWithBackoff Semantics (v1.0)
+#### RetryWithBackoff Semantics (v0.6.0)
 
-**Before (v0.x):**
+**Before (robfig/cron):**
 ```go
 // maxRetries=0 meant unlimited retries (DoS risk)
 c := cron.New(cron.WithChain(
@@ -208,7 +214,7 @@ c := cron.New(cron.WithChain(
 // A failing job would retry forever
 ```
 
-**After (v1.0+):**
+**After (netresearch/go-cron v0.6.0+):**
 ```go
 // maxRetries=0 now means no retries (safe default)
 c := cron.New(cron.WithChain(

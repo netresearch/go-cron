@@ -52,10 +52,14 @@ import "github.com/robfig/cron/v3"
 import cron "github.com/netresearch/go-cron"
 ```
 
-The API is 100% compatible with robfig/cron v3.
+The API is 100% compatible with robfig/cron v3. However, this fork includes
+knowingly accepted behavior changes that fix bugs and inconsistencies in the
+unmaintained upstream — see the [comparison table above](#why) for a summary.
 
-> [!TIP]
-> See [docs/MIGRATION.md](docs/MIGRATION.md) for a comprehensive migration guide including behavioral differences, type changes, and troubleshooting.
+> [!WARNING]
+> **Behavior differences exist.** While the API is compatible, some runtime behavior
+> has changed (DOM/DOW matching, DST handling, chain execution). Review
+> [docs/MIGRATION.md](docs/MIGRATION.md) before upgrading production systems.
 
 ## Quick Start
 

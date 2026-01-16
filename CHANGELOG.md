@@ -15,14 +15,9 @@ features, bug fixes, and modernization improvements.
 
 ## [0.9.0] - 2026-01-16
 
-### Added
-- **Wraparound ranges** ([#276], [PR#278]): Cyclic fields now support ranges where start > end
-  - Hours: `22-2` spans midnight (22, 23, 0, 1, 2)
-  - Day-of-week: `FRI-MON` spans weekend (FRI, SAT, SUN, MON)
-  - Month: `NOV-FEB` spans year boundary (NOV, DEC, JAN, FEB)
-  - Supports step values: `22-2/2` = every 2 hours from 10pm to 2am
-- **`DowOrDom` parser option** ([#277], [PR#279]): Legacy OR mode for DOM/DOW matching
-  - Provides robfig/cron compatibility for users depending on OR behavior
+> [!WARNING]
+> **Breaking change:** DOM/DOW matching now uses AND logic by default.
+> See [MIGRATION.md](docs/MIGRATION.md#domdow-and-logic-277) for details and the `DowOrDom` legacy option.
 
 ### Changed
 - **BREAKING: DOM/DOW matching now uses AND logic** ([#277], [PR#279]): When both day-of-month
@@ -32,6 +27,15 @@ features, bug fixes, and modernization improvements.
   - `0 0 1-7 * MON` = first Monday of month
   - `0 0 13 * FRI` = Friday the 13th
   - Use `DowOrDom` parser option for legacy OR behavior
+
+### Added
+- **Wraparound ranges** ([#276], [PR#278]): Cyclic fields now support ranges where start > end
+  - Hours: `22-2` spans midnight (22, 23, 0, 1, 2)
+  - Day-of-week: `FRI-MON` spans weekend (FRI, SAT, SUN, MON)
+  - Month: `NOV-FEB` spans year boundary (NOV, DEC, JAN, FEB)
+  - Supports step values: `22-2/2` = every 2 hours from 10pm to 2am
+- **`DowOrDom` parser option** ([#277], [PR#279]): Legacy OR mode for DOM/DOW matching
+  - Provides robfig/cron compatibility for users depending on OR behavior
 
 ### Fixed
 - **Test reliability** ([PR#278]): Fixed flaky chain tests using channel synchronization
