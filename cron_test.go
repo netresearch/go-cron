@@ -3028,3 +3028,165 @@ func TestScheduleJobDomDowWarningViaScheduleJob(t *testing.T) {
 		t.Error("expected warning for DOM+DOW restricted schedule")
 	}
 }
+
+func TestUpdateSchedule(t *testing.T) {
+	start := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
+	clock := NewFakeClock(start)
+	c := New(WithClock(clock), WithParser(secondParser))
+	defer c.Stop()
+
+	var runs int32
+	id, err := c.AddFunc("* * * * * *", func() { atomic.AddInt32(&runs, 1) })
+	if err != nil {
+		t.Fatalf("add failed: %v", err)
+	}
+	c.Start()
+	clock.BlockUntil(1)
+	clock.Advance(time.Second)
+	time.Sleep(10 * time.Millisecond)
+	if atomic.LoadInt32(&runs) != 1 {
+		t.Fatalf("expected 1 run before update, got %d", runs)
+	}
+	if err := c.UpdateSchedule(id, Every(5*time.Second)); err != nil {
+		t.Fatalf("update schedule failed: %v", err)
+	}
+	clock.BlockUntil(1)
+	clock.Advance(4 * time.Second)
+	time.Sleep(10 * time.Millisecond)
+	if atomic.LoadInt32(&runs) != 1 {
+		t.Errorf("expected still 1 run after advancing 4s on updated schedule, got %d", runs)
+	}
+	clock.BlockUntil(1)
+	clock.Advance(1 * time.Second)
+	time.Sleep(10 * time.Millisecond)
+	if atomic.LoadInt32(&runs) != 2 {
+		t.Errorf("expected 2 runs after schedule update, got %d", runs)
+	}
+}
+
+func TestUpdateJob(t *testing.T) {
+	start := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
+	clock := NewFakeClock(start)
+	c := New(WithClock(clock), WithParser(secondParser))
+	defer c.Stop()
+
+	var runs int32
+	id, err := c.AddFunc("* * * * * *", func() { atomic.AddInt32(&runs, 1) })
+	if err != nil {
+		t.Fatalf("add failed: %v", err)
+	}
+	c.Start()
+	clock.BlockUntil(1)
+	clock.Advance(time.Second)
+	time.Sleep(10 * time.Millisecond)
+	if atomic.LoadInt32(&runs) != 1 {
+		t.Fatalf("expected 1 run before update, got %d", runs)
+	}
+	if err := c.UpdateJob(id, "*/5 * * * * *"); err != nil {
+		t.Fatalf("update job failed: %v", err)
+	}
+	clock.BlockUntil(1)
+	clock.Advance(3 * time.Second)
+	time.Sleep(10 * time.Millisecond)
+	if atomic.LoadInt32(&runs) != 1 {
+		t.Errorf("expected still 1 run after advancing 4s on updated spec, got %d", runs)
+	}
+	clock.BlockUntil(1)
+	clock.Advance(1 * time.Second)
+	time.Sleep(10 * time.Millisecond)
+	if atomic.LoadInt32(&runs) != 2 {
+		t.Errorf("expected 2 runs after job update, got %d", runs)
+	}
+}
+
+func TestUpdateEntryNotFound(t *testing.T) {
+	c := New()
+	defer c.Stop()
+	if err := c.UpdateSchedule(999999, Every(time.Second)); !errors.Is(err, ErrEntryNotFound) {
+		t.Errorf("expected ErrEntryNotFound for UpdateSchedule, got %v", err)
+	}
+	if err := c.UpdateJob(999999, "* * * * *"); !errors.Is(err, ErrEntryNotFound) {
+		t.Errorf("expected ErrEntryNotFound for UpdateJob, got %v", err)
+	}
+}
+
+func TestUpdateScheduleByName(t *testing.T) {
+	start := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
+	clock := NewFakeClock(start)
+	c := New(WithClock(clock), WithParser(secondParser))
+	defer c.Stop()
+
+	var runs int32
+	_, err := c.AddFunc("* * * * * *", func() { atomic.AddInt32(&runs, 1) }, WithName("job-by-name"))
+	if err != nil {
+		t.Fatalf("add failed: %v", err)
+	}
+	c.Start()
+	clock.BlockUntil(1)
+	clock.Advance(time.Second)
+	time.Sleep(10 * time.Millisecond)
+	if atomic.LoadInt32(&runs) != 1 {
+		t.Fatalf("expected 1 run before update, got %d", runs)
+	}
+	if err := c.UpdateScheduleByName("job-by-name", Every(5*time.Second)); err != nil {
+		t.Fatalf("update by name failed: %v", err)
+	}
+	clock.BlockUntil(1)
+	clock.Advance(4 * time.Second)
+	time.Sleep(10 * time.Millisecond)
+	if atomic.LoadInt32(&runs) != 1 {
+		t.Errorf("expected still 1 run after advancing 4s on updated schedule, got %d", runs)
+	}
+	clock.BlockUntil(1)
+	clock.Advance(1 * time.Second)
+	time.Sleep(10 * time.Millisecond)
+	if atomic.LoadInt32(&runs) != 2 {
+		t.Errorf("expected 2 runs after update by name, got %d", runs)
+	}
+}
+
+func TestUpdateJobByName(t *testing.T) {
+	start := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
+	clock := NewFakeClock(start)
+	c := New(WithClock(clock), WithParser(secondParser))
+	defer c.Stop()
+
+	var runs int32
+	_, err := c.AddFunc("* * * * * *", func() { atomic.AddInt32(&runs, 1) }, WithName("spec-by-name"))
+	if err != nil {
+		t.Fatalf("add failed: %v", err)
+	}
+	c.Start()
+	clock.BlockUntil(1)
+	clock.Advance(time.Second)
+	time.Sleep(10 * time.Millisecond)
+	if atomic.LoadInt32(&runs) != 1 {
+		t.Fatalf("expected 1 run before update, got %d", runs)
+	}
+	if err := c.UpdateJobByName("spec-by-name", "*/5 * * * * *"); err != nil {
+		t.Fatalf("update job by name failed: %v", err)
+	}
+	clock.BlockUntil(1)
+	clock.Advance(3 * time.Second)
+	time.Sleep(10 * time.Millisecond)
+	if atomic.LoadInt32(&runs) != 1 {
+		t.Errorf("expected still 1 run after advancing 4s on updated spec, got %d", runs)
+	}
+	clock.BlockUntil(1)
+	clock.Advance(1 * time.Second)
+	time.Sleep(10 * time.Millisecond)
+	if atomic.LoadInt32(&runs) != 2 {
+		t.Errorf("expected 2 runs after update by spec name, got %d", runs)
+	}
+}
+
+func TestUpdateByNameEntryNotFound(t *testing.T) {
+	c := New()
+	defer c.Stop()
+	if err := c.UpdateScheduleByName("does-not-exist", Every(time.Second)); !errors.Is(err, ErrEntryNotFound) {
+		t.Errorf("expected ErrEntryNotFound for UpdateScheduleByName, got %v", err)
+	}
+	if err := c.UpdateJobByName("does-not-exist", "* * * * *"); !errors.Is(err, ErrEntryNotFound) {
+		t.Errorf("expected ErrEntryNotFound for UpdateJobByName, got %v", err)
+	}
+}
