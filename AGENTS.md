@@ -1,4 +1,4 @@
-<!-- Managed by agent: keep sections and order; edit content, not structure. Last updated: 2025-12-14 -->
+<!-- Managed by agent: keep sections and order; edit content, not structure. Last updated: 2026-01-16 -->
 
 # AGENTS.md
 
@@ -20,6 +20,7 @@ Maintained fork of robfig/cron - a cron spec parser and job scheduler for Go.
 - Panic fixes for TZ= parsing (issues #554, #555)
 - `Entry.Run()` method for proper chain decorator invocation (#551)
 - DST "spring forward" jobs run immediately (ISC cron behavior, PR #541)
+- DOM/DOW uses AND logic by default (consistent, enables useful patterns) (#277)
 - Heap-based scheduling for O(log n) performance
 - FakeClock for deterministic testing
 - ObservabilityHooks for metrics integration
@@ -36,6 +37,8 @@ Maintained fork of robfig/cron - a cron spec parser and job scheduler for Go.
 | [ADR-004](docs/adr/ADR-004-functional-options.md) | Functional Options | Use `WithX()` pattern for config - do NOT add config structs or setters |
 | [ADR-005](docs/adr/ADR-005-decorator-pattern.md) | Decorator/Chain Pattern | JobWrapper composition - do NOT change Job interface signature |
 | [ADR-006](docs/adr/ADR-006-sync-map-cache.md) | sync.Map for Cache | Lock-free reads for parser cache - do NOT use RWMutex |
+| [ADR-007](docs/adr/ADR-007-nw-skip-invalid-days.md) | nW Skips Invalid Days | `31W` in February skips month - use `LW` for every-month behavior |
+| [ADR-008](docs/adr/ADR-008-dom-dow-and-logic.md) | DOM/DOW AND Logic | Both must match when restricted - use `DowOrDom` for legacy OR |
 
 When proposing changes that conflict with an ADR, you MUST:
 1. Read the full ADR including alternatives considered
@@ -106,6 +109,9 @@ import (
 | `option.go` | Functional options for Cron configuration |
 | `chain.go` | Job wrappers: `Recover`, `SkipIfStillRunning`, `Timeout`, etc. |
 | `retry.go` | `RetryWithBackoff`, `CircuitBreaker` wrappers |
+| `validate.go` | `ValidateSpec`, `AnalyzeSpec` for expression validation |
+| `introspect.go` | Schedule introspection: `Bounds()`, `Fields()`, `Matches()` |
+| `observability.go` | `ObservabilityHooks` for metrics integration |
 | `logger.go` | Logger interface compatible with go-logr/logr |
 | `clock.go` | Clock abstraction with `FakeClock` for testing |
 | `heap.go` | Min-heap implementation for entry scheduling |
@@ -120,7 +126,8 @@ import (
 | `docs/API_REFERENCE.md` | Public API documentation |
 | `docs/DST_HANDLING.md` | Daylight saving time behavior |
 | `docs/TESTING_GUIDE.md` | Testing strategies and FakeClock usage |
-| `docs/adr/` | Architecture Decision Records (6 ADRs) |
+| `docs/PROJECT_INDEX.md` | Complete project file index |
+| `docs/adr/` | Architecture Decision Records (8 ADRs) |
 
 ## PR/commit checklist
 
