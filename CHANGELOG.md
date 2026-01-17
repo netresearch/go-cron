@@ -13,6 +13,25 @@ features, bug fixes, and modernization improvements.
 ### Planned for v2
 - Context-aware Job interface with graceful shutdown support
 
+## [0.9.1] - 2026-01-17
+
+### Added
+- **DOM/DOW AND logic warnings** ([#277], [PR#285]): Runtime notification when both day-of-month
+  and day-of-week are restricted, helping users understand AND logic behavior
+  - `SpecAnalysis.Warnings` field for programmatic inspection via `AnalyzeSpec()`
+  - Cron-level logger emits info message when scheduling affected jobs
+  - Warnings suppressed when `DowOrDom` option is used (legacy OR behavior)
+
+### Documentation
+- **ADR-008** ([PR#284]): Architecture decision record documenting DOM/DOW AND logic rationale
+- Improved breaking change visibility in README, CHANGELOG, and MIGRATION.md ([PR#282])
+- Fixed version reference in RetryWithBackoff migration guide ([PR#283])
+
+[PR#282]: https://github.com/netresearch/go-cron/pull/282
+[PR#283]: https://github.com/netresearch/go-cron/pull/283
+[PR#284]: https://github.com/netresearch/go-cron/pull/284
+[PR#285]: https://github.com/netresearch/go-cron/pull/285
+
 ## [0.9.0] - 2026-01-16
 
 > [!WARNING]
