@@ -218,8 +218,12 @@ for i := 0; i < 1000; i++ {
 ```
 
 `WithCapacity` pre-allocates the internal maps and heap slice, reducing overhead
-when bulk-loading many jobs at startup. Benchmark results show ~10-15% improvement
-in bulk addition time and ~1% fewer allocations for 1000 jobs.
+when bulk-loading many jobs at startup. Benchmark results show ~6% improvement
+in bulk addition time and ~1% fewer allocations for 1000 jobs, at the cost of
+~3% higher peak memory due to pre-allocated capacity.
+
+**When to use:** Only beneficial when adding 100+ jobs at startup. For fewer jobs
+or dynamic workloads, the default allocation is sufficient.
 
 ### 5. Batch Removals if Possible
 
