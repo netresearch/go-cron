@@ -66,31 +66,12 @@ func TestMissedRunOncePolicy(t *testing.T) {
 	now := time.Date(2026, 1, 18, 10, 0, 0, 0, time.UTC)
 	clock := NewFakeClock(now)
 
-	c := New(
-		WithClock(clock),
-		WithParser(secondParser),
-	)
-
 	var calls int64
 	var lastScheduledTime time.Time
 	var mu sync.Mutex
 
-	// Job runs every hour at :00. Last ran at 7:00, now it's 10:00
-	// Missed: 8:00, 9:00
-	// With MissedRunOnce, should only run once for 9:00 (most recent)
-	lastRun := time.Date(2026, 1, 18, 7, 0, 0, 0, time.UTC)
-	_, err := c.AddFunc("0 0 * * * *", func() {
-		atomic.AddInt64(&calls, 1)
-	},
-		WithPrev(lastRun),
-		WithMissedPolicy(MissedRunOnce),
-	)
-	if err != nil {
-		t.Fatalf("AddFunc failed: %v", err)
-	}
-
-	// Track the scheduled time via observability
-	c = New(
+	// Create single Cron instance with observability hooks
+	c := New(
 		WithClock(clock),
 		WithParser(secondParser),
 		WithObservability(ObservabilityHooks{
@@ -101,7 +82,12 @@ func TestMissedRunOncePolicy(t *testing.T) {
 			},
 		}),
 	)
-	_, err = c.AddFunc("0 0 * * * *", func() {
+
+	// Job runs every hour at :00. Last ran at 7:00, now it's 10:00
+	// Missed: 8:00, 9:00
+	// With MissedRunOnce, should only run once for 9:00 (most recent)
+	lastRun := time.Date(2026, 1, 18, 7, 0, 0, 0, time.UTC)
+	_, err := c.AddFunc("0 0 * * * *", func() {
 		atomic.AddInt64(&calls, 1)
 	},
 		WithPrev(lastRun),
