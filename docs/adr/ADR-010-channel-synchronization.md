@@ -141,8 +141,8 @@ func (c *Cron) Remove(id EntryID) Entry {
 Some operations must only be called from the run loop:
 
 ```go
-// removeEntry must only be called from the run loop or when holding runningMu
-// and c.running == false. Calling from elsewhere causes data races.
+// removeEntry must only be called from the run loop, or when holding runningMu
+// with c.running == false. Calling from elsewhere causes data races.
 func (c *Cron) removeEntry(id EntryID) Entry {
     // ...
 }

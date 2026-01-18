@@ -313,7 +313,9 @@ func healthHandler(c *cron.Cron) http.HandlerFunc {
         entries := c.Entries()
         status := map[string]any{
             "scheduled_jobs": len(entries),
-            "next_run":       entries[0].Next, // Entries sorted by next run
+        }
+        if len(entries) > 0 {
+            status["next_run"] = entries[0].Next // Entries sorted by next run
         }
         json.NewEncoder(w).Encode(status)
     }

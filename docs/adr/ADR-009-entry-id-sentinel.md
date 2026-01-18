@@ -35,7 +35,7 @@ func (e Entry) Valid() bool { return e.ID != 0 }
 // ID allocation skips 0 on wraparound
 c.nextID++
 if c.nextID == 0 {
-    c.nextID = 1 // Skip 0; Entry.Valid() uses 0 as invalid sentinel
+    c.nextID = 1 // Skip 0 to maintain EntryID(0) as the invalid sentinel used by Entry.Valid()
 }
 ```
 
