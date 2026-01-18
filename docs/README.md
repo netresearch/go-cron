@@ -22,6 +22,13 @@ Welcome to the go-cron documentation. This guide helps you find the right docume
 | [FAQ.md](FAQ.md) | Frequently asked questions |
 | [DST_HANDLING.md](DST_HANDLING.md) | How daylight saving time transitions are handled |
 
+### Integration Guides
+
+| Document | Description |
+|----------|-------------|
+| [PERSISTENCE_GUIDE.md](PERSISTENCE_GUIDE.md) | Integrate with databases for durable job state |
+| [DISTRIBUTED_LOCKING_GUIDE.md](DISTRIBUTED_LOCKING_GUIDE.md) | Coordinate jobs across multiple instances |
+
 ### Operations & Troubleshooting
 
 | Document | Description |
@@ -65,6 +72,7 @@ ADRs document significant architectural decisions. Read these to understand *why
 | [ADR-017](adr/ADR-017-job-with-context.md) | Optional JobWithContext interface |
 | [ADR-018](adr/ADR-018-run-flags.md) | Run-immediately and run-once entry flags |
 | [ADR-019](adr/ADR-019-atomic-entry-limit.md) | Atomic CAS for entry count limiting |
+| [ADR-020](adr/ADR-020-feature-scope-boundary.md) | Feature scope and boundary definition |
 
 See [adr/README.md](adr/README.md) for the complete ADR index and template.
 

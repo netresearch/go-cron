@@ -88,9 +88,8 @@ func (c *Cron) ScheduleJob(schedule Schedule, job Job) (EntryID, error) {
 
 ### Negative
 
-- **Spin on contention**: CAS loop under high concurrency
-- **Approximate during race**: Limit may be briefly exceeded
-- **Complexity**: Atomic operations are subtle
+- **Spin on contention**: CAS loop retries under high concurrency
+- **Complexity**: Atomic operations are subtle and require careful reasoning
 
 ### Neutral
 
@@ -99,19 +98,18 @@ func (c *Cron) ScheduleJob(schedule Schedule, job Job) (EntryID, error) {
 
 ## Implementation Details
 
-### Approximate Enforcement
+### Strict Enforcement via CAS
 
-Under extreme concurrent load, the limit may be briefly exceeded:
+The CAS loop guarantees strict limit enforcement. Even under extreme concurrent load
+(e.g., 100 goroutines calling Add simultaneously with maxEntries=10), exactly 10
+entries will be added. The CAS operation ensures:
 
-```go
-// 100 goroutines calling Add simultaneously with maxEntries=10
-// Possible: 10-15 entries added before limit enforced
-```
-
-This is acceptable because:
-1. Limit is for resource protection, not exact quota
-2. Entries beyond limit are small overhead
-3. Alternative (mutex) has worse performance
+1. **Atomic check-and-increment**: The limit check and increment happen as one operation
+2. **Retry on contention**: If another goroutine wins the race, the losing goroutine
+   retries with the updated count
+3. **No over-counting**: The loop only exits when either:
+   - CAS succeeds (count was incremented from a valid state), or
+   - Limit is reached (returns false immediately)
 
 ### Decrement on Failure
 

@@ -35,6 +35,7 @@ An Architecture Decision Record captures a significant decision made about the a
 | [ADR-017](ADR-017-job-with-context.md) | Optional JobWithContext Interface | Accepted | 2025-12 |
 | [ADR-018](ADR-018-run-flags.md) | Run-Immediately and Run-Once Entry Flags | Accepted | 2025-12 |
 | [ADR-019](ADR-019-atomic-entry-limit.md) | Atomic CAS for Entry Count Limiting | Accepted | 2025-12 |
+| [ADR-020](ADR-020-feature-scope-boundary.md) | Feature Scope and Boundary Definition | Accepted | 2026-01 |
 
 ## ADR Template
 
