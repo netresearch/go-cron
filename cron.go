@@ -200,6 +200,16 @@ type Entry struct {
 	// runOnce is an internal flag set by WithRunOnce().
 	// When true, the entry will be automatically removed after its first execution.
 	runOnce bool
+
+	// MissedPolicy defines how to handle missed executions when the scheduler
+	// starts or when an entry is added. See MissedPolicy constants.
+	// Set via WithMissedPolicy(). Default is MissedSkip.
+	MissedPolicy MissedPolicy
+
+	// MissedGracePeriod defines the maximum age of a missed execution that
+	// should be caught up. If zero, all missed executions (within safety limits)
+	// are eligible for catch-up. Set via WithMissedGracePeriod().
+	MissedGracePeriod time.Duration
 }
 
 // Valid returns true if this is not the zero entry.
@@ -386,6 +396,53 @@ func WithRunImmediately() JobOption {
 func WithRunOnce() JobOption {
 	return func(e *Entry) {
 		e.runOnce = true
+	}
+}
+
+// WithMissedPolicy configures how the scheduler handles missed job executions.
+// A job is considered "missed" if it was scheduled to run while the scheduler
+// was not running (e.g., during application restart).
+//
+// This feature requires WithPrev() to provide the last run time. Without a known
+// last run time, no catch-up will occur regardless of the policy.
+//
+// Available policies:
+//   - MissedSkip (default): Do not catch up; wait for next scheduled time
+//   - MissedRunOnce: Run once immediately if any executions were missed
+//   - MissedRunAll: Run for every missed execution (use with caution)
+//
+// Example:
+//
+//	lastRun := loadFromDatabase("daily-report")
+//	c.AddFunc("0 9 * * *", dailyReport,
+//	    cron.WithPrev(lastRun),
+//	    cron.WithMissedPolicy(cron.MissedRunOnce),
+//	)
+func WithMissedPolicy(policy MissedPolicy) JobOption {
+	return func(e *Entry) {
+		e.MissedPolicy = policy
+	}
+}
+
+// WithMissedGracePeriod sets the maximum age of a missed execution that should
+// be caught up. If zero (default), all missed executions are eligible for catch-up
+// (subject to the safety limit of 100 executions for MissedRunAll).
+//
+// This is useful to avoid running very old missed jobs that are no longer relevant.
+// For example, if a daily report job was missed 3 days ago, you might not want
+// to generate reports for all those days.
+//
+// Example:
+//
+//	// Only catch up if missed within the last 2 hours
+//	c.AddFunc("0 9 * * *", dailyReport,
+//	    cron.WithPrev(lastRun),
+//	    cron.WithMissedPolicy(cron.MissedRunOnce),
+//	    cron.WithMissedGracePeriod(2*time.Hour),
+//	)
+func WithMissedGracePeriod(d time.Duration) JobOption {
+	return func(e *Entry) {
+		e.MissedGracePeriod = d
 	}
 }
 
@@ -701,6 +758,8 @@ func (c *Cron) run() {
 	// Figure out the next activation times for each entry and initialize heap.
 	now := c.now()
 	for _, entry := range c.entries {
+		// Check for missed executions before scheduling next run
+		c.processMissedRuns(entry, now)
 		c.scheduleEntryNext(entry, now)
 		c.hooks.callOnSchedule(entry.ID, entry.Job, entry.Next)
 		c.logger.Info("schedule", "now", now, "entry", entry.ID, "next", entry.Next)
@@ -735,6 +794,8 @@ func (c *Cron) run() {
 				newEntry := req.value
 				timer.Stop()
 				now = c.now()
+				// Check for missed executions before scheduling next run
+				c.processMissedRuns(newEntry, now)
 				c.scheduleEntryNext(newEntry, now)
 				heap.Push(&c.entries, newEntry)
 				c.entryIndex[newEntry.ID] = newEntry

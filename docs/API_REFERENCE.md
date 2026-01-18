@@ -197,12 +197,15 @@ Location gets the time zone location.
 
 ```go
 type Entry struct {
-    ID         EntryID   // Cron-assigned unique identifier
-    Schedule   Schedule  // Schedule for this entry
-    Next       time.Time // Next activation time (zero if not started)
-    Prev       time.Time // Last run time (zero if never run)
-    WrappedJob Job       // Job with chain wrappers applied
-    Job        Job       // Original job as submitted
+    ID                EntryID       // Cron-assigned unique identifier
+    Schedule          Schedule      // Schedule for this entry
+    Next              time.Time     // Next activation time (zero if not started)
+    Prev              time.Time     // Last run time (zero if never run)
+    WrappedJob        Job           // Job with chain wrappers applied
+    Job               Job           // Original job as submitted
+    Name              string        // Optional name for the entry
+    MissedPolicy      MissedPolicy  // Policy for handling missed executions
+    MissedGracePeriod time.Duration // Maximum age for catch-up runs
 }
 ```
 
@@ -235,6 +238,135 @@ type EntryID uint64
 
 EntryID identifies an entry within a Cron instance.
 Using uint64 prevents overflow and ID collisions on all platforms.
+
+---
+
+### MissedPolicy
+
+```go
+type MissedPolicy int
+
+const (
+    MissedSkip    MissedPolicy = iota // Do not catch up on missed executions (default)
+    MissedRunOnce                      // Run once for the most recent missed execution
+    MissedRunAll                       // Run for every missed execution (capped at 100)
+)
+```
+
+MissedPolicy defines how to handle jobs that were scheduled to run while the
+scheduler was not running (e.g., application restart).
+
+**Important:** This feature requires the user to provide the last run time via
+`WithPrev()`. The scheduler does NOT persist state - users are responsible for
+storing and loading last run times from their own persistence layer.
+
+**Policies:**
+- `MissedSkip`: Default behavior. No catch-up runs occur.
+- `MissedRunOnce`: Run the job once immediately for the most recent missed time.
+- `MissedRunAll`: Run the job for every missed execution (up to 100 runs for safety).
+
+**Example:**
+```go
+// Load last run time from your database
+lastRun := loadFromDatabase("daily-report")
+
+c.AddFunc("0 9 * * *", dailyReport,
+    cron.WithPrev(lastRun),                      // When it last ran
+    cron.WithMissedPolicy(cron.MissedRunOnce),   // Run once if missed
+    cron.WithMissedGracePeriod(2*time.Hour),     // Only if within 2 hours
+)
+```
+
+See [PERSISTENCE_GUIDE.md](PERSISTENCE_GUIDE.md) for complete integration patterns.
+
+---
+
+### JobOption
+
+```go
+type JobOption func(*Entry)
+```
+
+JobOption represents a modification to a specific job entry.
+Job options are passed to `AddFunc`, `AddJob`, or `Schedule` methods.
+
+#### func WithName
+
+```go
+func WithName(name string) JobOption
+```
+
+WithName sets a name for the job entry. Named jobs can be looked up via
+`EntryByName()` and filtered via `EntriesByTag()`.
+
+**Example:**
+```go
+c.AddFunc("0 9 * * *", dailyReport, cron.WithName("daily-report"))
+entry := c.EntryByName("daily-report")
+```
+
+#### func WithPrev
+
+```go
+func WithPrev(t time.Time) JobOption
+```
+
+WithPrev sets the last execution time for the job entry. This is used to
+calculate missed executions when combined with `WithMissedPolicy()`.
+
+**Example:**
+```go
+lastRun := loadFromDatabase("my-job")
+c.AddFunc("0 * * * *", myJob,
+    cron.WithPrev(lastRun),
+    cron.WithMissedPolicy(cron.MissedRunOnce),
+)
+```
+
+#### func WithMissedPolicy
+
+```go
+func WithMissedPolicy(policy MissedPolicy) JobOption
+```
+
+WithMissedPolicy sets the policy for handling missed job executions.
+See `MissedPolicy` for available options.
+
+#### func WithMissedGracePeriod
+
+```go
+func WithMissedGracePeriod(d time.Duration) JobOption
+```
+
+WithMissedGracePeriod sets the maximum age for missed executions to be
+caught up. Missed runs older than this duration are skipped even with
+`MissedRunAll` policy.
+
+**Example:**
+```go
+// Only catch up on missed runs from the last hour
+c.AddFunc("*/5 * * * *", job,
+    cron.WithPrev(lastRun),
+    cron.WithMissedPolicy(cron.MissedRunAll),
+    cron.WithMissedGracePeriod(time.Hour),
+)
+```
+
+#### func WithTags
+
+```go
+func WithTags(tags ...string) JobOption
+```
+
+WithTags sets tags for categorizing the job entry. Multiple entries can
+share the same tags, enabling group operations.
+
+**Example:**
+```go
+c.AddFunc("* * * * *", job1, cron.WithTags("reports", "daily"))
+c.AddFunc("0 * * * *", job2, cron.WithTags("reports", "hourly"))
+entries := c.EntriesByTag("reports")
+```
 
 ---
 

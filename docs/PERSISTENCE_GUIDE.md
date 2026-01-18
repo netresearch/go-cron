@@ -13,11 +13,34 @@ go-cron intentionally does not include built-in persistence because:
 
 See [ADR-020](adr/ADR-020-feature-scope-boundary.md) for the full rationale.
 
+## Built-in Missed Job Policy
+
+go-cron provides a built-in mechanism to handle missed job executions. While the scheduler does NOT persist state, you can provide the last run time and the scheduler will automatically catch up:
+
+```go
+// Load last run time from your database
+lastRun := loadFromDatabase("daily-report")
+
+c.AddFunc("0 9 * * *", dailyReport,
+    cron.WithName("daily-report"),
+    cron.WithPrev(lastRun),                      // When it last ran
+    cron.WithMissedPolicy(cron.MissedRunOnce),   // Run once if missed
+    cron.WithMissedGracePeriod(2*time.Hour),     // Only if within 2 hours
+)
+```
+
+**Available policies:**
+- `MissedSkip` (default): No catch-up, wait for next scheduled time
+- `MissedRunOnce`: Run once immediately for the most recent missed execution
+- `MissedRunAll`: Run for every missed execution (capped at 100 for safety)
+
+The patterns below show how to persist job state so you can provide `WithPrev()` on startup.
+
 ## Integration Patterns
 
 ### Pattern 1: Persist Last Run Time (Recommended)
 
-Store the last successful run time for each job. On restart, use this to determine if catch-up is needed.
+Store the last successful run time for each job. On restart, pass it to `WithPrev()` for automatic catch-up.
 
 ```go
 package main
@@ -70,41 +93,24 @@ func main() {
         },
     }))
 
-    // Register jobs with names for tracking
-    c.AddFunc("0 9 * * *", dailyReport, cron.WithName("daily-report"))
-    c.AddFunc("0 * * * *", hourlySync, cron.WithName("hourly-sync"))
+    // Load last run times and register jobs with automatic catch-up
+    dailyLastRun, _ := store.GetLastRun("daily-report")
+    c.AddFunc("0 9 * * *", dailyReport,
+        cron.WithName("daily-report"),
+        cron.WithPrev(dailyLastRun),
+        cron.WithMissedPolicy(cron.MissedRunOnce),
+        cron.WithMissedGracePeriod(2*time.Hour),
+    )
 
-    // Check for missed jobs on startup
-    checkMissedJobs(c, store)
+    hourlyLastRun, _ := store.GetLastRun("hourly-sync")
+    c.AddFunc("0 * * * *", hourlySync,
+        cron.WithName("hourly-sync"),
+        cron.WithPrev(hourlyLastRun),
+        cron.WithMissedPolicy(cron.MissedRunOnce),
+    )
 
     c.Start()
     // ... graceful shutdown handling
-}
-
-func checkMissedJobs(c *cron.Cron, store *JobStore) {
-    for _, entry := range c.Entries() {
-        if entry.Name == "" {
-            continue
-        }
-
-        lastRun, err := store.GetLastRun(entry.Name)
-        if err != nil {
-            log.Printf("Error getting last run for %s: %v", entry.Name, err)
-            continue
-        }
-
-        if lastRun.IsZero() {
-            continue // Never run, let normal schedule handle it
-        }
-
-        // Calculate expected runs since last execution
-        expectedNext := entry.Schedule.Next(lastRun)
-        if expectedNext.Before(time.Now()) {
-            log.Printf("Job %s missed execution at %v, running catch-up",
-                entry.Name, expectedNext)
-            go entry.Job.Run() // Run immediately
-        }
-    }
 }
 ```
 
@@ -362,19 +368,20 @@ func TestMissedJobCatchUp(t *testing.T) {
     // Set up fake clock at 10:00 AM
     clock := cron.NewFakeClock(time.Date(2026, 1, 18, 10, 0, 0, 0, time.UTC))
 
-    store := &MockJobStore{
-        lastRuns: map[string]time.Time{
-            "daily-report": time.Date(2026, 1, 17, 9, 0, 0, 0, time.UTC), // Yesterday 9 AM
-        },
-    }
+    // Simulate last run was yesterday at 9 AM
+    lastRun := time.Date(2026, 1, 17, 9, 0, 0, 0, time.UTC)
 
     c := cron.New(cron.WithClock(clock))
 
     var catchUpRan bool
-    c.AddFunc("0 9 * * *", func() { catchUpRan = true }, cron.WithName("daily-report"))
+    c.AddFunc("0 9 * * *", func() { catchUpRan = true },
+        cron.WithName("daily-report"),
+        cron.WithPrev(lastRun),                    // Last run time from DB
+        cron.WithMissedPolicy(cron.MissedRunOnce), // Catch up if missed
+    )
 
-    // Check for missed jobs
-    checkMissedJobs(c, store)
+    c.Start()
+    defer c.Stop()
 
     // The job should have caught up (9 AM today was missed)
     time.Sleep(10 * time.Millisecond) // Let goroutine run

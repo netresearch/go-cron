@@ -240,6 +240,31 @@ c := cron.New(cron.WithLogger(
 ))
 ```
 
+## Missed Job Catch-Up
+
+Handle jobs that were missed while the scheduler was not running (e.g., application restart):
+
+```go
+// Load last run time from your database
+lastRun := loadFromDatabase("daily-report")
+
+c.AddFunc("0 9 * * *", dailyReport,
+    cron.WithPrev(lastRun),                      // When it last ran
+    cron.WithMissedPolicy(cron.MissedRunOnce),   // Run once if missed
+    cron.WithMissedGracePeriod(2*time.Hour),     // Only if within 2 hours
+)
+```
+
+**Policies:**
+- `MissedSkip` (default) — No catch-up, wait for next scheduled time
+- `MissedRunOnce` — Run once immediately for the most recent missed execution
+- `MissedRunAll` — Run for every missed execution (capped at 100 for safety)
+
+> [!IMPORTANT]
+> The scheduler does NOT persist state. You must provide the last run time via `WithPrev()`
+> and store it yourself (database, file, etc.). See [docs/PERSISTENCE_GUIDE.md](docs/PERSISTENCE_GUIDE.md)
+> for complete integration patterns.
+
 ## API Reference
 
 Full documentation: [pkg.go.dev/github.com/netresearch/go-cron](https://pkg.go.dev/github.com/netresearch/go-cron)
