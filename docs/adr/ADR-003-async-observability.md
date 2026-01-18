@@ -26,7 +26,7 @@ Users need to integrate cron job metrics into their observability stack (Prometh
 
 ## Decision
 
-Implement synchronous hook calls that execute in the scheduler's goroutine context, but design them for fast, non-blocking operations.
+Implement asynchronous hook calls that execute in separate goroutines, ensuring the scheduler is never blocked by slow callbacks.
 
 ```go
 type ObservabilityHooks struct {
@@ -38,23 +38,18 @@ type ObservabilityHooks struct {
 
 **Key design choices:**
 
-1. **Synchronous calls**: Hooks are called directly, not via channels
-2. **Caller responsibility**: Users must ensure hooks are fast (buffer/async internally if needed)
-3. **Panic isolation**: Each hook call is wrapped in recover()
-4. **Optional hooks**: Nil function pointers are checked before calling
+1. **Asynchronous calls**: Hooks are spawned in goroutines (`go h.OnJobStart(...)`)
+2. **Non-blocking**: Scheduler never waits for hook completion
+3. **Optional hooks**: Nil function pointers are checked before spawning goroutines
+4. **Thread-safety required**: Hook implementations must be safe for concurrent execution
 
 ```go
 // Internal implementation
-func (c *Cron) callOnJobComplete(e *Entry, duration time.Duration, recovered any) {
-    if c.hooks.OnJobComplete == nil {
-        return
+func (h *ObservabilityHooks) callOnJobStart(entryID EntryID, job Job, scheduledTime time.Time) {
+    if h != nil && h.OnJobStart != nil {
+        name := getJobName(job)
+        go h.OnJobStart(entryID, name, scheduledTime)
     }
-    defer func() {
-        if r := recover(); r != nil {
-            c.logger.Error(nil, "observability hook panicked", "hook", "OnJobComplete", "panic", r)
-        }
-    }()
-    c.hooks.OnJobComplete(e.ID, e.Name, duration, recovered)
 }
 ```
 
@@ -62,23 +57,22 @@ func (c *Cron) callOnJobComplete(e *Entry, duration time.Duration, recovered any
 
 ### Positive
 
-- **Zero allocation** when hooks are nil
-- **Simple mental model**: hooks run in expected order
-- **Guaranteed delivery**: no events lost to channel buffers
-- **Easy debugging**: stack traces show hook in context
-- **Flexible implementation**: users can make hooks async if needed
+- **Non-blocking**: Slow hooks never delay the scheduler or job execution
+- **Isolation**: Hook panics don't crash the scheduler (contained in their own goroutine)
+- **Simple API**: Users don't need to manage channels or goroutines
+- **Zero overhead when nil**: No goroutines spawned if hooks are not configured
 
 ### Negative
 
-- **Blocking risk**: Slow hooks delay the scheduler
-- **Thread safety**: Hook implementations must be thread-safe
-- **No backpressure**: Slow consumer can't signal overload
-- **Ordering within job**: OnJobStart and OnJobComplete are in different goroutines
+- **No ordering guarantees**: Events may be processed out of order
+- **Events may be lost on shutdown**: In-flight goroutines may not complete
+- **Thread-safety required**: Hook implementations must handle concurrent calls
+- **Slight latency**: Hooks execute after event, not during
 
 ### Neutral
 
-- **User responsibility**: Performance characteristics depend on hook implementation
-- **Documentation**: Must clearly state that hooks should be fast
+- **Goroutine overhead**: Each event spawns a goroutine (acceptable for typical job frequencies)
+- **No backpressure**: System can't signal to slow consumers
 
 ## Alternatives Considered
 
@@ -99,17 +93,19 @@ func (c *Cron) Events() <-chan ObservabilityEvent
 - Risk of dropped events on slow consumers
 - Requires users to run a separate goroutine
 
-### 2. Callback Registration with Async Dispatch
+### 2. Synchronous Hook Calls
 
 ```go
-func (c *Cron) OnJobComplete(fn func(...)) {
-    c.hooks = append(c.hooks, asyncWrapper(fn))
+func (c *Cron) callOnJobComplete(e *Entry, duration time.Duration, recovered any) {
+    if c.hooks.OnJobComplete != nil {
+        c.hooks.OnJobComplete(e.ID, e.Name, duration, recovered)
+    }
 }
 ```
 
-- **Rejected**: Hidden goroutine spawning
-- Unpredictable ordering
-- Resource leaks if hooks are slow
+- **Rejected**: Slow hooks would block the scheduler
+- Users could make the scheduler unresponsive
+- Would require complex timeout logic to prevent blocking
 
 ### 3. OpenTelemetry Integration
 
@@ -135,17 +131,19 @@ type EventStore interface {
 
 ## Usage Guidance
 
+Since hooks run in their own goroutines, they won't block the scheduler. However, keep hooks efficient to avoid unbounded goroutine growth.
+
 ```go
-// DO: Fast, non-blocking hooks
+// DO: Fast operations (counters, gauges)
 hooks := cron.ObservabilityHooks{
     OnJobComplete: func(id cron.EntryID, name string, dur time.Duration, rec any) {
-        // Counter increment is fast
+        // Prometheus counter/histogram updates are thread-safe and fast
         jobCounter.WithLabelValues(name, statusFromRecovered(rec)).Inc()
         jobDuration.WithLabelValues(name).Observe(dur.Seconds())
     },
 }
 
-// DO: Buffer if you need async processing
+// DO: Bounded buffering for slow consumers
 var eventChan = make(chan Event, 1000)
 
 hooks := cron.ObservabilityHooks{
@@ -158,10 +156,12 @@ hooks := cron.ObservabilityHooks{
     },
 }
 
-// DON'T: Slow synchronous operations
+// CAUTION: Slow operations spawn long-lived goroutines
 hooks := cron.ObservabilityHooks{
     OnJobComplete: func(id cron.EntryID, name string, dur time.Duration, rec any) {
-        http.Post("https://metrics.example.com", ...)  // SLOW!
+        // Each call spawns a goroutine that lives until HTTP completes
+        // Many jobs + slow endpoint = goroutine accumulation
+        http.Post("https://metrics.example.com", ...)
     },
 }
 ```

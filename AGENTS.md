@@ -33,7 +33,7 @@ Maintained fork of robfig/cron - a cron spec parser and job scheduler for Go.
 |-----|----------|---------|
 | [ADR-001](docs/adr/ADR-001-heap-scheduling.md) | Min-Heap for Scheduling | O(log n) insert/remove, O(1) peek - do NOT revert to sorted slice |
 | [ADR-002](docs/adr/ADR-002-panic-for-failures.md) | Panic-Based Failures | Jobs signal failure via panic, caught by wrappers - do NOT add error returns to Job interface |
-| [ADR-003](docs/adr/ADR-003-async-observability.md) | Synchronous Hooks | Hooks are fast/sync, user buffers if needed - do NOT add channels/async dispatch |
+| [ADR-003](docs/adr/ADR-003-async-observability.md) | Asynchronous Hooks | Hooks run in goroutines, non-blocking - do NOT make synchronous |
 | [ADR-004](docs/adr/ADR-004-functional-options.md) | Functional Options | Use `WithX()` pattern for config - do NOT add config structs or setters |
 | [ADR-005](docs/adr/ADR-005-decorator-pattern.md) | Decorator/Chain Pattern | JobWrapper composition - do NOT change Job interface signature |
 | [ADR-006](docs/adr/ADR-006-sync-map-cache.md) | sync.Map for Cache | Lock-free reads for parser cache - do NOT use RWMutex |
