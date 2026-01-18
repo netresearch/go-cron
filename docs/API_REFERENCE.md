@@ -304,8 +304,7 @@ c := cron.New(cron.WithClock(fakeClock))
 c.Start()
 fakeClock.Advance(time.Hour) // Trigger jobs deterministically
 
-// For backward compatibility with function-based clock
-c := cron.New(cron.WithClock(cron.ClockFunc(time.Now)))
+// RealClock is used by default, no need to specify unless overriding
 ```
 
 #### func WithCapacity
@@ -632,7 +631,7 @@ Logger is the logging interface used by cron. Compatible with go-logr/logr.
 #### Variables
 
 ```go
-var DefaultLogger Logger = PrintfLogger(log.New(os.Stderr, "cron: ", log.LstdFlags))
+var DefaultLogger Logger = PrintfLogger(log.New(os.Stdout, "cron: ", log.LstdFlags))
 var DiscardLogger Logger = PrintfLogger(log.New(io.Discard, "", 0))
 ```
 
@@ -784,18 +783,6 @@ TimerCount returns the number of active timers.
 
 ---
 
-### ClockFunc
-
-```go
-func ClockFunc(fn func() time.Time) Clock
-```
-
-ClockFunc creates a Clock from a simple `func() time.Time`.
-Provides backward compatibility with the old Clock type.
-Timers created by this clock use real `time.Timer`.
-
----
-
 ## Functions
 
 ### ParseStandard
@@ -829,4 +816,4 @@ MaxSpecLength is the maximum allowed length for a cron spec string.
 
 ---
 
-*Generated: 2024-11-28*
+*Generated: 2025-11-28*

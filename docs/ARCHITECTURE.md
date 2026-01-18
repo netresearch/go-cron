@@ -623,4 +623,4 @@ c := cron.New(cron.WithChain(MetricsWrapper(registry)))
 
 ---
 
-*Generated: 2024-11-28*
+*Generated: 2025-11-28*

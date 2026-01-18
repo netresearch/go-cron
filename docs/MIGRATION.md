@@ -315,7 +315,7 @@ No code changes required — this is an internal optimization.
 import "log/slog"
 
 c := cron.New(cron.WithLogger(
-    cron.SlogLogger(slog.Default()),
+    cron.NewSlogLogger(slog.Default()),
 ))
 ```
 

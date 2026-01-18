@@ -870,7 +870,7 @@ func init() {
 func main() {
     // Structured logging
     logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-    cronLogger := cron.SlogLogger(logger)
+    cronLogger := cron.NewSlogLogger(logger)
 
     // Observability hooks
     hooks := cron.ObservabilityHooks{

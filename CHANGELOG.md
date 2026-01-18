@@ -339,7 +339,10 @@ This fork includes all features from robfig/cron v3 plus:
    _, err := cron.ParseStandard("*/60 * * * *") // Error: step (60) must be less than range size (60)
    ```
 
-[Unreleased]: https://github.com/netresearch/go-cron/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/netresearch/go-cron/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/netresearch/go-cron/compare/v0.9.0...v0.9.1
+[0.9.0]: https://github.com/netresearch/go-cron/compare/v0.8.0...v0.9.0
+[0.8.0]: https://github.com/netresearch/go-cron/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/netresearch/go-cron/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/netresearch/go-cron/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/netresearch/go-cron/compare/v0.6.0...v0.6.1

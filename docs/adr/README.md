@@ -15,12 +15,14 @@ An Architecture Decision Record captures a significant decision made about the a
 
 | ADR | Title | Status | Date |
 |-----|-------|--------|------|
-| [ADR-001](ADR-001-heap-scheduling.md) | Use Min-Heap for Entry Scheduling | Accepted | 2024-09 |
-| [ADR-002](ADR-002-panic-for-failures.md) | Panic-Based Job Failure Signaling | Accepted | 2024-09 |
-| [ADR-003](ADR-003-async-observability.md) | Asynchronous Observability Hooks | Accepted | 2024-10 |
-| [ADR-004](ADR-004-functional-options.md) | Functional Options Pattern | Accepted | 2024-09 |
-| [ADR-005](ADR-005-decorator-pattern.md) | Decorator Pattern for Job Wrappers | Accepted | 2024-09 |
-| [ADR-006](ADR-006-sync-map-cache.md) | sync.Map for Parser Cache | Accepted | 2024-10 |
+| [ADR-001](ADR-001-heap-scheduling.md) | Use Min-Heap for Entry Scheduling | Accepted | 2025-12 |
+| [ADR-002](ADR-002-panic-for-failures.md) | Panic-Based Job Failure Signaling | Accepted | 2025-12 |
+| [ADR-003](ADR-003-async-observability.md) | Asynchronous Observability Hooks | Accepted | 2025-12 |
+| [ADR-004](ADR-004-functional-options.md) | Functional Options Pattern | Accepted | 2025-12 |
+| [ADR-005](ADR-005-decorator-pattern.md) | Decorator Pattern for Job Wrappers | Accepted | 2025-12 |
+| [ADR-006](ADR-006-sync-map-cache.md) | sync.Map for Parser Cache | Accepted | 2025-12 |
+| [ADR-007](ADR-007-nw-skip-invalid-days.md) | nW Syntax Skips Invalid Months | Accepted | 2025-12 |
+| [ADR-008](ADR-008-dom-dow-and-logic.md) | DOM/DOW AND Logic by Default | Accepted | 2026-01 |
 
 ## ADR Template
 

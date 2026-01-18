@@ -277,7 +277,6 @@ const (
 |------|-------|
 | `RealClock{}` | Production (default) |
 | `FakeClock` | Testing with controlled time |
-| `ClockFunc(fn)` | Backward-compatible adapter |
 
 **FakeClock Methods:**
 ```go
@@ -470,4 +469,4 @@ See [CHANGELOG.md](../CHANGELOG.md) for detailed release notes.
 
 ---
 
-*Generated: 2024-11-28 | go-cron v3.x*
+*Generated: 2025-11-28 | go-cron v0.9.x*
