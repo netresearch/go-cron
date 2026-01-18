@@ -27,6 +27,14 @@ An Architecture Decision Record captures a significant decision made about the a
 | [ADR-009](ADR-009-entry-id-sentinel.md) | Entry ID Sentinel Value (0 = Invalid) | Accepted | 2025-12 |
 | [ADR-010](ADR-010-channel-synchronization.md) | Channel-Based Synchronization Model | Accepted | 2025-12 |
 | [ADR-011](ADR-011-dual-index-maps.md) | Dual-Index Maps for O(1) Lookup | Accepted | 2025-12 |
+| [ADR-012](ADR-012-index-compaction.md) | Map Index Compaction | Accepted | 2025-12 |
+| [ADR-013](ADR-013-heap-index-tracking.md) | Entry Heap Index Tracking | Accepted | 2025-12 |
+| [ADR-014](ADR-014-max-idle-duration.md) | Maximum Idle Duration | Accepted | 2025-12 |
+| [ADR-015](ADR-015-zero-time-sentinel.md) | Zero Time as Schedule Exhaustion Sentinel | Accepted | 2025-12 |
+| [ADR-016](ADR-016-dst-normalization.md) | DST Handling via Normalization | Accepted | 2025-12 |
+| [ADR-017](ADR-017-job-with-context.md) | Optional JobWithContext Interface | Accepted | 2025-12 |
+| [ADR-018](ADR-018-run-flags.md) | Run-Immediately and Run-Once Entry Flags | Accepted | 2025-12 |
+| [ADR-019](ADR-019-atomic-entry-limit.md) | Atomic CAS for Entry Count Limiting | Accepted | 2025-12 |
 
 ## ADR Template
 

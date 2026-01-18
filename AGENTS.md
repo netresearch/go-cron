@@ -1,4 +1,4 @@
-<!-- Managed by agent: keep sections and order; edit content, not structure. Last updated: 2026-01-16 -->
+<!-- Managed by agent: keep sections and order; edit content, not structure. Last updated: 2026-01-18 -->
 
 # AGENTS.md
 
@@ -43,6 +43,14 @@ Maintained fork of robfig/cron - a cron spec parser and job scheduler for Go.
 | [ADR-009](docs/adr/ADR-009-entry-id-sentinel.md) | Entry ID Sentinel | `EntryID(0)` is invalid; `entry.Valid()` checks this |
 | [ADR-010](docs/adr/ADR-010-channel-synchronization.md) | Channel Sync Model | Run loop owns state; channels serialize access - deadlock-free |
 | [ADR-011](docs/adr/ADR-011-dual-index-maps.md) | Dual-Index Maps | O(1) lookup by ID and Name; memory compaction on high churn |
+| [ADR-012](docs/adr/ADR-012-index-compaction.md) | Map Index Compaction | Threshold-based map recreation to reclaim memory |
+| [ADR-013](docs/adr/ADR-013-heap-index-tracking.md) | Entry Heap Index | Entry stores heapIndex for O(log n) removal |
+| [ADR-014](docs/adr/ADR-014-max-idle-duration.md) | Max Idle Duration | 100,000 hours as practical infinity for responsive idle |
+| [ADR-015](docs/adr/ADR-015-zero-time-sentinel.md) | Zero Time Sentinel | time.Time{} signals schedule exhaustion |
+| [ADR-016](docs/adr/ADR-016-dst-normalization.md) | DST Normalization | ISC cron behavior for spring-forward/fall-back |
+| [ADR-017](docs/adr/ADR-017-job-with-context.md) | JobWithContext | Optional interface for context-aware jobs |
+| [ADR-018](docs/adr/ADR-018-run-flags.md) | Run Flags | WithRunImmediately() and WithRunOnce() entry flags |
+| [ADR-019](docs/adr/ADR-019-atomic-entry-limit.md) | Atomic Entry Limit | CAS loop for lock-free entry count limiting |
 
 When proposing changes that conflict with an ADR, you MUST:
 1. Read the full ADR including alternatives considered
@@ -133,7 +141,7 @@ import (
 | `docs/OPERATIONS.md` | Production deployment, shutdown, monitoring |
 | `docs/TROUBLESHOOTING.md` | Common issues and debugging techniques |
 | `docs/PROJECT_INDEX.md` | Complete project file index |
-| `docs/adr/` | Architecture Decision Records (12 ADRs) |
+| `docs/adr/` | Architecture Decision Records (20 ADRs) |
 
 ## PR/commit checklist
 
