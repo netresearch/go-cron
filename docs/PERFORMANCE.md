@@ -28,10 +28,11 @@ For applications that add jobs once and never remove them, the overhead is ~23% 
 
 | Aspect | robfig/cron | netresearch/go-cron | Trade-off |
 |--------|-------------|---------------------|-----------|
-| Per-job memory | 701 B | 864 B | +23% for indexes |
+| Scheduler creation | 580 B | 1456 B | +150% (index maps allocated) |
+| Per-job overhead | ~640 B | ~770 B | +20% for indexes |
 | Entry lookup | O(n) scan | O(1) map | 150-1900x faster |
-| Entry removal | O(n) scan | O(log n) heap | Scales better |
-| High churn | Slower | 40% faster | Index amortizes |
+| Entry removal | O(n) scan | O(log n) heap | 8x faster at 1000 jobs |
+| Dynamic workloads | Degrades with size | Stays constant | netresearch wins at scale |
 
 ### Head-to-Head Benchmarks
 
@@ -50,8 +51,22 @@ Measured on AMD Ryzen 9 9950X3D, Go 1.25.5, Linux (WSL2), 2026-01-18:
 
 | Operation | robfig/cron | netresearch | Difference |
 |-----------|-------------|-------------|------------|
-| Per-job add | 521 ns | 803 ns | +54% slower |
-| Per-job memory | 701 B | 864 B | +23% more |
+| New scheduler + 1 job | 633 ns, 1280 B | 953 ns, 2120 B | +50% slower, +66% memory |
+| Bulk add 1000 jobs | 467 ms, 674 KB | 578 ms, 869 KB | +24% slower, +29% memory |
+
+*Note: robfig is faster for bulk adds because it uses simpler data structures. The trade-off is O(n) lookups and removals.*
+
+#### Scaling Behavior (Add+Remove cycle)
+
+This benchmark measures adding and removing a single job to a cron with N existing jobs:
+
+| Existing Jobs | robfig/cron | netresearch | Winner |
+|---------------|-------------|-------------|--------|
+| 10 | 568 ns, 904 B | 600 ns, 768 B | ~Equal (robfig 5% faster, netresearch 15% less memory) |
+| 100 | 1,044 ns, 2,824 B | 620 ns, 770 B | **netresearch 40% faster, 73% less memory** |
+| 1,000 | 5,098 ns, 18,184 B | 637 ns, 805 B | **netresearch 8x faster, 96% less memory** |
+
+**Key insight:** robfig's Remove() is O(n), so performance degrades linearly with job count. netresearch's O(log n) removal stays nearly constant.
 
 ### Why the Difference?
 
