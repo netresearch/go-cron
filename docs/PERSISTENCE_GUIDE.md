@@ -61,10 +61,10 @@ func main() {
 
     // Create scheduler with observability hooks for persistence
     c := cron.New(cron.WithObservability(cron.ObservabilityHooks{
-        OnJobComplete: func(entry cron.Entry, err error) {
-            if err == nil && entry.Name != "" {
-                if err := store.SetLastRun(entry.Name, time.Now()); err != nil {
-                    log.Printf("Failed to persist last run for %s: %v", entry.Name, err)
+        OnJobComplete: func(entryID cron.EntryID, name string, duration time.Duration, recovered any) {
+            if recovered == nil && name != "" {
+                if err := store.SetLastRun(name, time.Now()); err != nil {
+                    log.Printf("Failed to persist last run for %s: %v", name, err)
                 }
             }
         },
@@ -116,7 +116,9 @@ Store the complete schedule definition for jobs that can be added/removed at run
 package main
 
 import (
-    "encoding/json"
+    "context"
+    "log"
+    "time"
 
     cron "github.com/netresearch/go-cron"
 )
@@ -309,6 +311,17 @@ CREATE TABLE cron_jobs (
 Ensure jobs complete and state is persisted before shutdown:
 
 ```go
+import (
+    "context"
+    "log"
+    "os"
+    "os/signal"
+    "syscall"
+    "time"
+
+    cron "github.com/netresearch/go-cron"
+)
+
 func main() {
     ctx, cancel := context.WithCancel(context.Background())
 

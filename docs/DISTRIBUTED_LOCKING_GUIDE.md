@@ -265,9 +265,12 @@ func main() {
 }
 ```
 
-### Pattern 4: File-Based Lock (Single Host)
+### Pattern 4: File-Based Lock (Single Host, Unix Only)
 
-For multiple processes on the same host (not distributed), use file locks:
+For multiple processes on the same host (not distributed), use file locks.
+
+> **Note**: This pattern uses `syscall.Flock` which is Unix-specific (Linux, macOS, BSD).
+> It will not compile on Windows. For Windows, use `LockFileEx` from the `golang.org/x/sys/windows` package.
 
 ```go
 package main

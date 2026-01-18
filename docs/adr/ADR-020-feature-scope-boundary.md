@@ -68,7 +68,7 @@ Provide documentation showing how to integrate go-cron with external systems:
 |-------------|---------------|
 | Persistence | [PERSISTENCE_GUIDE.md](../PERSISTENCE_GUIDE.md) |
 | Distributed Locking | [DISTRIBUTED_LOCKING_GUIDE.md](../DISTRIBUTED_LOCKING_GUIDE.md) |
-| Prometheus Metrics | [COOKBOOK.md](../COOKBOOK.md#prometheus-metrics) |
+| Prometheus Metrics | [COOKBOOK.md](../COOKBOOK.md#4-metrics-integration) |
 | Graceful Shutdown | [OPERATIONS.md](../OPERATIONS.md#graceful-shutdown) |
 
 ## Consequences
