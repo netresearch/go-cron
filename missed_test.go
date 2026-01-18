@@ -587,3 +587,178 @@ func TestMissedGracePeriodZero(t *testing.T) {
 		t.Errorf("Expected 4 catch-up runs, got %d", calls)
 	}
 }
+
+func TestMissedPolicyValid(t *testing.T) {
+	tests := []struct {
+		policy MissedPolicy
+		want   bool
+	}{
+		{MissedSkip, true},
+		{MissedRunOnce, true},
+		{MissedRunAll, true},
+		{MissedPolicy(-1), false},
+		{MissedPolicy(99), false},
+	}
+
+	for _, tt := range tests {
+		if got := tt.policy.Valid(); got != tt.want {
+			t.Errorf("MissedPolicy(%d).Valid() = %v, want %v", tt.policy, got, tt.want)
+		}
+	}
+}
+
+func TestMissedInvalidPolicySkipsCatchup(t *testing.T) {
+	// Invalid MissedPolicy values should skip catch-up gracefully
+	now := time.Date(2026, 1, 18, 10, 0, 0, 0, time.UTC)
+	clock := NewFakeClock(now)
+
+	c := New(
+		WithClock(clock),
+		WithParser(secondParser),
+	)
+
+	var calls int64
+
+	// Use invalid policy value
+	lastRun := time.Date(2026, 1, 18, 8, 0, 0, 0, time.UTC)
+	_, err := c.AddFunc("0 0 * * * *", func() {
+		atomic.AddInt64(&calls, 1)
+	},
+		WithPrev(lastRun),
+		WithMissedPolicy(MissedPolicy(99)), // Invalid policy
+	)
+	if err != nil {
+		t.Fatalf("AddFunc failed: %v", err)
+	}
+
+	c.Start()
+	defer c.Stop()
+
+	time.Sleep(50 * time.Millisecond)
+
+	// Invalid policy should not trigger catch-up
+	if atomic.LoadInt64(&calls) != 0 {
+		t.Errorf("Invalid policy should not trigger catch-up, got %d calls", calls)
+	}
+}
+
+func TestMissedRunOnceSkipsForRunOnceJobs(t *testing.T) {
+	// Run-once jobs should skip catch-up to avoid duplicate runs
+	now := time.Date(2026, 1, 18, 10, 0, 0, 0, time.UTC)
+	clock := NewFakeClock(now)
+
+	c := New(
+		WithClock(clock),
+		WithParser(secondParser),
+	)
+
+	var calls int64
+
+	// Job with both WithRunOnce and WithMissedPolicy
+	lastRun := time.Date(2026, 1, 18, 8, 0, 0, 0, time.UTC)
+	_, err := c.AddFunc("0 0 * * * *", func() {
+		atomic.AddInt64(&calls, 1)
+	},
+		WithPrev(lastRun),
+		WithMissedPolicy(MissedRunOnce),
+		WithRunOnce(),
+	)
+	if err != nil {
+		t.Fatalf("AddFunc failed: %v", err)
+	}
+
+	c.Start()
+	defer c.Stop()
+
+	time.Sleep(50 * time.Millisecond)
+
+	// Run-once jobs should not trigger catch-up
+	if atomic.LoadInt64(&calls) != 0 {
+		t.Errorf("Run-once jobs should skip catch-up, got %d calls", calls)
+	}
+}
+
+func TestMissedUpdatesPrevAfterCatchup(t *testing.T) {
+	// Entry.Prev should be updated after catch-up to prevent duplicate catch-ups
+	now := time.Date(2026, 1, 18, 10, 0, 0, 0, time.UTC)
+	clock := NewFakeClock(now)
+
+	c := New(
+		WithClock(clock),
+		WithParser(secondParser),
+	)
+
+	var calls int64
+
+	// Job runs every hour, last ran at 7:00
+	// Missed: 8:00, 9:00
+	lastRun := time.Date(2026, 1, 18, 7, 0, 0, 0, time.UTC)
+	id, err := c.AddFunc("0 0 * * * *", func() {
+		atomic.AddInt64(&calls, 1)
+	},
+		WithPrev(lastRun),
+		WithMissedPolicy(MissedRunOnce),
+	)
+	if err != nil {
+		t.Fatalf("AddFunc failed: %v", err)
+	}
+
+	c.Start()
+	defer c.Stop()
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Should have run once for catch-up
+	if atomic.LoadInt64(&calls) != 1 {
+		t.Errorf("Expected 1 catch-up call, got %d", calls)
+	}
+
+	// Entry.Prev should be updated to the most recent caught-up time (9:00)
+	entry := c.Entry(id)
+	expectedPrev := time.Date(2026, 1, 18, 9, 0, 0, 0, time.UTC)
+	if !entry.Prev.Equal(expectedPrev) {
+		t.Errorf("Entry.Prev = %v, want %v", entry.Prev, expectedPrev)
+	}
+}
+
+func TestMissedRunAllUpdatesPrevAfterCatchup(t *testing.T) {
+	// Entry.Prev should be updated to the most recent catch-up time for MissedRunAll
+	now := time.Date(2026, 1, 18, 10, 0, 0, 0, time.UTC)
+	clock := NewFakeClock(now)
+
+	c := New(
+		WithClock(clock),
+		WithParser(secondParser),
+	)
+
+	var calls int64
+
+	// Job runs every hour, last ran at 7:00
+	lastRun := time.Date(2026, 1, 18, 7, 0, 0, 0, time.UTC)
+	id, err := c.AddFunc("0 0 * * * *", func() {
+		atomic.AddInt64(&calls, 1)
+	},
+		WithPrev(lastRun),
+		WithMissedPolicy(MissedRunAll),
+	)
+	if err != nil {
+		t.Fatalf("AddFunc failed: %v", err)
+	}
+
+	c.Start()
+	defer c.Stop()
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Should have run twice for catch-up (8:00, 9:00)
+	if atomic.LoadInt64(&calls) != 2 {
+		t.Errorf("Expected 2 catch-up calls, got %d", calls)
+	}
+
+	// Entry.Prev should be updated to the most recent caught-up time (9:00)
+	entry := c.Entry(id)
+	expectedPrev := time.Date(2026, 1, 18, 9, 0, 0, 0, time.UTC)
+	if !entry.Prev.Equal(expectedPrev) {
+		t.Errorf("Entry.Prev = %v, want %v", entry.Prev, expectedPrev)
+	}
+}
