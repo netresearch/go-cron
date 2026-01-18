@@ -762,3 +762,28 @@ func TestMissedRunAllUpdatesPrevAfterCatchup(t *testing.T) {
 		t.Errorf("Entry.Prev = %v, want %v", entry.Prev, expectedPrev)
 	}
 }
+
+func TestHandleMissedRunsWithInvalidPolicy(t *testing.T) {
+	// Test the defensive default case in handleMissedRuns
+	// This case is normally unreachable because calculateMissedRuns validates,
+	// but we test it directly to ensure defensive code coverage
+	c := New()
+
+	var calls int64
+	entry := &Entry{
+		ID:           1,
+		MissedPolicy: MissedPolicy(99), // Invalid policy
+		Job:          FuncJob(func() { atomic.AddInt64(&calls, 1) }),
+		WrappedJob:   FuncJob(func() { atomic.AddInt64(&calls, 1) }),
+	}
+
+	missed := []time.Time{time.Now()}
+
+	// Should not panic, should log and return without executing job
+	c.handleMissedRuns(entry, missed)
+
+	// Job should NOT have been executed for invalid policy
+	if atomic.LoadInt64(&calls) != 0 {
+		t.Errorf("Expected 0 calls for invalid policy, got %d", calls)
+	}
+}
