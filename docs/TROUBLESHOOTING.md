@@ -91,7 +91,7 @@ c := cron.New(cron.WithParser(cron.NewParser(
 
 **Check: Is your job panicking silently?**
 
-Without `Recover()` wrapper, panics are caught by the scheduler but not logged (only passed to `OnJobComplete` hook):
+Without `Recover()` wrapper, panics crash the job's goroutine and are printed to stderr by Go's runtime (also passed to `OnJobComplete` hook):
 
 ```go
 c := cron.New(cron.WithChain(
@@ -289,7 +289,7 @@ c := cron.New(cron.WithChain(
 ))
 ```
 
-Without `Recover()`, the scheduler catches panics internally (it never crashes), but they are only visible via the `OnJobComplete` hook's `recovered` parameter. Use `Recover()` to log panics explicitly.
+Without `Recover()`, panics crash the job's goroutine and are printed to stderr by Go's runtime, in addition to being passed to the `OnJobComplete` hook's `recovered` parameter. Use `Recover()` for structured logging through your configured logger instead of relying on stderr.
 
 ---
 
