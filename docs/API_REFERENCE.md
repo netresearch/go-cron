@@ -308,6 +308,35 @@ fakeClock.Advance(time.Hour) // Trigger jobs deterministically
 c := cron.New(cron.WithClock(cron.ClockFunc(time.Now)))
 ```
 
+#### func WithCapacity
+
+```go
+func WithCapacity(n int) Option
+```
+
+WithCapacity pre-allocates internal data structures for the expected number
+of entries. This reduces map rehashing and slice growth during bulk additions,
+improving performance when adding many jobs at startup.
+
+Pre-allocates:
+- `entryIndex` map with capacity n (O(1) lookup by ID)
+- `nameIndex` map with capacity n (O(1) lookup by name)
+- `entries` heap slice with capacity n
+
+For applications adding fewer than 100 jobs, the default allocation is sufficient.
+Use this option when bulk-loading hundreds or thousands of jobs.
+
+A capacity of 0 or negative has no effect (uses default allocation).
+
+**Example:**
+```go
+// Expect ~1000 jobs at startup
+c := cron.New(cron.WithCapacity(1000))
+for _, job := range jobs {
+    c.AddFunc(job.Schedule, job.Func)
+}
+```
+
 ---
 
 ### Schedule
