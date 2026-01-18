@@ -31,6 +31,7 @@ Maintained fork of robfig/cron - a cron spec parser and job scheduler for Go.
 
 | ADR | Decision | Summary |
 |-----|----------|---------|
+| [ADR-000](docs/adr/ADR-000-fork-rationale.md) | Fork Rationale | Why this fork exists, what it fixes, who maintains it |
 | [ADR-001](docs/adr/ADR-001-heap-scheduling.md) | Min-Heap for Scheduling | O(log n) insert/remove, O(1) peek - do NOT revert to sorted slice |
 | [ADR-002](docs/adr/ADR-002-panic-for-failures.md) | Panic-Based Failures | Jobs signal failure via panic, caught by wrappers - do NOT add error returns to Job interface |
 | [ADR-003](docs/adr/ADR-003-async-observability.md) | Asynchronous Hooks | Hooks run in goroutines, non-blocking - do NOT make synchronous |
@@ -39,6 +40,9 @@ Maintained fork of robfig/cron - a cron spec parser and job scheduler for Go.
 | [ADR-006](docs/adr/ADR-006-sync-map-cache.md) | sync.Map for Cache | Lock-free reads for parser cache - do NOT use RWMutex |
 | [ADR-007](docs/adr/ADR-007-nw-skip-invalid-days.md) | nW Skips Invalid Days | `31W` in February skips month - use `LW` for every-month behavior |
 | [ADR-008](docs/adr/ADR-008-dom-dow-and-logic.md) | DOM/DOW AND Logic | Both must match when restricted - use `DowOrDom` for legacy OR |
+| [ADR-009](docs/adr/ADR-009-entry-id-sentinel.md) | Entry ID Sentinel | `EntryID(0)` is invalid; `entry.Valid()` checks this |
+| [ADR-010](docs/adr/ADR-010-channel-synchronization.md) | Channel Sync Model | Run loop owns state; channels serialize access - deadlock-free |
+| [ADR-011](docs/adr/ADR-011-dual-index-maps.md) | Dual-Index Maps | O(1) lookup by ID and Name; memory compaction on high churn |
 
 When proposing changes that conflict with an ADR, you MUST:
 1. Read the full ADR including alternatives considered
@@ -126,8 +130,10 @@ import (
 | `docs/API_REFERENCE.md` | Public API documentation |
 | `docs/DST_HANDLING.md` | Daylight saving time behavior |
 | `docs/TESTING_GUIDE.md` | Testing strategies and FakeClock usage |
+| `docs/OPERATIONS.md` | Production deployment, shutdown, monitoring |
+| `docs/TROUBLESHOOTING.md` | Common issues and debugging techniques |
 | `docs/PROJECT_INDEX.md` | Complete project file index |
-| `docs/adr/` | Architecture Decision Records (8 ADRs) |
+| `docs/adr/` | Architecture Decision Records (12 ADRs) |
 
 ## PR/commit checklist
 

@@ -15,6 +15,7 @@ An Architecture Decision Record captures a significant decision made about the a
 
 | ADR | Title | Status | Date |
 |-----|-------|--------|------|
+| [ADR-000](ADR-000-fork-rationale.md) | Fork of robfig/cron | Accepted | 2025-11 |
 | [ADR-001](ADR-001-heap-scheduling.md) | Use Min-Heap for Entry Scheduling | Accepted | 2025-12 |
 | [ADR-002](ADR-002-panic-for-failures.md) | Panic-Based Job Failure Signaling | Accepted | 2025-12 |
 | [ADR-003](ADR-003-async-observability.md) | Asynchronous Observability Hooks | Accepted | 2025-12 |
@@ -23,6 +24,9 @@ An Architecture Decision Record captures a significant decision made about the a
 | [ADR-006](ADR-006-sync-map-cache.md) | sync.Map for Parser Cache | Accepted | 2025-12 |
 | [ADR-007](ADR-007-nw-skip-invalid-days.md) | nW Syntax Skips Invalid Months | Accepted | 2025-12 |
 | [ADR-008](ADR-008-dom-dow-and-logic.md) | DOM/DOW AND Logic by Default | Accepted | 2026-01 |
+| [ADR-009](ADR-009-entry-id-sentinel.md) | Entry ID Sentinel Value (0 = Invalid) | Accepted | 2025-12 |
+| [ADR-010](ADR-010-channel-synchronization.md) | Channel-Based Synchronization Model | Accepted | 2025-12 |
+| [ADR-011](ADR-011-dual-index-maps.md) | Dual-Index Maps for O(1) Lookup | Accepted | 2025-12 |
 
 ## ADR Template
 
