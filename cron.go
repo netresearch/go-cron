@@ -149,7 +149,7 @@ type nameLookupRequest struct {
 	reply chan Entry
 }
 
-// updateScheduleRequest is used for update the schedule of a job.
+// updateScheduleRequest is used to update the schedule of a job.
 type updateScheduleRequest struct {
 	id       EntryID
 	schedule Schedule
