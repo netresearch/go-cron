@@ -765,6 +765,7 @@ func (c *Cron) processDueEntries(now time.Time) {
 	}
 }
 
+//nolint:gocognit,gocyclo,cyclop,funlen // Central run loop multiplexes all scheduler ops via channels; splitting would obscure ownership and increase risk.
 func (c *Cron) run() {
 	c.logger.Info("start")
 
