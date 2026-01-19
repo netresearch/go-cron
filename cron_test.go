@@ -3170,7 +3170,7 @@ func TestUpdateJobByName(t *testing.T) {
 	clock.Advance(3 * time.Second)
 	time.Sleep(10 * time.Millisecond)
 	if atomic.LoadInt32(&runs) != 1 {
-		t.Errorf("expected still 1 run after advancing 4s on updated spec, got %d", runs)
+		t.Errorf("expected still 1 run after advancing 3s on updated spec, got %d", runs)
 	}
 	clock.BlockUntil(1)
 	clock.Advance(1 * time.Second)
