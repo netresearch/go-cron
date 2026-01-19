@@ -3099,6 +3099,21 @@ func TestUpdateJob(t *testing.T) {
 	}
 }
 
+// UpdateJob with an invalid spec should return a parse error
+func TestUpdateJobBadSpec(t *testing.T) {
+	c := New(WithParser(secondParser))
+	defer c.Stop()
+
+	id, err := c.AddFunc("* * * * * *", func() {})
+	if err != nil {
+		t.Fatalf("add failed: %v", err)
+	}
+	// Use an invalid spec string to trigger parse error
+	if err := c.UpdateJob(id, "not-a-valid-spec"); err == nil {
+		t.Fatalf("expected parse error for bad spec, got nil")
+	}
+}
+
 func TestUpdateEntryNotFound(t *testing.T) {
 	c := New()
 	defer c.Stop()
@@ -3180,6 +3195,20 @@ func TestUpdateJobByName(t *testing.T) {
 	}
 }
 
+func TestUpdateJobByNameBadSpec(t *testing.T) {
+	c := New(WithParser(secondParser))
+	defer c.Stop()
+
+	_, err := c.AddFunc("* * * * * *", func() {}, WithName("bad-spec-name"))
+	if err != nil {
+		t.Fatalf("add failed: %v", err)
+	}
+	// Use an invalid spec string to trigger parse error
+	if err := c.UpdateJobByName("bad-spec-name", "not-a-valid-spec"); err == nil {
+		t.Fatalf("expected parse error for bad spec, got nil")
+	}
+}
+
 func TestUpdateByNameEntryNotFound(t *testing.T) {
 	c := New()
 	defer c.Stop()
@@ -3188,5 +3217,33 @@ func TestUpdateByNameEntryNotFound(t *testing.T) {
 	}
 	if err := c.UpdateJobByName("does-not-exist", "* * * * *"); !errors.Is(err, ErrEntryNotFound) {
 		t.Errorf("expected ErrEntryNotFound for UpdateJobByName, got %v", err)
+	}
+}
+
+// While running, UpdateSchedule should still return ErrEntryNotFound for bad IDs
+func TestUpdateScheduleWhileRunningEntryNotFound(t *testing.T) {
+	c := New(WithParser(secondParser))
+	c.Start()
+	defer c.Stop()
+
+	// Ensure run loop is active
+	time.Sleep(10 * time.Millisecond)
+
+	if err := c.UpdateSchedule(123456789, Every(time.Second)); !errors.Is(err, ErrEntryNotFound) {
+		t.Errorf("expected ErrEntryNotFound for UpdateSchedule while running, got %v", err)
+	}
+}
+
+// While running, UpdateScheduleByName should return ErrEntryNotFound for unknown names
+func TestUpdateScheduleByNameWhileRunningEntryNotFound(t *testing.T) {
+	c := New(WithParser(secondParser))
+	c.Start()
+	defer c.Stop()
+
+	// Ensure run loop is active
+	time.Sleep(10 * time.Millisecond)
+
+	if err := c.UpdateScheduleByName("no-such-name", Every(time.Second)); !errors.Is(err, ErrEntryNotFound) {
+		t.Errorf("expected ErrEntryNotFound for UpdateScheduleByName while running, got %v", err)
 	}
 }
