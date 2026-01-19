@@ -43,7 +43,11 @@ jobs:
     name: Auto-Approve (Solo Maintainer)
     runs-on: ubuntu-latest
     needs: quality-gate
-    if: github.event.pull_request.draft == false
+    # Only auto-approve non-draft PRs from the same repo (not forks)
+    # Fork PRs require manual review by maintainer
+    if: |
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository
 
     steps:
       - name: Harden Runner
