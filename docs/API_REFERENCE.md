@@ -1042,4 +1042,16 @@ MaxSpecLength is the maximum allowed length for a cron spec string.
 
 ---
 
+## Errors
+
+### ErrEntryNotFound
+
+```go
+var ErrEntryNotFound = errors.New("cron: entry not found")
+```
+
+`ErrEntryNotFound` is returned by `UpdateSchedule`, `UpdateJob`, `UpdateScheduleByName`, and `UpdateJobByName` when the requested entry is not found.
+
+---
+
 *Generated: 2025-11-28*
