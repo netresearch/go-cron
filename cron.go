@@ -921,8 +921,11 @@ func (c *Cron) updateSchedule(req *updateScheduleRequest) error {
 	}
 
 	entry.Schedule = req.schedule
-	c.scheduleEntryNext(entry, c.now())
-	c.entries.Update(entry)
+	if c.running {
+		c.scheduleEntryNext(entry, c.now())
+		c.entries.Update(entry)
+		c.hooks.callOnSchedule(entry.ID, entry.Job, entry.Next)
+	}
 	return nil
 }
 
