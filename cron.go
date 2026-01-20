@@ -922,7 +922,7 @@ func (c *Cron) updateSchedule(req *updateScheduleRequest) error {
 
 	entry.Schedule = req.schedule
 	c.scheduleEntryNext(entry, c.now())
-	heap.Fix(&c.entries, entry.heapIndex)
+	c.entries.Update(entry)
 	return nil
 }
 
