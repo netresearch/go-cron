@@ -677,19 +677,35 @@ func main() {
     })
 
     // DELETE /jobs/{name} - Remove a job
+    // PATCH  /jobs/{name} - Update job spec by name
     http.HandleFunc("/jobs/", func(w http.ResponseWriter, r *http.Request) {
-        if r.Method != http.MethodDelete {
+        switch r.Method {
+        case http.MethodPatch:
+            name := r.URL.Path[len("/jobs/"):]
+            var req struct{ Spec string `json:"spec"` }
+            if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+                http.Error(w, err.Error(), http.StatusBadRequest)
+                return
+            }
+            if err := scheduler.cron.UpdateJobByName(name, req.Spec); err != nil {
+                if errors.Is(err, cron.ErrEntryNotFound) {
+                    http.Error(w, "Job not found", http.StatusNotFound)
+                    return
+                }
+                http.Error(w, err.Error(), http.StatusBadRequest)
+                return
+            }
+            w.WriteHeader(http.StatusNoContent)
+        case http.MethodDelete:
+            name := r.URL.Path[len("/jobs/"):]
+            if !scheduler.RemoveJob(name) {
+                http.Error(w, "Job not found", http.StatusNotFound)
+                return
+            }
+            w.WriteHeader(http.StatusNoContent)
+        default:
             http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-            return
         }
-
-        name := r.URL.Path[len("/jobs/"):]
-        if !scheduler.RemoveJob(name) {
-            http.Error(w, "Job not found", http.StatusNotFound)
-            return
-        }
-
-        w.WriteHeader(http.StatusNoContent)
     })
 
     // GET /jobs - List all jobs
