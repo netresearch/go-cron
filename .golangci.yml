@@ -221,14 +221,14 @@ linters:
         text: "(Next|Prev)"
 
       # Central run loop has intentional complexity and length; splitting would obscure ownership
-      # Exclude complexity/length linters for cron.go to avoid brittle text matching
+      # Exclude complexity/length linters for the specific Cron.run method only
       - linters:
           - gocognit
           - gocyclo
           - cyclop
           - funlen
         path: cron\.go
-        text: "run"
+        text: "[Ff]unc.+run"
 
       # parse() and getRangeWithHash handle multiple ParseOption flags and hash expression scenarios
       # Complexity is inherent to flexible cron expression parsing with hash support

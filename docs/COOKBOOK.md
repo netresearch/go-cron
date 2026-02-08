@@ -677,7 +677,7 @@ func main() {
     })
 
     // DELETE /jobs/{name} - Remove a job
-    // PATCH  /jobs/{name} - Update job spec by name
+    // PATCH  /jobs/{name} - Update job schedule
     http.HandleFunc("/jobs/", func(w http.ResponseWriter, r *http.Request) {
         switch r.Method {
         case http.MethodPatch:
@@ -687,11 +687,17 @@ func main() {
                 http.Error(w, err.Error(), http.StatusBadRequest)
                 return
             }
-            if err := scheduler.cron.UpdateJobByName(name, req.Spec); err != nil {
-                if errors.Is(err, cron.ErrEntryNotFound) {
-                    http.Error(w, "Job not found", http.StatusNotFound)
-                    return
-                }
+
+            scheduler.mu.RLock()
+            id, exists := scheduler.jobs[name]
+            scheduler.mu.RUnlock()
+
+            if !exists {
+                http.Error(w, "Job not found", http.StatusNotFound)
+                return
+            }
+
+            if err := scheduler.cron.UpdateJob(id, req.Spec); err != nil {
                 http.Error(w, err.Error(), http.StatusBadRequest)
                 return
             }
