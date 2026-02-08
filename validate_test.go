@@ -829,3 +829,154 @@ func TestAnalyzeSpecWithHashDomDowWarning(t *testing.T) {
 		t.Errorf("expected no warning when DOW is *, got: %v", result.Warnings)
 	}
 }
+
+// TestValidateSpecWith tests validation using a custom ScheduleParser.
+func TestValidateSpecWith(t *testing.T) {
+	tests := []struct {
+		name    string
+		spec    string
+		parser  ScheduleParser
+		wantErr bool
+	}{
+		{
+			name:    "valid with standard parser",
+			spec:    "* * * * *",
+			parser:  NewParser(Minute | Hour | Dom | Month | Dow | Descriptor),
+			wantErr: false,
+		},
+		{
+			name:    "valid with seconds parser",
+			spec:    "0 * * * * *",
+			parser:  NewParser(Second | Minute | Hour | Dom | Month | Dow),
+			wantErr: false,
+		},
+		{
+			name:    "invalid 5-field with seconds parser",
+			spec:    "* * * * *",
+			parser:  NewParser(Second | Minute | Hour | Dom | Month | Dow),
+			wantErr: true,
+		},
+		{
+			name:    "valid descriptor with descriptor-enabled parser",
+			spec:    "@hourly",
+			parser:  NewParser(Minute | Hour | Dom | Month | Dow | Descriptor),
+			wantErr: false,
+		},
+		{
+			name:    "invalid descriptor with descriptor-disabled parser",
+			spec:    "@hourly",
+			parser:  NewParser(Minute | Hour | Dom | Month | Dow),
+			wantErr: true,
+		},
+		{
+			name:    "valid hash expression with hash parser",
+			spec:    "H * * * *",
+			parser:  NewParser(Minute | Hour | Dom | Month | Dow | Hash).WithHashKey("test"),
+			wantErr: false,
+		},
+		{
+			name:    "invalid with standard parser",
+			spec:    "invalid",
+			parser:  NewParser(Minute | Hour | Dom | Month | Dow | Descriptor),
+			wantErr: true,
+		},
+		{
+			name:    "empty spec",
+			spec:    "",
+			parser:  NewParser(Minute | Hour | Dom | Month | Dow | Descriptor),
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateSpecWith(tt.spec, tt.parser)
+			if tt.wantErr && err == nil {
+				t.Errorf("ValidateSpecWith(%q) expected error, got nil", tt.spec)
+			}
+			if !tt.wantErr && err != nil {
+				t.Errorf("ValidateSpecWith(%q) unexpected error: %v", tt.spec, err)
+			}
+		})
+	}
+}
+
+// TestCronValidateSpec tests the Cron.ValidateSpec method.
+func TestCronValidateSpec(t *testing.T) {
+	tests := []struct {
+		name    string
+		options []Option
+		spec    string
+		wantErr bool
+	}{
+		{
+			name:    "default parser accepts 5-field",
+			spec:    "* * * * *",
+			wantErr: false,
+		},
+		{
+			name:    "default parser accepts descriptor",
+			spec:    "@hourly",
+			wantErr: false,
+		},
+		{
+			name:    "default parser rejects 6-field",
+			spec:    "0 * * * * *",
+			wantErr: true,
+		},
+		{
+			name:    "default parser rejects invalid",
+			spec:    "invalid",
+			wantErr: true,
+		},
+		{
+			name:    "seconds parser accepts 6-field",
+			options: []Option{WithSeconds()},
+			spec:    "0 * * * * *",
+			wantErr: false,
+		},
+		{
+			name:    "seconds parser rejects 5-field",
+			options: []Option{WithSeconds()},
+			spec:    "* * * * *",
+			wantErr: true,
+		},
+		{
+			name:    "second-optional parser accepts 5-field",
+			options: []Option{WithSecondOptional()},
+			spec:    "* * * * *",
+			wantErr: false,
+		},
+		{
+			name:    "second-optional parser accepts 6-field",
+			options: []Option{WithSecondOptional()},
+			spec:    "30 * * * * *",
+			wantErr: false,
+		},
+		{
+			name:    "empty spec is invalid",
+			spec:    "",
+			wantErr: true,
+		},
+		{
+			name:    "timezone spec is valid",
+			spec:    "TZ=UTC 0 9 * * *",
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := New(tt.options...)
+			defer c.Stop()
+
+			err := c.ValidateSpec(tt.spec)
+			if tt.wantErr && err == nil {
+				t.Errorf("Cron.ValidateSpec(%q) expected error, got nil", tt.spec)
+			}
+			if !tt.wantErr && err != nil {
+				t.Errorf("Cron.ValidateSpec(%q) unexpected error: %v", tt.spec, err)
+			}
+		})
+	}
+}

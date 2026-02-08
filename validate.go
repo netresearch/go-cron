@@ -68,6 +68,22 @@ func ValidateSpec(spec string, options ...ParseOption) error {
 	return err
 }
 
+// ValidateSpecWith validates a cron expression using any ScheduleParser implementation.
+// This is useful when you have a custom parser or a pre-configured Parser instance.
+//
+// Example:
+//
+//	// Validate with a custom parser
+//	:= cron.NewParser(cron.Second | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Hash).
+//	    WithHashKey("my-job")
+//	if err := cron.ValidateSpecWith("H * * * * *", parser); err != nil {
+//	    // Handle error
+//	}
+func ValidateSpecWith(spec string, parser ScheduleParser) error {
+	_, err := parser.Parse(spec)
+	return err
+}
+
 // ValidateSpecs validates multiple cron expressions at once.
 // It returns a map of index to error for any invalid specs.
 // If all specs are valid, returns an empty map (not nil).
