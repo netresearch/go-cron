@@ -3248,80 +3248,63 @@ func TestUpdateScheduleByNameWhileRunningEntryNotFound(t *testing.T) {
 	}
 }
 
-// TestUpdateScheduleBeforeStart verifies that UpdateSchedule/UpdateJob work
+// TestUpdateBeforeStart verifies that UpdateSchedule/UpdateJob work
 // correctly when the scheduler has not been started yet.
-func TestUpdateScheduleBeforeStart(t *testing.T) {
-	start := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
-	clock := NewFakeClock(start)
-	c := New(WithClock(clock), WithParser(secondParser))
-	defer c.Stop()
-
-	var runs int32
-	id, err := c.AddFunc("* * * * * *", func() { atomic.AddInt32(&runs, 1) })
-	if err != nil {
-		t.Fatalf("add failed: %v", err)
+func TestUpdateBeforeStart(t *testing.T) {
+	testCases := []struct {
+		name       string
+		updateFunc func(c *Cron, id EntryID) error
+	}{
+		{
+			name: "UpdateSchedule",
+			updateFunc: func(c *Cron, id EntryID) error {
+				return c.UpdateSchedule(id, Every(5*time.Second))
+			},
+		},
+		{
+			name: "UpdateJob",
+			updateFunc: func(c *Cron, id EntryID) error {
+				return c.UpdateJob(id, "*/5 * * * * *")
+			},
+		},
 	}
 
-	// Update schedule BEFORE starting the scheduler
-	if err := c.UpdateSchedule(id, Every(5*time.Second)); err != nil {
-		t.Fatalf("update schedule before start failed: %v", err)
-	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			start := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
+			clock := NewFakeClock(start)
+			c := New(WithClock(clock), WithParser(secondParser))
+			defer c.Stop()
 
-	// Start the scheduler - updated schedule should take effect
-	c.Start()
-	clock.BlockUntil(1)
+			var runs int32
+			id, err := c.AddFunc("* * * * * *", func() { atomic.AddInt32(&runs, 1) })
+			if err != nil {
+				t.Fatalf("add failed: %v", err)
+			}
 
-	// Advance 4 seconds - should NOT trigger (schedule is every 5s)
-	clock.Advance(4 * time.Second)
-	time.Sleep(10 * time.Millisecond)
-	if atomic.LoadInt32(&runs) != 0 {
-		t.Errorf("expected 0 runs after 4s, got %d", runs)
-	}
+			// Update BEFORE starting the scheduler
+			if err := tc.updateFunc(c, id); err != nil {
+				t.Fatalf("update before start failed: %v", err)
+			}
 
-	// Advance 1 more second (total 5s) - should trigger
-	clock.BlockUntil(1)
-	clock.Advance(1 * time.Second)
-	time.Sleep(10 * time.Millisecond)
-	if atomic.LoadInt32(&runs) != 1 {
-		t.Errorf("expected 1 run after 5s, got %d", runs)
-	}
-}
+			// Start the scheduler - updated schedule/spec should take effect
+			c.Start()
+			clock.BlockUntil(1)
 
-// TestUpdateJobBeforeStart verifies that UpdateJob works correctly
-// when the scheduler has not been started yet.
-func TestUpdateJobBeforeStart(t *testing.T) {
-	start := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
-	clock := NewFakeClock(start)
-	c := New(WithClock(clock), WithParser(secondParser))
-	defer c.Stop()
+			// Advance 4 seconds - should NOT trigger (schedule is every 5s)
+			clock.Advance(4 * time.Second)
+			time.Sleep(10 * time.Millisecond)
+			if atomic.LoadInt32(&runs) != 0 {
+				t.Errorf("expected 0 runs after 4s, got %d", runs)
+			}
 
-	var runs int32
-	id, err := c.AddFunc("* * * * * *", func() { atomic.AddInt32(&runs, 1) })
-	if err != nil {
-		t.Fatalf("add failed: %v", err)
-	}
-
-	// Update job spec BEFORE starting the scheduler
-	if err := c.UpdateJob(id, "*/5 * * * * *"); err != nil {
-		t.Fatalf("update job before start failed: %v", err)
-	}
-
-	// Start the scheduler - updated spec should take effect
-	c.Start()
-	clock.BlockUntil(1)
-
-	// Advance 4 seconds - should NOT trigger (spec is */5)
-	clock.Advance(4 * time.Second)
-	time.Sleep(10 * time.Millisecond)
-	if atomic.LoadInt32(&runs) != 0 {
-		t.Errorf("expected 0 runs after 4s, got %d", runs)
-	}
-
-	// Advance 1 more second (total 5s) - should trigger
-	clock.BlockUntil(1)
-	clock.Advance(1 * time.Second)
-	time.Sleep(10 * time.Millisecond)
-	if atomic.LoadInt32(&runs) != 1 {
-		t.Errorf("expected 1 run after 5s, got %d", runs)
+			// Advance 1 more second (total 5s) - should trigger
+			clock.BlockUntil(1)
+			clock.Advance(1 * time.Second)
+			time.Sleep(10 * time.Millisecond)
+			if atomic.LoadInt32(&runs) != 1 {
+				t.Errorf("expected 1 run after 5s, got %d", runs)
+			}
+		})
 	}
 }
