@@ -4,6 +4,8 @@ on:
   pull_request:
     branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
+  pull_request_review:
+    types: [submitted]
 
 permissions:
   contents: read
@@ -13,7 +15,7 @@ jobs:
   quality-gate:
     name: Quality Gate
     runs-on: ubuntu-latest
-    if: github.event.pull_request.draft == false
+    if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
 
     steps:
       - name: Harden Runner
@@ -42,7 +44,7 @@ jobs:
   auto-approve:
     name: Auto-Approve (Solo Maintainer)
     runs-on: ubuntu-latest
-    needs: quality-gate
+    # No dependency on quality-gate — runs independently on both triggers
     # Only auto-approve non-draft PRs from the same repo (not forks)
     # Fork PRs require manual review by maintainer
     if: |
@@ -55,14 +57,78 @@ jobs:
         with:
           egress-policy: audit
 
-      - name: Auto-approve PR
+      - name: Check for pending reviewers
+        id: check-reviewers
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         with:
           script: |
+            const prNumber = context.payload.pull_request.number;
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+            });
+
+            const pendingUsers = pr.requested_reviewers.map(r => r.login);
+            const pendingTeams = pr.requested_teams.map(t => t.slug);
+            const pending = [...pendingUsers, ...pendingTeams];
+
+            if (pending.length > 0) {
+              console.log(`Waiting for reviewers: ${pending.join(', ')}`);
+              core.setOutput('ready', 'false');
+              return;
+            }
+
+            // Check that no reviewer has requested changes
+            const { data: reviews } = await github.rest.pulls.listReviews({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+            });
+            // Build map of latest review state per reviewer
+            const latestByReviewer = new Map();
+            for (const review of reviews) {
+              if (review.state === 'APPROVED' || review.state === 'CHANGES_REQUESTED') {
+                latestByReviewer.set(review.user.login, review.state);
+              }
+            }
+            const changesRequested = [...latestByReviewer.entries()]
+              .filter(([, state]) => state === 'CHANGES_REQUESTED')
+              .map(([login]) => login);
+
+            if (changesRequested.length > 0) {
+              console.log(`Changes requested by: ${changesRequested.join(', ')}`);
+              core.setOutput('ready', 'false');
+            } else {
+              console.log('All assigned reviewers have completed their reviews');
+              core.setOutput('ready', 'true');
+            }
+
+      - name: Auto-approve PR
+        if: steps.check-reviewers.outputs.ready == 'true'
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
+        with:
+          script: |
+            const prNumber = context.payload.pull_request.number;
+
+            // Don't double-approve
+            const { data: reviews } = await github.rest.pulls.listReviews({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+            });
+            const alreadyApproved = reviews.some(
+              r => r.user.login === 'github-actions[bot]' && r.state === 'APPROVED'
+            );
+            if (alreadyApproved) {
+              console.log('Already approved by automation, skipping');
+              return;
+            }
+
             await github.rest.pulls.createReview({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              pull_number: context.issue.number,
+              pull_number: prNumber,
               event: 'APPROVE',
-              body: '**Automated approval for solo maintainer project**\n\nAll CI checks passed. See SECURITY.md for compensating controls.'
+              body: '**Automated approval for solo maintainer project**\n\nAll assigned reviewers have completed their reviews. See SECURITY.md for compensating controls.'
             });

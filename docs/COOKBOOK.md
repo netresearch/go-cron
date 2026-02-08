@@ -677,7 +677,7 @@ func main() {
     })
 
     // DELETE /jobs/{name} - Remove a job
-    // PATCH  /jobs/{name} - Update job spec by name
+    // PATCH  /jobs/{name} - Update job spec
     http.HandleFunc("/jobs/", func(w http.ResponseWriter, r *http.Request) {
         switch r.Method {
         case http.MethodPatch:
@@ -687,8 +687,24 @@ func main() {
                 http.Error(w, err.Error(), http.StatusBadRequest)
                 return
             }
-            if err := scheduler.cron.UpdateJobByName(name, req.Spec); err != nil {
+
+            scheduler.mu.RLock()
+            id, exists := scheduler.jobs[name]
+            scheduler.mu.RUnlock()
+
+            if !exists {
+                http.Error(w, "Job not found", http.StatusNotFound)
+                return
+            }
+
+            if err := scheduler.cron.UpdateJob(id, req.Spec); err != nil {
                 if errors.Is(err, cron.ErrEntryNotFound) {
+                    // Job was removed after lookup; clean up stale mapping only if ID still matches
+                    scheduler.mu.Lock()
+                    if currentID, ok := scheduler.jobs[name]; ok && currentID == id {
+                        delete(scheduler.jobs, name)
+                    }
+                    scheduler.mu.Unlock()
                     http.Error(w, "Job not found", http.StatusNotFound)
                     return
                 }

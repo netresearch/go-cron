@@ -19,8 +19,9 @@ var ErrMaxEntriesReached = errors.New("cron: max entries limit reached")
 // ErrDuplicateName is returned when adding an entry with a name that already exists.
 var ErrDuplicateName = errors.New("cron: duplicate entry name")
 
-// ErrEntryNotFound is returned by UpdateSchedule and UpdateJob when the
-// provided EntryID does not exist in this Cron instance.
+// ErrEntryNotFound is returned by UpdateSchedule, UpdateScheduleByName,
+// UpdateJob, and UpdateJobByName when the specified entry does not exist
+// in this Cron instance.
 var ErrEntryNotFound = errors.New("cron: entry not found")
 
 // maxIdleDuration is the sleep duration when no entries are scheduled.
@@ -984,14 +985,17 @@ func (c *Cron) startJob(entryID EntryID, originalJob, wrappedJob Job, scheduledT
 	}()
 }
 
-// updateSchedule updates the schedule of an existing entry, recalculates its
-// next activation time relative to the current clock, and fixes the heap to
-// maintain ordering. Returns ErrEntryNotFound if the entry ID is unknown.
+// updateSchedule updates the schedule of an existing entry. When the scheduler
+// is running, it also recalculates the entry's next activation time relative to
+// the current clock and fixes the heap to maintain ordering. When the scheduler
+// is stopped, only the schedule is updated; the next activation time will be
+// recomputed when scheduling resumes. Returns ErrEntryNotFound if the entry ID
+// is unknown.
 //
 // Concurrency: Must be called only from the scheduler's run loop (when
 // c.running is true) which owns the data exclusively, or from UpdateSchedule
 // when the scheduler is stopped (caller holds runningMu). Complexity: O(log n)
-// due to heap.Fix.
+// while running due to heap.Fix, O(1) when stopped.
 func (c *Cron) updateSchedule(req *updateScheduleRequest) error {
 	entry, found := c.entryIndex[req.id]
 	if !found {
