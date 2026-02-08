@@ -999,7 +999,19 @@ func TestCronValidateSpecNilReceiver(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for nil Cron, got nil")
 	}
-	if !strings.Contains(err.Error(), "nil") {
-		t.Errorf("expected error mentioning nil, got: %v", err)
+	if !strings.Contains(err.Error(), "nil Cron") {
+		t.Errorf("expected error mentioning nil Cron, got: %v", err)
+	}
+}
+
+// TestCronValidateSpecNilParser tests that Cron.ValidateSpec handles nil parser.
+func TestCronValidateSpecNilParser(t *testing.T) {
+	c := &Cron{} // non-nil Cron but parser field is zero-value (nil)
+	err := c.ValidateSpec("* * * * *")
+	if err == nil {
+		t.Fatal("expected error for nil parser, got nil")
+	}
+	if !strings.Contains(err.Error(), "parser is nil") {
+		t.Errorf("expected error mentioning parser is nil, got: %v", err)
 	}
 }
