@@ -76,6 +76,29 @@ jobs:
             if (pending.length > 0) {
               console.log(`Waiting for reviewers: ${pending.join(', ')}`);
               core.setOutput('ready', 'false');
+              return;
+            }
+
+            // Check that no reviewer has requested changes
+            const { data: reviews } = await github.rest.pulls.listReviews({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+            });
+            // Build map of latest review state per reviewer
+            const latestByReviewer = new Map();
+            for (const review of reviews) {
+              if (review.state === 'APPROVED' || review.state === 'CHANGES_REQUESTED') {
+                latestByReviewer.set(review.user.login, review.state);
+              }
+            }
+            const changesRequested = [...latestByReviewer.entries()]
+              .filter(([, state]) => state === 'CHANGES_REQUESTED')
+              .map(([login]) => login);
+
+            if (changesRequested.length > 0) {
+              console.log(`Changes requested by: ${changesRequested.join(', ')}`);
+              core.setOutput('ready', 'false');
             } else {
               console.log('All assigned reviewers have completed their reviews');
               core.setOutput('ready', 'true');

@@ -699,9 +699,11 @@ func main() {
 
             if err := scheduler.cron.UpdateJob(id, req.Spec); err != nil {
                 if errors.Is(err, cron.ErrEntryNotFound) {
-                    // Job was removed after lookup; clean up stale mapping
+                    // Job was removed after lookup; clean up stale mapping only if ID still matches
                     scheduler.mu.Lock()
-                    delete(scheduler.jobs, name)
+                    if currentID, ok := scheduler.jobs[name]; ok && currentID == id {
+                        delete(scheduler.jobs, name)
+                    }
                     scheduler.mu.Unlock()
                     http.Error(w, "Job not found", http.StatusNotFound)
                     return

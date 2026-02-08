@@ -3294,16 +3294,16 @@ func TestUpdateBeforeStart(t *testing.T) {
 			// Advance 4 seconds - should NOT trigger (schedule is every 5s)
 			clock.Advance(4 * time.Second)
 			time.Sleep(10 * time.Millisecond)
-			if atomic.LoadInt32(&runs) != 0 {
-				t.Errorf("expected 0 runs after 4s, got %d", runs)
+			if got := atomic.LoadInt32(&runs); got != 0 {
+				t.Errorf("expected 0 runs after 4s, got %d", got)
 			}
 
 			// Advance 1 more second (total 5s) - should trigger
 			clock.BlockUntil(1)
 			clock.Advance(1 * time.Second)
 			time.Sleep(10 * time.Millisecond)
-			if atomic.LoadInt32(&runs) != 1 {
-				t.Errorf("expected 1 run after 5s, got %d", runs)
+			if got := atomic.LoadInt32(&runs); got != 1 {
+				t.Errorf("expected 1 run after 5s, got %d", got)
 			}
 		})
 	}
