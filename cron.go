@@ -19,6 +19,10 @@ var ErrMaxEntriesReached = errors.New("cron: max entries limit reached")
 // ErrDuplicateName is returned when adding an entry with a name that already exists.
 var ErrDuplicateName = errors.New("cron: duplicate entry name")
 
+// ErrEntryNotFound is returned by UpdateSchedule and UpdateJob when the
+// provided EntryID does not exist in this Cron instance.
+var ErrEntryNotFound = errors.New("cron: entry not found")
+
 // maxIdleDuration is the sleep duration when no entries are scheduled.
 // Using a very long duration (~11.4 years) instead of blocking indefinitely
 // allows the scheduler loop to still respond to add, remove, and stop operations.
@@ -40,6 +44,7 @@ type Cron struct {
 	stop        chan struct{}
 	add         chan request[*Entry, struct{}]
 	remove      chan request[EntryID, struct{}]
+	update      chan request[updateScheduleRequest, error]
 	snapshot    chan chan []Entry
 	entryLookup chan entryLookupRequest // O(1) single-entry lookup when running
 	nameLookup  chan nameLookupRequest  // O(1) entry lookup by name when running
@@ -144,6 +149,13 @@ type nameLookupRequest struct {
 	reply chan Entry
 }
 
+// updateScheduleRequest is used to update the schedule of a job.
+type updateScheduleRequest struct {
+	id       EntryID
+	schedule Schedule
+}
+
+// request is a generic way to make a request to the run loop.
 type request[T, C any] struct {
 	value T
 	reply chan C
@@ -255,6 +267,7 @@ func New(opts ...Option) *Cron {
 		entryLookup: make(chan entryLookupRequest),
 		nameLookup:  make(chan nameLookupRequest),
 		remove:      make(chan request[EntryID, struct{}]),
+		update:      make(chan request[updateScheduleRequest, error]),
 		running:     false,
 		runningMu:   sync.Mutex{},
 		logger:      DefaultLogger,
@@ -839,6 +852,17 @@ func (c *Cron) run() {
 				c.removeEntry(id)
 				req.reply <- struct{}{}
 				c.logger.Info("removed", "entry", id)
+
+			case req := <-c.update:
+				err := c.updateSchedule(&req.value)
+				req.reply <- err
+				if err != nil {
+					continue
+				}
+
+				timer.Stop()
+				now = c.now()
+				c.logger.Info("updated", "entry", req.value.id)
 			}
 
 			break
@@ -880,6 +904,97 @@ func (c *Cron) startJob(entryID EntryID, originalJob, wrappedJob Job, scheduledT
 			panic(recovered)
 		}
 	}()
+}
+
+// updateSchedule updates the schedule of an existing entry, recalculates its
+// next activation time relative to the current clock, and fixes the heap to
+// maintain ordering. Returns ErrEntryNotFound if the entry ID is unknown.
+//
+// Concurrency: Must be called only from the scheduler's run loop (when
+// c.running is true) which owns the data exclusively, or from UpdateSchedule
+// when the scheduler is stopped (caller holds runningMu). Complexity: O(log n)
+// due to heap.Fix.
+func (c *Cron) updateSchedule(req *updateScheduleRequest) error {
+	entry, found := c.entryIndex[req.id]
+	if !found {
+		return ErrEntryNotFound
+	}
+
+	entry.Schedule = req.schedule
+	if c.running {
+		c.scheduleEntryNext(entry, c.now())
+		c.entries.Update(entry)
+		c.hooks.callOnSchedule(entry.ID, entry.Job, entry.Next)
+	}
+	return nil
+}
+
+// UpdateJob updates the schedule of an existing entry identified by id,
+// parsing the provided cron spec string using this Cron's configured parser.
+//
+// If the scheduler is running, the update is applied safely via the run loop
+// and takes effect immediately for next-run computation. If stopped, the
+// schedule is updated directly in place.
+//
+// Returns ErrEntryNotFound if the id does not correspond to an existing entry.
+// Returns a parse error if spec is invalid for the configured parser.
+func (c *Cron) UpdateJob(id EntryID, spec string) error {
+	schedule, err := c.parser.Parse(spec)
+	if err != nil {
+		return err
+	}
+
+	return c.UpdateSchedule(id, schedule)
+}
+
+// UpdateSchedule updates the Schedule of an existing entry identified by id.
+//
+// Concurrency semantics:
+//   - If the scheduler is running, the change is routed through the run loop
+//     to avoid races, and the heap is adjusted atomically. The new schedule is
+//     used to recompute the entry's next run immediately.
+//   - If the scheduler is stopped, the schedule is updated directly.
+//
+// Returns ErrEntryNotFound if no entry with the given id exists.
+func (c *Cron) UpdateSchedule(id EntryID, schedule Schedule) error {
+	c.runningMu.Lock()
+	defer c.runningMu.Unlock()
+	request := updateScheduleRequest{id: id, schedule: schedule}
+	if c.running {
+		req := makeReq[updateScheduleRequest, error](request)
+		c.update <- req
+		return <-req.reply
+	}
+
+	return c.updateSchedule(&request)
+}
+
+// UpdateScheduleByName updates the Schedule of an existing entry identified by
+// its Name. Lookup is O(1) via the internal name index. If the scheduler is
+// running, the actual update is delegated to UpdateSchedule which routes through
+// the run loop safely.
+//
+// Returns ErrEntryNotFound if no entry with the given name exists.
+func (c *Cron) UpdateScheduleByName(name string, schedule Schedule) error {
+	e := c.EntryByName(name)
+	if !e.Valid() {
+		return ErrEntryNotFound
+	}
+	return c.UpdateSchedule(e.ID, schedule)
+}
+
+// UpdateJobByName updates the schedule of an existing entry identified by its
+// Name, parsing the provided cron spec using this Cron's configured parser.
+//
+// Returns ErrEntryNotFound if the name does not correspond to an existing
+// entry. Returns a parse error if the spec is invalid for the configured
+// parser.
+func (c *Cron) UpdateJobByName(name, spec string) error {
+	schedule, err := c.parser.Parse(spec)
+	if err != nil {
+		return err
+	}
+	return c.UpdateScheduleByName(name, schedule)
 }
 
 // now returns current time in c location.

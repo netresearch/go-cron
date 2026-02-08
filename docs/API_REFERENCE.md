@@ -128,6 +128,100 @@ id := c.Schedule(cron.Every(time.Hour), cron.FuncJob(func() {
 }))
 ```
 
+#### func (*Cron) UpdateJob
+
+```go
+func (c *Cron) UpdateJob(id EntryID, spec string) error
+```
+
+UpdateJob updates the schedule of an existing entry, parsing the provided cron spec.
+Returns `ErrEntryNotFound` if the entry does not exist.
+Returns a parse error if the spec is invalid for the configured parser.
+
+If the scheduler is running, the update is applied safely via the run loop and takes
+effect immediately for next-run computation. If stopped, the schedule is updated
+directly in place.
+
+**Example:**
+```go
+id, _ := c.AddFunc("0 9 * * *", dailyReport)
+// Change to run at 10:30 every day
+if err := c.UpdateJob(id, "30 10 * * *"); err != nil {
+    log.Println("update failed:", err)
+}
+```
+
+#### func (*Cron) UpdateJobByName
+
+```go
+func (c *Cron) UpdateJobByName(name, spec string) error
+```
+
+UpdateJobByName updates the schedule of an existing entry identified by its name,
+parsing the provided cron spec.
+Returns `ErrEntryNotFound` if the entry does not exist.
+Returns a parse error if the spec is invalid for the configured parser.
+
+If the scheduler is running, the actual update is delegated to `UpdateSchedule`
+which routes through the run loop safely.
+
+**Example:**
+```go
+c.AddFunc("0 9 * * *", dailyReport, cron.WithName("daily-report"))
+// Change to run at 10:30 every day
+if err := c.UpdateJobByName("daily-report", "30 10 * * *"); err != nil {
+    log.Println("update failed:", err)
+}
+```
+
+#### func (*Cron) UpdateSchedule
+
+```go
+func (c *Cron) UpdateSchedule(id EntryID, schedule Schedule) error
+```
+
+UpdateSchedule updates the schedule of an existing entry.
+Returns `ErrEntryNotFound` if the entry does not exist.
+If the scheduler is running, the entry is re-positioned in the heap according to
+its new `Next` time; if stopped, the new schedule will apply when started.
+
+Notes:
+- Preserves `WrappedJob`, `Job`, name, tags, and missed-run settings
+- Recomputes `Next` from `clock.Now()`; `Prev` is unchanged
+
+**Example:**
+```go
+id, _ := c.AddFunc("0 9 * * *", dailyReport)
+// Change to run at 10:30 every day
+schedule, _ := cron.ParseStandard("30 10 * * *")
+if err := c.UpdateSchedule(id, schedule); err != nil {
+    log.Println("update failed:", err)
+}
+```
+
+#### func (*Cron) UpdateScheduleByName
+
+```go
+func (c *Cron) UpdateScheduleByName(name string, schedule Schedule) error
+```
+
+UpdateScheduleByName updates the Schedule of an existing entry identified by its name.
+Returns `ErrEntryNotFound` if the entry does not exist.
+
+Lookup is O(1) via the internal name index. If the scheduler is running,
+the actual update is delegated to `UpdateSchedule` which routes through the
+run loop safely.
+
+**Example:**
+```go
+c.AddFunc("0 9 * * *", dailyReport, cron.WithName("daily-report"))
+// Change to run at 10:30 every day
+schedule, _ := cron.ParseStandard("30 10 * * *")
+if err := c.UpdateScheduleByName("daily-report", schedule); err != nil {
+    log.Println("update failed:", err)
+}
+```
+
 #### func (*Cron) Entries
 
 ```go
@@ -945,6 +1039,18 @@ const MaxSpecLength = 1024
 ```
 
 MaxSpecLength is the maximum allowed length for a cron spec string.
+
+---
+
+## Errors
+
+### ErrEntryNotFound
+
+```go
+var ErrEntryNotFound = errors.New("cron: entry not found")
+```
+
+`ErrEntryNotFound` is returned by `UpdateSchedule`, `UpdateJob`, `UpdateScheduleByName`, and `UpdateJobByName` when the requested entry is not found.
 
 ---
 
