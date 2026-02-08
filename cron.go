@@ -514,6 +514,29 @@ func WithMissedGracePeriod(d time.Duration) JobOption {
 	}
 }
 
+// ValidateSpec validates a cron expression using this Cron instance's configured parser.
+// It returns nil if the spec is valid, or an error describing the problem.
+//
+// This is useful for pre-validating user input before calling AddFunc or AddJob,
+// especially when the Cron instance uses a custom parser (e.g., with seconds or hash support).
+//
+// Example:
+//
+//	c := cron.New(cron.WithSeconds())
+//	if err := c.ValidateSpec("0 30 * * * *"); err != nil {
+//	    return fmt.Errorf("invalid cron expression: %w", err)
+//	}
+func (c *Cron) ValidateSpec(spec string) error {
+	if c == nil {
+		return errors.New("cron: called ValidateSpec on nil Cron instance")
+	}
+	if c.parser == nil {
+		return errors.New("cron: parser is nil; ensure cron.New is not configured with a nil parser")
+	}
+	_, err := c.parser.Parse(spec)
+	return err
+}
+
 // AddFunc adds a func to the Cron to be run on the given schedule.
 // The spec is parsed using the time zone of this Cron instance as the default.
 // An opaque ID is returned that can be used to later remove it.
