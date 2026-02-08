@@ -702,18 +702,21 @@ func TestRetryOnError_ExhaustsRetries(t *testing.T) {
 	)
 
 	// Should panic after exhaustion to propagate failure through the middleware chain
-	didPanic := false
+	var panicValue any
 	func() {
 		defer func() {
-			if r := recover(); r != nil {
-				didPanic = true
-			}
+			panicValue = recover()
 		}()
 		wrapped.Run()
 	}()
 
-	if !didPanic {
-		t.Error("expected panic after retry exhaustion")
+	if panicValue == nil {
+		t.Fatal("expected panic after retry exhaustion")
+	}
+	if err, ok := panicValue.(error); !ok {
+		t.Errorf("expected error panic value, got %T: %v", panicValue, panicValue)
+	} else if err.Error() != "always fails" {
+		t.Errorf("expected 'always fails' error, got: %v", err)
 	}
 
 	// maxRetries=3 means 4 total attempts (1 initial + 3 retries)
@@ -806,13 +809,13 @@ func TestRetryOnError_BackoffTiming(t *testing.T) {
 		t.Fatalf("expected at least 4 timestamps, got %d", len(timestamps))
 	}
 
-	// Check delays are increasing (exponential backoff)
+	// Check delays are increasing (exponential backoff with 2x multiplier).
+	// Use generous tolerance (50%) to account for ±10% jitter and OS scheduling variance.
 	for i := 1; i < len(timestamps)-1; i++ {
 		prev := timestamps[i].Sub(timestamps[i-1])
 		next := timestamps[i+1].Sub(timestamps[i])
-		// Next delay should be roughly double (with some tolerance for jitter/timing)
-		if next < prev {
-			t.Logf("delay %d: %v, delay %d: %v", i, prev, i+1, next)
+		if next < prev/2 {
+			t.Errorf("delay %d (%v) should be greater than half of delay %d (%v)", i+1, next, i, prev)
 		}
 	}
 }
@@ -845,38 +848,6 @@ func TestRetryOnError_MaxDelayRespected(t *testing.T) {
 		if delay > maxDelay*3/2 {
 			t.Errorf("delay at attempt %d exceeded max: %v > %v", i, delay, maxDelay)
 		}
-	}
-}
-
-func TestRetryOnError_PanicsOnExhaustion(t *testing.T) {
-	// Verify that RetryOnError panics with the last error when retries are exhausted.
-	// This ensures failure propagates through the middleware chain (CircuitBreaker,
-	// Recover, etc.), consistent with RetryWithBackoff behavior.
-	wrapped := RetryOnError(DiscardLogger, 2, 1*time.Millisecond, 5*time.Millisecond, 2.0)(
-		FuncErrorJob(func() error {
-			return errors.New("permanent failure")
-		}),
-	)
-
-	var panicValue any
-	func() {
-		defer func() {
-			panicValue = recover()
-		}()
-		wrapped.Run()
-	}()
-
-	if panicValue == nil {
-		t.Fatal("expected panic on retry exhaustion, got none")
-	}
-
-	// The panic value should be the last error
-	err, ok := panicValue.(error)
-	if !ok {
-		t.Fatalf("expected error panic value, got %T: %v", panicValue, panicValue)
-	}
-	if err.Error() != "permanent failure" {
-		t.Errorf("expected 'permanent failure' error, got: %v", err)
 	}
 }
 

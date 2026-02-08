@@ -220,8 +220,9 @@ func logRetryExhausted(logger Logger, lastPanic any, maxAttempts int) {
 //   - maxDelay: Maximum delay cap (prevents exponential explosion)
 //   - multiplier: Delay multiplier per retry (typically 2.0)
 //
-// When all retries are exhausted, the final error is logged but NOT re-thrown as a panic.
-// This keeps the error-based contract clean: errors stay as errors.
+// When all retries are exhausted, the final error is logged and then panicked, propagating
+// the failure through the middleware chain (e.g., CircuitBreaker, Recover). This is
+// consistent with RetryWithBackoff and ensures downstream wrappers see the failure.
 //
 // Example usage:
 //
@@ -243,7 +244,7 @@ func logRetryExhausted(logger Logger, lastPanic any, maxAttempts int) {
 //	| 2       | 1s    | Retry after delay  |
 //	| 3       | 2s    | Retry after delay  |
 //	| 4       | 4s    | Final retry        |
-//	| -       | -     | Log error (done)   |
+//	| -       | -     | Log + panic (done) |
 func RetryOnError(logger Logger, maxRetries int, initialDelay, maxDelay time.Duration, multiplier float64) JobWrapper {
 	return func(j Job) Job {
 		ej, ok := j.(ErrorJob)
