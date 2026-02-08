@@ -74,7 +74,7 @@ func ValidateSpec(spec string, options ...ParseOption) error {
 //
 // Example:
 //
-//	// Validate with a custom parser
+//	// Validate with a custom parser instance
 //	parser := cron.NewParser(cron.Second | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Hash).
 //		WithHashKey("my-job")
 //	if err := cron.ValidateSpecWith("H * * * * *", parser); err != nil {

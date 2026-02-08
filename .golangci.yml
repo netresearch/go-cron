@@ -204,11 +204,6 @@ linters:
         path: cron\.go
         text: "waitgroup"
 
-      # False positive: "parser" in doc comment code example is variable name + function name
-      - linters:
-          - dupword
-        path: validate\.go
-        text: "parser"
 
       # Context in test is used for verification, not passed to other functions
       - linters:
