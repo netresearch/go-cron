@@ -701,8 +701,20 @@ func TestRetryOnError_ExhaustsRetries(t *testing.T) {
 		}),
 	)
 
-	// Should NOT panic - errors stay as errors
-	wrapped.Run()
+	// Should panic after exhaustion to propagate failure through the middleware chain
+	didPanic := false
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				didPanic = true
+			}
+		}()
+		wrapped.Run()
+	}()
+
+	if !didPanic {
+		t.Error("expected panic after retry exhaustion")
+	}
 
 	// maxRetries=3 means 4 total attempts (1 initial + 3 retries)
 	if got := atomic.LoadInt32(&attempts); got != 4 {
@@ -720,8 +732,11 @@ func TestRetryOnError_NoRetries(t *testing.T) {
 		}),
 	)
 
-	// Should NOT panic
-	wrapped.Run()
+	// Should panic after single attempt (maxRetries=0 means 1 attempt, no retries)
+	func() {
+		defer func() { recover() }()
+		wrapped.Run()
+	}()
 
 	if got := atomic.LoadInt32(&attempts); got != 1 {
 		t.Errorf("expected 1 attempt with maxRetries=0, got %d", got)
@@ -833,28 +848,35 @@ func TestRetryOnError_MaxDelayRespected(t *testing.T) {
 	}
 }
 
-func TestRetryOnError_DoesNotPanicOnExhaustion(t *testing.T) {
-	// Verify that RetryOnError does NOT panic when retries are exhausted.
-	// This is a key behavioral difference from RetryWithBackoff.
+func TestRetryOnError_PanicsOnExhaustion(t *testing.T) {
+	// Verify that RetryOnError panics with the last error when retries are exhausted.
+	// This ensures failure propagates through the middleware chain (CircuitBreaker,
+	// Recover, etc.), consistent with RetryWithBackoff behavior.
 	wrapped := RetryOnError(DiscardLogger, 2, 1*time.Millisecond, 5*time.Millisecond, 2.0)(
 		FuncErrorJob(func() error {
 			return errors.New("permanent failure")
 		}),
 	)
 
-	// This should complete without panicking
-	didPanic := false
+	var panicValue any
 	func() {
 		defer func() {
-			if r := recover(); r != nil {
-				didPanic = true
-			}
+			panicValue = recover()
 		}()
 		wrapped.Run()
 	}()
 
-	if didPanic {
-		t.Error("RetryOnError should not panic on exhaustion")
+	if panicValue == nil {
+		t.Fatal("expected panic on retry exhaustion, got none")
+	}
+
+	// The panic value should be the last error
+	err, ok := panicValue.(error)
+	if !ok {
+		t.Fatalf("expected error panic value, got %T: %v", panicValue, panicValue)
+	}
+	if err.Error() != "permanent failure" {
+		t.Errorf("expected 'permanent failure' error, got: %v", err)
 	}
 }
 

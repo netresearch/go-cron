@@ -273,6 +273,7 @@ func RetryOnError(logger Logger, maxRetries int, initialDelay, maxDelay time.Dur
 			}
 
 			logger.Error(lastErr, "retry exhausted", "attempts", maxAttempts)
+			panic(lastErr)
 		})
 	}
 }
