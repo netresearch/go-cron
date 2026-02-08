@@ -205,6 +205,78 @@ func logRetryExhausted(logger Logger, lastPanic any, maxAttempts int) {
 	logErrorWithOptionalStack(logger, err, "retry exhausted", stack, "attempts", maxAttempts)
 }
 
+// RetryOnError wraps an ErrorJob to retry on returned errors with exponential backoff.
+// Unlike RetryWithBackoff which catches panics, this wrapper uses Go-idiomatic error
+// returns for retry decisions. Jobs must implement the ErrorJob interface to benefit
+// from this wrapper; regular Jobs that only implement Run() are passed through unchanged.
+//
+// Parameters:
+//   - logger: For logging retry attempts
+//   - maxRetries: Maximum retry attempts:
+//   - 0 = no retries (execute once, log error if it fails) - SAFE DEFAULT
+//   - >0 = retry up to N times (N+1 total attempts)
+//   - -1 = unlimited retries (use with caution - can cause resource exhaustion)
+//   - initialDelay: First retry delay
+//   - maxDelay: Maximum delay cap (prevents exponential explosion)
+//   - multiplier: Delay multiplier per retry (typically 2.0)
+//
+// When all retries are exhausted, the final error is logged but NOT re-thrown as a panic.
+// This keeps the error-based contract clean: errors stay as errors.
+//
+// Example usage:
+//
+//	c := cron.New(
+//	    cron.WithChain(
+//	        cron.Recover(logger),   // Outermost: catches panics from non-ErrorJob jobs
+//	        cron.RetryOnError(logger, 3, time.Second, time.Minute, 2.0),
+//	    ),
+//	)
+//	c.AddJob("@every 5m", cron.FuncErrorJob(func() error {
+//	    return callAPI() // Returned errors trigger retry
+//	}))
+//
+// Retry behavior for maxRetries=3, initialDelay=1s, multiplier=2.0:
+//
+//	| Attempt | Delay | Action             |
+//	|---------|-------|--------------------|
+//	| 1       | 0     | Execute            |
+//	| 2       | 1s    | Retry after delay  |
+//	| 3       | 2s    | Retry after delay  |
+//	| 4       | 4s    | Final retry        |
+//	| -       | -     | Log error (done)   |
+func RetryOnError(logger Logger, maxRetries int, initialDelay, maxDelay time.Duration, multiplier float64) JobWrapper {
+	return func(j Job) Job {
+		ej, ok := j.(ErrorJob)
+		if !ok {
+			// Job doesn't implement ErrorJob, pass through unchanged
+			return j
+		}
+
+		return FuncJob(func() {
+			maxAttempts := computeMaxAttempts(maxRetries)
+			var lastErr error
+
+			for attempt := 1; maxAttempts == 0 || attempt <= maxAttempts; attempt++ {
+				if attempt > 1 {
+					delay := calculateBackoffDelay(attempt, initialDelay, maxDelay, multiplier)
+					logger.Info("retry", "attempt", attempt, "delay", delay, "last_error", lastErr)
+					time.Sleep(delay)
+				}
+
+				lastErr = ej.RunE()
+				if lastErr == nil {
+					if attempt > 1 {
+						logger.Info("retry succeeded", "attempt", attempt)
+					}
+					return
+				}
+			}
+
+			logger.Error(lastErr, "retry exhausted", "attempts", maxAttempts)
+		})
+	}
+}
+
 // CircuitBreaker wraps a job to stop execution after consecutive failures.
 // This prevents a failing job from continuously hammering an external service.
 //

@@ -1,6 +1,7 @@
 package cron
 
 import (
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -649,4 +650,353 @@ func TestPanicWithStackAlias(t *testing.T) {
 	if string(pws.Stack) != "stack trace" {
 		t.Errorf("unexpected stack: %s", pws.Stack)
 	}
+}
+
+// --- RetryOnError tests ---
+
+func TestRetryOnError_SuccessOnFirstAttempt(t *testing.T) {
+	var attempts int32
+
+	wrapped := RetryOnError(DiscardLogger, 3, 10*time.Millisecond, time.Second, 2.0)(
+		FuncErrorJob(func() error {
+			atomic.AddInt32(&attempts, 1)
+			return nil
+		}),
+	)
+
+	wrapped.Run()
+
+	if got := atomic.LoadInt32(&attempts); got != 1 {
+		t.Errorf("expected 1 attempt, got %d", got)
+	}
+}
+
+func TestRetryOnError_SuccessOnRetry(t *testing.T) {
+	var attempts int32
+
+	wrapped := RetryOnError(DiscardLogger, 3, 10*time.Millisecond, time.Second, 2.0)(
+		FuncErrorJob(func() error {
+			count := atomic.AddInt32(&attempts, 1)
+			if count < 3 {
+				return errors.New("transient failure")
+			}
+			return nil
+		}),
+	)
+
+	wrapped.Run()
+
+	if got := atomic.LoadInt32(&attempts); got != 3 {
+		t.Errorf("expected 3 attempts, got %d", got)
+	}
+}
+
+func TestRetryOnError_ExhaustsRetries(t *testing.T) {
+	var attempts int32
+
+	wrapped := RetryOnError(DiscardLogger, 3, 1*time.Millisecond, time.Second, 2.0)(
+		FuncErrorJob(func() error {
+			atomic.AddInt32(&attempts, 1)
+			return errors.New("always fails")
+		}),
+	)
+
+	// Should NOT panic - errors stay as errors
+	wrapped.Run()
+
+	// maxRetries=3 means 4 total attempts (1 initial + 3 retries)
+	if got := atomic.LoadInt32(&attempts); got != 4 {
+		t.Errorf("expected 4 attempts (1 initial + 3 retries), got %d", got)
+	}
+}
+
+func TestRetryOnError_NoRetries(t *testing.T) {
+	var attempts int32
+
+	wrapped := RetryOnError(DiscardLogger, 0, 1*time.Millisecond, 5*time.Millisecond, 2.0)(
+		FuncErrorJob(func() error {
+			atomic.AddInt32(&attempts, 1)
+			return errors.New("fail immediately")
+		}),
+	)
+
+	// Should NOT panic
+	wrapped.Run()
+
+	if got := atomic.LoadInt32(&attempts); got != 1 {
+		t.Errorf("expected 1 attempt with maxRetries=0, got %d", got)
+	}
+}
+
+func TestRetryOnError_UnlimitedRetries(t *testing.T) {
+	var attempts int32
+
+	wrapped := RetryOnError(DiscardLogger, -1, 1*time.Millisecond, 5*time.Millisecond, 2.0)(
+		FuncErrorJob(func() error {
+			count := atomic.AddInt32(&attempts, 1)
+			if count < 20 {
+				return errors.New("keep trying")
+			}
+			return nil
+		}),
+	)
+
+	wrapped.Run()
+
+	if got := atomic.LoadInt32(&attempts); got != 20 {
+		t.Errorf("expected 20 attempts, got %d", got)
+	}
+}
+
+func TestRetryOnError_PassesThroughRegularJob(t *testing.T) {
+	var attempts int32
+
+	// Regular FuncJob doesn't implement ErrorJob
+	regularJob := FuncJob(func() {
+		atomic.AddInt32(&attempts, 1)
+	})
+
+	wrapped := RetryOnError(DiscardLogger, 3, 10*time.Millisecond, time.Second, 2.0)(regularJob)
+
+	wrapped.Run()
+
+	if got := atomic.LoadInt32(&attempts); got != 1 {
+		t.Errorf("expected 1 attempt (pass-through), got %d", got)
+	}
+}
+
+func TestRetryOnError_BackoffTiming(t *testing.T) {
+	var timestamps []time.Time
+	var mu sync.Mutex
+
+	wrapped := RetryOnError(DiscardLogger, 3, 50*time.Millisecond, time.Second, 2.0)(
+		FuncErrorJob(func() error {
+			mu.Lock()
+			timestamps = append(timestamps, time.Now())
+			count := len(timestamps)
+			mu.Unlock()
+			if count < 4 {
+				return errors.New("transient")
+			}
+			return nil
+		}),
+	)
+
+	wrapped.Run()
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if len(timestamps) < 4 {
+		t.Fatalf("expected at least 4 timestamps, got %d", len(timestamps))
+	}
+
+	// Check delays are increasing (exponential backoff)
+	for i := 1; i < len(timestamps)-1; i++ {
+		prev := timestamps[i].Sub(timestamps[i-1])
+		next := timestamps[i+1].Sub(timestamps[i])
+		// Next delay should be roughly double (with some tolerance for jitter/timing)
+		if next < prev {
+			t.Logf("delay %d: %v, delay %d: %v", i, prev, i+1, next)
+		}
+	}
+}
+
+func TestRetryOnError_MaxDelayRespected(t *testing.T) {
+	var timestamps []time.Time
+	var mu sync.Mutex
+
+	maxDelay := 30 * time.Millisecond
+	wrapped := RetryOnError(DiscardLogger, 10, 10*time.Millisecond, maxDelay, 2.0)(
+		FuncErrorJob(func() error {
+			mu.Lock()
+			timestamps = append(timestamps, time.Now())
+			count := len(timestamps)
+			mu.Unlock()
+			if count < 8 {
+				return errors.New("transient")
+			}
+			return nil
+		}),
+	)
+
+	wrapped.Run()
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	for i := 4; i < len(timestamps); i++ {
+		delay := timestamps[i].Sub(timestamps[i-1])
+		if delay > maxDelay*3/2 {
+			t.Errorf("delay at attempt %d exceeded max: %v > %v", i, delay, maxDelay)
+		}
+	}
+}
+
+func TestRetryOnError_DoesNotPanicOnExhaustion(t *testing.T) {
+	// Verify that RetryOnError does NOT panic when retries are exhausted.
+	// This is a key behavioral difference from RetryWithBackoff.
+	wrapped := RetryOnError(DiscardLogger, 2, 1*time.Millisecond, 5*time.Millisecond, 2.0)(
+		FuncErrorJob(func() error {
+			return errors.New("permanent failure")
+		}),
+	)
+
+	// This should complete without panicking
+	didPanic := false
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				didPanic = true
+			}
+		}()
+		wrapped.Run()
+	}()
+
+	if didPanic {
+		t.Error("RetryOnError should not panic on exhaustion")
+	}
+}
+
+func TestRetryOnError_IntegrationWithCron(t *testing.T) {
+	clock := NewFakeClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
+	var executions int32
+
+	c := New(
+		WithClock(clock),
+		WithChain(
+			Recover(DiscardLogger),
+			RetryOnError(DiscardLogger, 2, 1*time.Millisecond, 10*time.Millisecond, 2.0),
+		),
+	)
+
+	c.AddJob("@every 1h", FuncErrorJob(func() error {
+		count := atomic.AddInt32(&executions, 1)
+		if count < 3 {
+			return errors.New("transient failure")
+		}
+		return nil
+	}))
+
+	c.Start()
+	defer c.Stop()
+
+	time.Sleep(50 * time.Millisecond)
+	clock.Advance(time.Hour)
+	time.Sleep(100 * time.Millisecond)
+
+	// Should have 3 executions (2 retries + 1 success)
+	if got := atomic.LoadInt32(&executions); got != 3 {
+		t.Errorf("expected 3 executions, got %d", got)
+	}
+}
+
+func TestRetryOnError_ChainWithRecover(t *testing.T) {
+	// RetryOnError should compose with Recover for mixed job types.
+	// ErrorJob gets error-based retry; if Run() is called on a FuncErrorJob
+	// that returns an error, it panics, which Recover catches.
+	var errorJobAttempts int32
+	var regularJobAttempts int32
+
+	chain := NewChain(
+		Recover(DiscardLogger),
+		RetryOnError(DiscardLogger, 2, 1*time.Millisecond, 10*time.Millisecond, 2.0),
+	)
+
+	// ErrorJob: gets error-based retry
+	errorJob := chain.Then(FuncErrorJob(func() error {
+		count := atomic.AddInt32(&errorJobAttempts, 1)
+		if count < 2 {
+			return errors.New("transient")
+		}
+		return nil
+	}))
+	errorJob.Run()
+
+	if got := atomic.LoadInt32(&errorJobAttempts); got != 2 {
+		t.Errorf("ErrorJob: expected 2 attempts, got %d", got)
+	}
+
+	// Regular Job: passes through RetryOnError, Recover catches panic
+	regularJob := chain.Then(FuncJob(func() {
+		atomic.AddInt32(&regularJobAttempts, 1)
+		panic("regular job failure")
+	}))
+	regularJob.Run() // Recover catches the panic
+
+	if got := atomic.LoadInt32(&regularJobAttempts); got != 1 {
+		t.Errorf("Regular Job: expected 1 attempt (no retry), got %d", got)
+	}
+}
+
+// --- FuncErrorJob tests ---
+
+func TestFuncErrorJob_RunE_Success(t *testing.T) {
+	var called bool
+	job := FuncErrorJob(func() error {
+		called = true
+		return nil
+	})
+
+	err := job.RunE()
+	if err != nil {
+		t.Errorf("expected nil error, got %v", err)
+	}
+	if !called {
+		t.Error("expected function to be called")
+	}
+}
+
+func TestFuncErrorJob_RunE_Error(t *testing.T) {
+	expectedErr := errors.New("test error")
+	job := FuncErrorJob(func() error {
+		return expectedErr
+	})
+
+	err := job.RunE()
+	if !errors.Is(err, expectedErr) {
+		t.Errorf("expected %v, got %v", expectedErr, err)
+	}
+}
+
+func TestFuncErrorJob_Run_Success(t *testing.T) {
+	var called bool
+	job := FuncErrorJob(func() error {
+		called = true
+		return nil
+	})
+
+	// Run() should not panic on success
+	job.Run()
+	if !called {
+		t.Error("expected function to be called")
+	}
+}
+
+func TestFuncErrorJob_Run_PanicsOnError(t *testing.T) {
+	expectedErr := errors.New("test error")
+	job := FuncErrorJob(func() error {
+		return expectedErr
+	})
+
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Error("expected panic from Run() when RunE returns error")
+		}
+		if err, ok := r.(error); ok {
+			if !errors.Is(err, expectedErr) {
+				t.Errorf("expected panic with %v, got %v", expectedErr, err)
+			}
+		} else {
+			t.Errorf("expected error panic, got %T: %v", r, r)
+		}
+	}()
+
+	job.Run()
+}
+
+func TestFuncErrorJob_ImplementsErrorJob(t *testing.T) {
+	var job ErrorJob = FuncErrorJob(func() error { return nil })
+	_ = job // Compile-time check that FuncErrorJob implements ErrorJob
 }

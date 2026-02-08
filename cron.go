@@ -78,6 +78,61 @@ type Job interface {
 	Run()
 }
 
+// ErrorJob is an optional interface for jobs that return errors instead of panicking.
+// Jobs implementing this interface can use error-based retry wrappers like RetryOnError,
+// which is more idiomatic Go than the panic-based RetryWithBackoff.
+//
+// When a job implements ErrorJob, wrappers that understand errors (like RetryOnError)
+// will call RunE() and use the returned error for retry decisions. The standard Run()
+// method should still be implemented (typically delegating to RunE and panicking on error)
+// for compatibility with wrappers that don't understand ErrorJob.
+//
+// Example:
+//
+//	type APIJob struct{ url string }
+//
+//	func (j *APIJob) Run() {
+//	    if err := j.RunE(); err != nil {
+//	        panic(err)
+//	    }
+//	}
+//
+//	func (j *APIJob) RunE() error {
+//	    resp, err := http.Get(j.url)
+//	    if err != nil {
+//	        return fmt.Errorf("API call failed: %w", err)
+//	    }
+//	    defer resp.Body.Close()
+//	    return nil
+//	}
+type ErrorJob interface {
+	Job
+	RunE() error
+}
+
+// FuncErrorJob is a wrapper that turns a func() error into an ErrorJob.
+// This enables error-returning jobs using simple functions.
+//
+// Example:
+//
+//	c.AddJob("@every 5m", cron.FuncErrorJob(func() error {
+//	    return callExternalAPI()
+//	}))
+type FuncErrorJob func() error
+
+// Run implements Job by calling RunE and panicking on error.
+// This ensures compatibility with panic-based wrappers like Recover.
+func (f FuncErrorJob) Run() {
+	if err := f.RunE(); err != nil {
+		panic(err)
+	}
+}
+
+// RunE implements ErrorJob by calling the wrapped function.
+func (f FuncErrorJob) RunE() error {
+	return f()
+}
+
 // JobWithContext is an optional interface for jobs that support context.Context.
 // If a job implements this interface, RunWithContext is called instead of Run,
 // allowing the job to:
