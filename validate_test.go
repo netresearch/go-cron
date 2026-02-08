@@ -980,3 +980,26 @@ func TestCronValidateSpec(t *testing.T) {
 		})
 	}
 }
+
+// TestValidateSpecWithNilParser tests that ValidateSpecWith returns an error for nil parser.
+func TestValidateSpecWithNilParser(t *testing.T) {
+	err := ValidateSpecWith("* * * * *", nil)
+	if err == nil {
+		t.Fatal("expected error for nil parser, got nil")
+	}
+	if !strings.Contains(err.Error(), "nil") {
+		t.Errorf("expected error mentioning nil, got: %v", err)
+	}
+}
+
+// TestCronValidateSpecNilReceiver tests that Cron.ValidateSpec handles nil receiver.
+func TestCronValidateSpecNilReceiver(t *testing.T) {
+	var c *Cron
+	err := c.ValidateSpec("* * * * *")
+	if err == nil {
+		t.Fatal("expected error for nil Cron, got nil")
+	}
+	if !strings.Contains(err.Error(), "nil") {
+		t.Errorf("expected error mentioning nil, got: %v", err)
+	}
+}

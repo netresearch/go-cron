@@ -1,6 +1,7 @@
 package cron
 
 import (
+	"errors"
 	"strconv"
 	"strings"
 	"time"
@@ -74,12 +75,15 @@ func ValidateSpec(spec string, options ...ParseOption) error {
 // Example:
 //
 //	// Validate with a custom parser
-//	:= cron.NewParser(cron.Second | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Hash).
-//	    WithHashKey("my-job")
+//	parser := cron.NewParser(cron.Second | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Hash).
+//		WithHashKey("my-job")
 //	if err := cron.ValidateSpecWith("H * * * * *", parser); err != nil {
 //	    // Handle error
 //	}
 func ValidateSpecWith(spec string, parser ScheduleParser) error {
+	if parser == nil {
+		return errors.New("cron: parser is nil")
+	}
 	_, err := parser.Parse(spec)
 	return err
 }
@@ -112,16 +116,16 @@ func ValidateSpecWith(spec string, parser ScheduleParser) error {
 //	    c.AddFunc(spec, handler)
 //	}
 func ValidateSpecs(specs []string, options ...ParseOption) map[int]error {
-	errors := make(map[int]error)
+	errs := make(map[int]error)
 	parser := getParserForOptions(options)
 
 	for i, spec := range specs {
 		if _, err := parser.Parse(spec); err != nil {
-			errors[i] = err
+			errs[i] = err
 		}
 	}
 
-	return errors
+	return errs
 }
 
 // AnalyzeSpec provides detailed analysis of a cron expression.

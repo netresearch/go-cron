@@ -527,6 +527,9 @@ func WithMissedGracePeriod(d time.Duration) JobOption {
 //	    return fmt.Errorf("invalid cron expression: %w", err)
 //	}
 func (c *Cron) ValidateSpec(spec string) error {
+	if c == nil || c.parser == nil {
+		return errors.New("cron: parser is nil; ensure cron.New is not configured with a nil parser")
+	}
 	_, err := c.parser.Parse(spec)
 	return err
 }
