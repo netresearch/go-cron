@@ -853,3 +853,58 @@ func TestANDModePrevSchedule(t *testing.T) {
 		})
 	}
 }
+
+// TestNormalizeDSTDayPrev tests the normalizeDSTDayPrev function.
+func TestNormalizeDSTDayPrev(t *testing.T) {
+	unchangedInput := time.Date(2024, 6, 15, 23, 59, 59, 0, time.UTC)
+	testCases := []struct {
+		name     string
+		input    time.Time
+		expected time.Time
+	}{
+		{
+			"hour 23 unchanged",
+			unchangedInput,
+			unchangedInput,
+		},
+		{
+			"hour not 23 adjusted",
+			time.Date(2024, 6, 15, 14, 30, 0, 0, time.UTC),
+			time.Date(2024, 6, 15, 23, 59, 59, 0, time.UTC),
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := normalizeDSTDayPrev(tc.input)
+			if !result.Equal(tc.expected) {
+				t.Errorf("normalizeDSTDayPrev() = %v, want %v", result, tc.expected)
+			}
+		})
+	}
+}
+
+// TestPrevWithLocalTimezone tests prepareTimeForPrevSchedule() with time.Local path.
+func TestPrevWithLocalTimezone(t *testing.T) {
+	// Create a schedule with time.Local location (matches daily at 09:30:00)
+	sched := &SpecSchedule{
+		Second:   1 << 0,
+		Minute:   1 << 30,
+		Hour:     1 << 9,
+		Dom:      starBit | 0xFFFFFFFE,
+		Month:    starBit | 0x1FFE,
+		Dow:      starBit | 0x7F,
+		Location: time.Local,
+	}
+
+	// Use a time in a named timezone (not Local)
+	utcTime := time.Date(2024, 6, 15, 10, 0, 0, 0, time.UTC)
+	prev := sched.Prev(utcTime)
+
+	// When schedule location is time.Local, Prev uses the input time's location (UTC here).
+	// So it finds the previous 09:30:00 UTC before 10:00:00 UTC → same day at 09:30 UTC.
+	expected := time.Date(2024, 6, 15, 9, 30, 0, 0, time.UTC)
+	if !prev.Equal(expected) {
+		t.Errorf("Prev() with time.Local schedule = %v, want %v", prev, expected)
+	}
+}

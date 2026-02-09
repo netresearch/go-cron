@@ -486,6 +486,18 @@ func TestRemoveAtBoundaryIdxEqualsLen(t *testing.T) {
 	}
 }
 
+// TestHeapPopEmpty tests Pop() on an empty heap returns nil (defensive check).
+func TestHeapPopEmpty(t *testing.T) {
+	h := &entryHeap{}
+	heap.Init(h)
+
+	// Direct Pop() on empty heap should return nil (defensive path)
+	result := h.Pop()
+	if result != nil {
+		t.Errorf("Pop() on empty heap should return nil, got %v", result)
+	}
+}
+
 // TestRemoveAtIdxLastValid tests that idx = len(*h) - 1 (last valid index) works.
 // This is the "just inside boundary" case.
 func TestRemoveAtIdxLastValid(t *testing.T) {

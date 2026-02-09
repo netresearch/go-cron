@@ -2,6 +2,7 @@ package cron
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log"
 	"reflect"
@@ -1173,6 +1174,76 @@ func TestJitterWithLogger_LogsDelay(t *testing.T) {
 
 	if !logCalled {
 		t.Error("JitterWithLogger should have logged the delay")
+	}
+}
+
+// TestRecoverWithNonErrorPanic tests toError() with various panic value types.
+func TestRecoverWithNonErrorPanic(t *testing.T) {
+	testCases := []struct {
+		name       string
+		panicValue any
+	}{
+		{"string panic", "string panic value"},
+		{"int panic", 42},
+		{"error panic", errors.New("error panic value")},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			panickingJob := FuncJob(func() {
+				panic(tc.panicValue)
+			})
+
+			logger := &testLogCapture{}
+			NewChain(Recover(logger)).Then(panickingJob).Run()
+
+			if logger.ErrorCount() != 1 {
+				t.Errorf("expected 1 Error call, got %d", logger.ErrorCount())
+			}
+		})
+	}
+}
+
+// TestTimeoutWithContext_CallbackOnTimeout tests that RunWithContext fires onTimeout callback.
+func TestTimeoutWithContext_CallbackOnTimeout(t *testing.T) {
+	var callbackCalled int32
+	var callbackDuration time.Duration
+
+	callback := func(timeout time.Duration) {
+		atomic.AddInt32(&callbackCalled, 1)
+		callbackDuration = timeout
+	}
+
+	jobDone := make(chan struct{})
+	job := FuncJobWithContext(func(ctx context.Context) {
+		defer close(jobDone)
+		// Ignore context cancellation, simulating a non-cooperative job
+		time.Sleep(200 * time.Millisecond)
+	})
+
+	timeout := 10 * time.Millisecond
+	wrapper := TimeoutWithContext(DiscardLogger, timeout, WithTimeoutCallback(callback))
+	wrappedJob := wrapper(job)
+
+	// RunWithContext should fire the timeout callback
+	jobWithCtx, ok := wrappedJob.(JobWithContext)
+	if !ok {
+		t.Fatalf("wrapped job does not implement JobWithContext")
+	}
+	jobWithCtx.RunWithContext(context.Background())
+
+	// Wait for abandoned goroutine
+	select {
+	case <-jobDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for abandoned goroutine")
+	}
+
+	if c := atomic.LoadInt32(&callbackCalled); c != 1 {
+		t.Errorf("expected callback called once, got %d", c)
+	}
+	if callbackDuration != timeout {
+		t.Errorf("expected callback duration %v, got %v", timeout, callbackDuration)
 	}
 }
 

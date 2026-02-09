@@ -807,6 +807,156 @@ func TestAnalyzeSpecDomDowWarning(t *testing.T) {
 	}
 }
 
+// TestAnalyzeSpec_ParseFields tests parseFields() for various field counts.
+func TestAnalyzeSpec_ParseFields(t *testing.T) {
+	testCases := []struct {
+		name           string
+		spec           string
+		expectedFields map[string]string
+		unexpectedKeys []string
+	}{
+		{
+			name: "6-field with year",
+			spec: "0 9 15 6 1 2026",
+			expectedFields: map[string]string{
+				"minute":       "0",
+				"hour":         "9",
+				"day_of_month": "15",
+				"month":        "6",
+				"day_of_week":  "1",
+				"year":         "2026",
+			},
+			unexpectedKeys: []string{"second"},
+		},
+		{
+			name: "6-field with seconds",
+			spec: "30 0 9 15 6 1",
+			expectedFields: map[string]string{
+				"second":       "30",
+				"minute":       "0",
+				"hour":         "9",
+				"day_of_month": "15",
+				"month":        "6",
+				"day_of_week":  "1",
+			},
+			unexpectedKeys: []string{"year"},
+		},
+		{
+			name: "7-field with seconds and year",
+			spec: "30 0 9 15 6 1 2026",
+			expectedFields: map[string]string{
+				"second":       "30",
+				"minute":       "0",
+				"hour":         "9",
+				"day_of_month": "15",
+				"month":        "6",
+				"day_of_week":  "1",
+				"year":         "2026",
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &SpecAnalysis{Fields: make(map[string]string)}
+			r.parseFields(tc.spec)
+
+			for key, expectedVal := range tc.expectedFields {
+				if actualVal, ok := r.Fields[key]; !ok || actualVal != expectedVal {
+					t.Errorf("expected field %s=%q, got %q", key, expectedVal, actualVal)
+				}
+			}
+
+			for _, key := range tc.unexpectedKeys {
+				if _, ok := r.Fields[key]; ok {
+					t.Errorf("unexpected field %q found", key)
+				}
+			}
+		})
+	}
+}
+
+// TestAnalyzeSpecWithHash_ErrorPaths tests error paths for AnalyzeSpecWithHash.
+func TestAnalyzeSpecWithHash_ErrorPaths(t *testing.T) {
+	testCases := []struct {
+		name      string
+		spec      string
+		expectErr string
+	}{
+		{"empty spec", "", "empty"},
+		{"invalid spec", "invalid cron", ""},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := AnalyzeSpecWithHash(tc.spec, Minute|Hour|Dom|Month|Dow|Hash, "seed")
+			if result.Valid {
+				t.Error("expected spec to be invalid")
+			}
+			if result.Error == nil {
+				t.Error("expected error for invalid spec")
+			}
+			if tc.expectErr != "" && !strings.Contains(result.Error.Error(), tc.expectErr) {
+				t.Errorf("expected error containing %q, got: %v", tc.expectErr, result.Error)
+			}
+		})
+	}
+}
+
+// TestValidationError_Error tests ValidationError.Error() formatting.
+func TestValidationError_Error(t *testing.T) {
+	testCases := []struct {
+		name     string
+		err      *ValidationError
+		expected string
+	}{
+		{
+			"with field",
+			&ValidationError{Message: "value out of range", Field: "minute", Value: "99"},
+			"value out of range in minute: 99",
+		},
+		{
+			"without field",
+			&ValidationError{Message: "empty spec string"},
+			"empty spec string",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.err.Error() != tc.expected {
+				t.Errorf("ValidationError.Error() = %q, want %q", tc.err.Error(), tc.expected)
+			}
+		})
+	}
+}
+
+// TestLooksLikeYear tests the looksLikeYear function for edge cases.
+func TestLooksLikeYear(t *testing.T) {
+	tests := []struct {
+		field string
+		want  bool
+	}{
+		{"2026", true},
+		{"2020-2030", true},
+		{"2026,2027", true},
+		{"2000/5", true},
+		{"*", false},
+		{"?", false},
+		{"5", false},
+		{"0-59", false},
+		{"MON", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.field, func(t *testing.T) {
+			got := looksLikeYear(tt.field)
+			if got != tt.want {
+				t.Errorf("looksLikeYear(%q) = %v, want %v", tt.field, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestAnalyzeSpecWithHashDomDowWarning tests that AnalyzeSpecWithHash also adds warnings.
 func TestAnalyzeSpecWithHashDomDowWarning(t *testing.T) {
 	// Test with hash that results in both DOM and DOW restricted
