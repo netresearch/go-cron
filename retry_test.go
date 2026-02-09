@@ -2,6 +2,7 @@ package cron
 
 import (
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -626,6 +627,75 @@ func TestCircuitBreaker_IsOpenBoundary(t *testing.T) {
 	if got := atomic.LoadInt32(&executions); got != int32(threshold)+1 {
 		t.Errorf("half-open state should allow execution, expected %d, got %d",
 			threshold+1, got)
+	}
+}
+
+// TestPanicError_String tests PanicError.String() formatting.
+func TestPanicError_String(t *testing.T) {
+	p := &PanicError{
+		Value: "test panic",
+		Stack: []byte("goroutine 1 [running]:\nmain.main()"),
+	}
+	s := p.String()
+	if !strings.Contains(s, "panic: test panic") {
+		t.Errorf("expected 'panic: test panic' in String(), got %q", s)
+	}
+	if !strings.Contains(s, "goroutine 1") {
+		t.Errorf("expected stack trace in String(), got %q", s)
+	}
+}
+
+// TestPanicError_Unwrap tests PanicError.Unwrap() with error and non-error values.
+func TestPanicError_Unwrap(t *testing.T) {
+	origErr := errors.New("original error")
+	testCases := []struct {
+		name           string
+		value          any
+		shouldUnwrapTo error
+	}{
+		{"error value", origErr, origErr},
+		{"string value", "not an error", nil},
+		{"int value", 42, nil},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := &PanicError{Value: tc.value, Stack: []byte("stack")}
+			unwrapped := p.Unwrap()
+			if tc.shouldUnwrapTo != nil {
+				if !errors.Is(unwrapped, tc.shouldUnwrapTo) {
+					t.Errorf("expected Unwrap() to return original error, got %v", unwrapped)
+				}
+			} else if unwrapped != nil {
+				t.Errorf("expected Unwrap() to return nil, got %v", unwrapped)
+			}
+		})
+	}
+}
+
+// TestRetryOnError_NonPanicErrorRecovery tests extractPanicValueAndStack() with various panic types.
+func TestRetryOnError_NonPanicErrorRecovery(t *testing.T) {
+	pe := &PanicError{Value: "inner value", Stack: []byte("stack trace")}
+	testCases := []struct {
+		name          string
+		panicInput    any
+		expectedVal   any
+		expectedStack string
+	}{
+		{"plain string", "plain string", "plain string", ""},
+		{"*PanicError", pe, "inner value", "stack trace"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			val, stack := extractPanicValueAndStack(tc.panicInput)
+			if val != tc.expectedVal {
+				t.Errorf("expected value %v, got %v", tc.expectedVal, val)
+			}
+			if stack != tc.expectedStack {
+				t.Errorf("expected stack %q, got %q", tc.expectedStack, stack)
+			}
+		})
 	}
 }
 

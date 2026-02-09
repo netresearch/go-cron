@@ -2,6 +2,7 @@ package cron
 
 import (
 	"bytes"
+	"container/heap"
 	"context"
 	"errors"
 	"fmt"
@@ -3306,5 +3307,165 @@ func TestUpdateBeforeStart(t *testing.T) {
 				t.Errorf("expected 1 run after 5s, got %d", got)
 			}
 		})
+	}
+}
+
+// TestFuncJobWithContext_Run tests that FuncJobWithContext.Run() calls RunWithContext(context.Background()).
+func TestFuncJobWithContext_Run(t *testing.T) {
+	var called bool
+	var receivedCtx context.Context
+
+	job := FuncJobWithContext(func(ctx context.Context) {
+		called = true
+		receivedCtx = ctx
+	})
+
+	// Call Run() directly (not RunWithContext)
+	job.Run()
+
+	if !called {
+		t.Error("FuncJobWithContext.Run() did not call the function")
+	}
+	if receivedCtx == nil {
+		t.Error("FuncJobWithContext.Run() should pass context.Background()")
+	}
+	// context.Background() should not be canceled
+	if receivedCtx.Err() != nil {
+		t.Errorf("expected non-canceled context, got err: %v", receivedCtx.Err())
+	}
+}
+
+// TestLocation tests the Cron.Location() accessor.
+func TestLocation(t *testing.T) {
+	// Default location should be time.Local
+	c := New()
+	if c.Location() != time.Local {
+		t.Errorf("default Location() = %v, want time.Local", c.Location())
+	}
+
+	// Custom location
+	nyLoc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Skipf("cannot load timezone: %v", err)
+	}
+	c2 := New(WithLocation(nyLoc))
+	if c2.Location() != nyLoc {
+		t.Errorf("Location() = %v, want %v", c2.Location(), nyLoc)
+	}
+}
+
+// TestRunAlreadyRunning tests that Cron.Run() is a no-op if already running.
+func TestRunAlreadyRunning(t *testing.T) {
+	fc := NewFakeClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
+	c := New(WithClock(fc))
+
+	var runs int32
+	_, err := c.AddFunc("@every 1h", func() {
+		atomic.AddInt32(&runs, 1)
+	})
+	if err != nil {
+		t.Fatalf("AddFunc returned error: %v", err)
+	}
+
+	// Start via Start() so it's already running
+	c.Start()
+
+	// Run() should be a no-op since already running
+	done := make(chan struct{})
+	go func() {
+		c.Run() // should return immediately since already running
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Good, Run() returned immediately
+	case <-time.After(time.Second):
+		t.Fatal("Run() should return immediately when already running")
+	}
+
+	c.Stop()
+}
+
+// TestHandleTimeBackwards tests handleTimeBackwards() reschedule on time regression.
+func TestHandleTimeBackwards(t *testing.T) {
+	// Test handleTimeBackwards directly using the internal method.
+	// When time moves backwards (NTP correction, VM snapshot restore),
+	// entries whose Prev is after "now" should be rescheduled.
+	c := New()
+
+	schedule, err := ParseStandard("0 * * * *") // every hour at :00
+	if err != nil {
+		t.Fatalf("ParseStandard failed: %v", err)
+	}
+	entry := &Entry{
+		ID:        1,
+		Schedule:  schedule,
+		Prev:      time.Date(2024, 6, 15, 13, 0, 0, 0, time.UTC), // ran at 13:00
+		Next:      time.Date(2024, 6, 15, 14, 0, 0, 0, time.UTC), // next at 14:00
+		heapIndex: -1,
+	}
+	heap.Push(&c.entries, entry)
+	c.entryIndex[entry.ID] = entry
+
+	// Simulate time moving backwards to 12:30 (NTP correction)
+	backwardsNow := time.Date(2024, 6, 15, 12, 30, 0, 0, time.UTC)
+
+	c.handleTimeBackwards(backwardsNow)
+
+	// Entry's Next should be rescheduled from the new "now" since Prev > now
+	// Schedule.Next(12:30) should give 13:00
+	expectedNext := time.Date(2024, 6, 15, 13, 0, 0, 0, time.UTC)
+	if !entry.Next.Equal(expectedNext) {
+		t.Errorf("after time backwards, Next = %v, want %v", entry.Next, expectedNext)
+	}
+
+	// Entry whose Prev is NOT after now should NOT be rescheduled
+	entry2 := &Entry{
+		ID:        2,
+		Schedule:  schedule,
+		Prev:      time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC), // ran at 12:00 (before "now")
+		Next:      time.Date(2024, 6, 15, 13, 0, 0, 0, time.UTC),
+		heapIndex: -1,
+	}
+	heap.Push(&c.entries, entry2)
+	c.entryIndex[entry2.ID] = entry2
+
+	originalNext := entry2.Next
+	c.handleTimeBackwards(backwardsNow)
+
+	if !entry2.Next.Equal(originalNext) {
+		t.Errorf("entry with Prev before now should not be rescheduled, Next changed from %v to %v", originalNext, entry2.Next)
+	}
+}
+
+// TestRemoveNamedEntryByID tests that removeEntry() cleans up nameIndex when removing by ID.
+func TestRemoveNamedEntryByID(t *testing.T) {
+	c := New()
+
+	id, err := c.AddFunc("@every 1h", func() {}, WithName("test-job"))
+	if err != nil {
+		t.Fatalf("AddFunc failed: %v", err)
+	}
+
+	// Verify the entry exists by name
+	entry := c.EntryByName("test-job")
+	if !entry.Valid() {
+		t.Fatal("expected entry to be found by name before removal")
+	}
+
+	// Remove by ID
+	c.Remove(id)
+
+	// Verify nameIndex was cleaned up
+	entry = c.EntryByName("test-job")
+	if entry.Valid() {
+		t.Error("expected entry to be removed from nameIndex after Remove(id)")
+	}
+
+	// Verify we can re-add with the same name (no duplicate error)
+	_, err = c.AddFunc("@every 1h", func() {}, WithName("test-job"))
+	if err != nil {
+		t.Errorf("re-adding with same name should succeed after removal, got: %v", err)
 	}
 }

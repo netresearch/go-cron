@@ -497,6 +497,23 @@ func TestIntrospectionNilSchedule(t *testing.T) {
 	}
 }
 
+// scheduleWithoutPrev implements Schedule but NOT ScheduleWithPrev.
+type scheduleWithoutPrev struct{}
+
+func (s scheduleWithoutPrev) Next(t time.Time) time.Time {
+	return t.Add(time.Hour)
+}
+
+// TestMatches_ScheduleWithoutPrev tests Matches() with a schedule that doesn't implement ScheduleWithPrev.
+func TestMatches_ScheduleWithoutPrev(t *testing.T) {
+	sched := scheduleWithoutPrev{}
+
+	// Matches should return false for schedules that don't implement ScheduleWithPrev
+	if Matches(sched, time.Now()) {
+		t.Error("Matches() should return false for schedules without ScheduleWithPrev")
+	}
+}
+
 // TestIntrospectionConcurrent tests thread safety of introspection functions.
 func TestIntrospectionConcurrent(t *testing.T) {
 	schedule, err := ParseStandard("0 * * * *")
