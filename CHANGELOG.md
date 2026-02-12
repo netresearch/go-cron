@@ -25,6 +25,18 @@ features, bug fixes, and modernization improvements.
   string with the Cron's configured parser, then atomically replace both schedule and
   job. Eliminates the need for callers to construct their own parser matching the Cron's
   configuration.
+- **Context-propagating chain wrappers**: All chain wrappers (`Recover`,
+  `DelayIfStillRunning`, `SkipIfStillRunning`, `Timeout`, `Jitter`,
+  `JitterWithLogger`) now implement `JobWithContext` and propagate the incoming
+  context to inner jobs that also implement `JobWithContext`. Previously, only
+  `TimeoutWithContext` propagated context; other wrappers returned `FuncJob`
+  which broke the context chain. This means per-entry context now flows through
+  the entire wrapper chain to context-aware jobs.
+- **`UpsertJob`**: Create-or-update convenience method that combines `AddJob` and
+  `UpdateEntry` into a single call. Requires `WithName` option. If an entry with
+  the name exists, its schedule and job are atomically updated; otherwise a new
+  entry is created. Handles TOCTOU races via retry. Returns `ErrNameRequired` if
+  no name is provided.
 
 [#313]: https://github.com/netresearch/go-cron/issues/313
 [PR#314]: https://github.com/netresearch/go-cron/pull/314
