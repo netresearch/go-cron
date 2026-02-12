@@ -10,48 +10,54 @@ features, bug fixes, and modernization improvements.
 
 ## [Unreleased]
 
+### Planned for v2
+- Context-aware Job interface with graceful shutdown support
+
+## [0.11.0] - 2026-02-12
+
 ### Added
 - **`UpdateEntry`/`UpdateEntryByName`** ([#313], [PR#314]): Atomically replace both
   schedule and job function of an existing entry. The new job is re-wrapped through
   the configured Chain. Useful when rescheduling requires a new closure (e.g.,
   `context.WithCancel` per schedule change). Returns `ErrNilJob` if job is nil.
-- **Per-entry context**: Each entry now has its own `context.Context` derived from the
-  Cron's base context. Jobs implementing `JobWithContext` receive this per-entry context
-  instead of the shared base context. The entry context is automatically canceled when
-  the entry is removed or when its job is replaced via `UpdateEntry`. Schedule-only
+- **Per-entry context** ([PR#315]): Each entry now has its own `context.Context` derived
+  from the Cron's base context. Jobs implementing `JobWithContext` receive this per-entry
+  context instead of the shared base context. The entry context is automatically canceled
+  when the entry is removed or when its job is replaced via `UpdateEntry`. Schedule-only
   updates (`UpdateSchedule`) do not cancel the context. `Stop()` cancels the base
   context, which cascades to all entry contexts.
-- **`UpdateEntryJob`/`UpdateEntryJobByName`**: Convenience methods that parse a spec
-  string with the Cron's configured parser, then atomically replace both schedule and
-  job. Eliminates the need for callers to construct their own parser matching the Cron's
-  configuration.
-- **Context-propagating chain wrappers**: All chain wrappers (`Recover`,
+- **`UpdateEntryJob`/`UpdateEntryJobByName`** ([PR#315]): Convenience methods that parse
+  a spec string with the Cron's configured parser, then atomically replace both schedule
+  and job. Eliminates the need for callers to construct their own parser matching the
+  Cron's configuration.
+- **Context-propagating chain wrappers** ([PR#316]): All chain wrappers (`Recover`,
   `DelayIfStillRunning`, `SkipIfStillRunning`, `Timeout`, `Jitter`,
   `JitterWithLogger`) now implement `JobWithContext` and propagate the incoming
   context to inner jobs that also implement `JobWithContext`. Previously, only
   `TimeoutWithContext` propagated context; other wrappers returned `FuncJob`
   which broke the context chain. This means per-entry context now flows through
   the entire wrapper chain to context-aware jobs.
-- **`UpsertJob`**: Create-or-update convenience method that combines `AddJob` and
-  `UpdateEntry` into a single call. Requires `WithName` option. If an entry with
+- **`UpsertJob`** ([PR#316]): Create-or-update convenience method that combines `AddJob`
+  and `UpdateEntry` into a single call. Requires `WithName` option. If an entry with
   the name exists, its schedule and job are atomically updated; otherwise a new
   entry is created. Handles TOCTOU races via retry. Returns `ErrNameRequired` if
   no name is provided.
-- **`WaitForJob`/`WaitForJobByName`** ([#317]): Block until all currently-running
-  invocations of an entry complete. Returns immediately if the entry is not running
-  or does not exist. Enables graceful job replacement without manual WaitGroup
-  tracking: `cr.WaitForJobByName("job"); cr.UpsertJob(...)`. Per-entry tracking
-  uses a mutex-protected counter on each entry, wired into `startJob`.
-- **`IsJobRunning`/`IsJobRunningByName`**: Non-blocking query to check whether an
-  entry has any invocations currently in flight. Useful for monitoring dashboards
-  and conditional logic (e.g., skip waiting if not running).
+- **`WaitForJob`/`WaitForJobByName`** ([#317], [PR#318]): Block until all
+  currently-running invocations of an entry complete. Returns immediately if the entry
+  is not running or does not exist. Enables graceful job replacement without manual
+  WaitGroup tracking: `cr.WaitForJobByName("job"); cr.UpsertJob(...)`. Per-entry
+  tracking uses a mutex-protected counter on each entry, wired into `startJob`.
+- **`IsJobRunning`/`IsJobRunningByName`** ([PR#319]): Non-blocking query to check
+  whether an entry has any invocations currently in flight. Useful for monitoring
+  dashboards and conditional logic (e.g., skip waiting if not running).
 
 [#313]: https://github.com/netresearch/go-cron/issues/313
 [PR#314]: https://github.com/netresearch/go-cron/pull/314
+[PR#315]: https://github.com/netresearch/go-cron/pull/315
+[PR#316]: https://github.com/netresearch/go-cron/pull/316
 [#317]: https://github.com/netresearch/go-cron/issues/317
-
-### Planned for v2
-- Context-aware Job interface with graceful shutdown support
+[PR#318]: https://github.com/netresearch/go-cron/pull/318
+[PR#319]: https://github.com/netresearch/go-cron/pull/319
 
 ## [0.9.1] - 2026-01-17
 
