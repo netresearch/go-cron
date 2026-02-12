@@ -111,10 +111,49 @@ func toError(v any) error {
 	return fmt.Errorf("%v", v)
 }
 
+// runJob executes a job, passing ctx if it implements JobWithContext.
+func runJob(ctx context.Context, j Job) {
+	if jc, ok := j.(JobWithContext); ok {
+		jc.RunWithContext(ctx)
+	} else {
+		j.Run()
+	}
+}
+
+// recoverJob implements Job and JobWithContext for the Recover wrapper.
+type recoverJob struct {
+	inner  Job
+	logger Logger
+	config recoverOpts
+}
+
+// Run implements Job by delegating to RunWithContext with context.Background().
+func (r *recoverJob) Run() {
+	r.RunWithContext(context.Background())
+}
+
+// RunWithContext implements JobWithContext, propagating ctx to the inner job.
+func (r *recoverJob) RunWithContext(ctx context.Context) {
+	defer func() {
+		if rv := recover(); rv != nil {
+			info := extractPanicInfo(rv)
+			if r.config.logLevel == LogLevelInfo {
+				r.logger.Info("panic recovered", "error", info.err, "panic_type", info.panicType, "stack", info.stack)
+			} else {
+				r.logger.Error(info.err, "panic", "panic_type", info.panicType, "stack", info.stack)
+			}
+		}
+	}()
+	runJob(ctx, r.inner)
+}
+
 // Recover panics in wrapped jobs and log them with the provided logger.
 //
 // By default, panics are logged at Error level. Use WithLogLevel to
 // change this behavior, for example when combined with retry wrappers.
+//
+// The returned wrapper implements JobWithContext, propagating the incoming
+// context to the inner job if it also implements JobWithContext.
 //
 // Example:
 //
@@ -135,55 +174,79 @@ func Recover(logger Logger, opts ...RecoverOption) JobWrapper {
 	}
 
 	return func(j Job) Job {
-		return FuncJob(func() {
-			defer func() {
-				if r := recover(); r != nil {
-					info := extractPanicInfo(r)
-					if config.logLevel == LogLevelInfo {
-						logger.Info("panic recovered", "error", info.err, "panic_type", info.panicType, "stack", info.stack)
-					} else {
-						logger.Error(info.err, "panic", "panic_type", info.panicType, "stack", info.stack)
-					}
-				}
-			}()
-			j.Run()
-		})
+		return &recoverJob{inner: j, logger: logger, config: config}
 	}
+}
+
+// delayJob implements Job and JobWithContext for the DelayIfStillRunning wrapper.
+type delayJob struct {
+	inner        Job
+	logger       Logger
+	mu           *sync.Mutex
+	logThreshold time.Duration // delay duration after which a log message is emitted
+}
+
+// Run implements Job by delegating to RunWithContext with context.Background().
+func (d *delayJob) Run() {
+	d.RunWithContext(context.Background())
+}
+
+// RunWithContext implements JobWithContext, propagating ctx to the inner job.
+func (d *delayJob) RunWithContext(ctx context.Context) {
+	start := time.Now()
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if dur := time.Since(start); dur > d.logThreshold {
+		d.logger.Info("delay", "duration", dur)
+	}
+	runJob(ctx, d.inner)
 }
 
 // DelayIfStillRunning serializes jobs, delaying subsequent runs until the
 // previous one is complete. Jobs running after a delay of more than a minute
 // have the delay logged at Info.
+//
+// The returned wrapper implements JobWithContext, propagating the incoming
+// context to the inner job if it also implements JobWithContext.
 func DelayIfStillRunning(logger Logger) JobWrapper {
 	return func(j Job) Job {
-		var mu sync.Mutex
-		return FuncJob(func() {
-			start := time.Now()
-			mu.Lock()
-			defer mu.Unlock()
-			if dur := time.Since(start); dur > time.Minute {
-				logger.Info("delay", "duration", dur)
-			}
-			j.Run()
-		})
+		return &delayJob{inner: j, logger: logger, mu: &sync.Mutex{}, logThreshold: time.Minute}
+	}
+}
+
+// skipJob implements Job and JobWithContext for the SkipIfStillRunning wrapper.
+type skipJob struct {
+	inner  Job
+	logger Logger
+	ch     chan struct{}
+}
+
+// Run implements Job by delegating to RunWithContext with context.Background().
+func (s *skipJob) Run() {
+	s.RunWithContext(context.Background())
+}
+
+// RunWithContext implements JobWithContext, propagating ctx to the inner job.
+func (s *skipJob) RunWithContext(ctx context.Context) {
+	select {
+	case v := <-s.ch:
+		defer func() { s.ch <- v }()
+		runJob(ctx, s.inner)
+	default:
+		s.logger.Info("skip")
 	}
 }
 
 // SkipIfStillRunning skips an invocation of the Job if a previous invocation is
 // still running. It logs skips to the given logger at Info level.
+//
+// The returned wrapper implements JobWithContext, propagating the incoming
+// context to the inner job if it also implements JobWithContext.
 func SkipIfStillRunning(logger Logger) JobWrapper {
 	return func(j Job) Job {
 		ch := make(chan struct{}, 1)
 		ch <- struct{}{}
-		return FuncJob(func() {
-			select {
-			case v := <-ch:
-				defer func() { ch <- v }()
-				j.Run()
-			default:
-				logger.Info("skip")
-			}
-		})
+		return &skipJob{inner: j, logger: logger, ch: ch}
 	}
 }
 
@@ -289,31 +352,52 @@ func Timeout(logger Logger, timeout time.Duration, opts ...TimeoutOption) JobWra
 		if timeout <= 0 {
 			return j
 		}
-		return FuncJob(func() {
-			done := make(chan struct{})
-			var panicVal any
-			go func() {
-				defer close(done)
-				panicVal = safeExecute(j.Run)
-			}()
+		return &timeoutJob{
+			inner:     j,
+			timeout:   timeout,
+			logger:    logger,
+			onTimeout: config.onTimeout,
+		}
+	}
+}
 
-			timer := time.NewTimer(timeout)
-			defer timer.Stop()
+// timeoutJob implements Job and JobWithContext for the Timeout wrapper.
+type timeoutJob struct {
+	inner     Job
+	timeout   time.Duration
+	logger    Logger
+	onTimeout func(time.Duration)
+}
 
-			select {
-			case <-done:
-				// Job completed within timeout - propagate any panic
-				if panicVal != nil {
-					panic(panicVal)
-				}
-			case <-timer.C:
-				logger.Error(fmt.Errorf("job exceeded timeout of %v; goroutine still running in background", timeout), "timeout", "duration", timeout)
-				// Invoke callback for metrics/alerting
-				if config.onTimeout != nil {
-					config.onTimeout(timeout)
-				}
-			}
-		})
+// Run implements Job by delegating to RunWithContext with context.Background().
+func (t *timeoutJob) Run() {
+	t.RunWithContext(context.Background())
+}
+
+// RunWithContext implements JobWithContext, propagating ctx to the inner job.
+func (t *timeoutJob) RunWithContext(ctx context.Context) {
+	done := make(chan struct{})
+	var panicVal any
+	go func() {
+		defer close(done)
+		panicVal = safeExecute(func() { runJob(ctx, t.inner) })
+	}()
+
+	timer := time.NewTimer(t.timeout)
+	defer timer.Stop()
+
+	select {
+	case <-done:
+		// Job completed within timeout - propagate any panic
+		if panicVal != nil {
+			panic(panicVal)
+		}
+	case <-timer.C:
+		t.logger.Error(fmt.Errorf("job exceeded timeout of %v; goroutine still running in background", t.timeout), "timeout", "duration", t.timeout)
+		// Invoke callback for metrics/alerting
+		if t.onTimeout != nil {
+			t.onTimeout(t.timeout)
+		}
 	}
 }
 
@@ -401,12 +485,7 @@ func (t *timeoutContextJob) RunWithContext(ctx context.Context) {
 
 	go func() {
 		defer close(done)
-		// Pass context to inner job if it supports it, using consolidated helper
-		if jc, ok := t.inner.(JobWithContext); ok {
-			panicVal = safeExecute(func() { jc.RunWithContext(ctx) })
-		} else {
-			panicVal = safeExecute(t.inner.Run)
-		}
+		panicVal = safeExecute(func() { runJob(ctx, t.inner) })
 	}()
 
 	select {
@@ -441,6 +520,27 @@ func (t *timeoutContextJob) RunWithContext(ctx context.Context) {
 	}
 }
 
+// jitterJob implements Job and JobWithContext for the Jitter wrapper.
+type jitterJob struct {
+	inner     Job
+	maxJitter time.Duration
+}
+
+// Run implements Job by delegating to RunWithContext with context.Background().
+func (j *jitterJob) Run() {
+	j.RunWithContext(context.Background())
+}
+
+// RunWithContext implements JobWithContext, propagating ctx to the inner job.
+func (j *jitterJob) RunWithContext(ctx context.Context) {
+	if j.maxJitter > 0 {
+		// #nosec G404 -- math/rand is appropriate for jitter; cryptographic randomness not needed
+		jitter := time.Duration(rand.Int64N(int64(j.maxJitter)))
+		time.Sleep(jitter)
+	}
+	runJob(ctx, j.inner)
+}
+
 // Jitter adds a random delay before job execution to prevent thundering herd.
 // When many jobs are scheduled at the same time (e.g., @hourly), they would
 // all execute simultaneously, causing database connection spikes, API rate
@@ -448,6 +548,9 @@ func (t *timeoutContextJob) RunWithContext(ctx context.Context) {
 //
 // The delay is uniformly distributed in the range [0, maxJitter).
 // A maxJitter of 0 or negative disables jitter (no delay).
+//
+// The returned wrapper implements JobWithContext, propagating the incoming
+// context to the inner job if it also implements JobWithContext.
 //
 // Example:
 //
@@ -465,33 +568,44 @@ func (t *timeoutContextJob) RunWithContext(ctx context.Context) {
 //	c.AddFunc("@hourly", syncData, cron.WithChain(cron.Jitter(30*time.Second)))
 func Jitter(maxJitter time.Duration) JobWrapper {
 	return func(j Job) Job {
-		return FuncJob(func() {
-			if maxJitter > 0 {
-				// #nosec G404 -- math/rand is appropriate for jitter; cryptographic randomness not needed
-				jitter := time.Duration(rand.Int64N(int64(maxJitter)))
-				time.Sleep(jitter)
-			}
-			j.Run()
-		})
+		return &jitterJob{inner: j, maxJitter: maxJitter}
 	}
+}
+
+// jitterLogJob implements Job and JobWithContext for the JitterWithLogger wrapper.
+type jitterLogJob struct {
+	inner     Job
+	maxJitter time.Duration
+	logger    Logger
+}
+
+// Run implements Job by delegating to RunWithContext with context.Background().
+func (j *jitterLogJob) Run() {
+	j.RunWithContext(context.Background())
+}
+
+// RunWithContext implements JobWithContext, propagating ctx to the inner job.
+func (j *jitterLogJob) RunWithContext(ctx context.Context) {
+	if j.maxJitter > 0 {
+		// #nosec G404 -- math/rand is appropriate for jitter; cryptographic randomness not needed
+		jitter := time.Duration(rand.Int64N(int64(j.maxJitter)))
+		j.logger.Info("jitter", "delay", jitter, "max", j.maxJitter)
+		time.Sleep(jitter)
+	}
+	runJob(ctx, j.inner)
 }
 
 // JitterWithLogger is like Jitter but logs the applied delay.
 // This is useful for debugging and observability to verify jitter is working.
+//
+// The returned wrapper implements JobWithContext, propagating the incoming
+// context to the inner job if it also implements JobWithContext.
 //
 // Example:
 //
 //	cron.NewChain(cron.JitterWithLogger(logger, 30 * time.Second)).Then(myJob)
 func JitterWithLogger(logger Logger, maxJitter time.Duration) JobWrapper {
 	return func(j Job) Job {
-		return FuncJob(func() {
-			if maxJitter > 0 {
-				// #nosec G404 -- math/rand is appropriate for jitter; cryptographic randomness not needed
-				jitter := time.Duration(rand.Int64N(int64(maxJitter)))
-				logger.Info("jitter", "delay", jitter, "max", maxJitter)
-				time.Sleep(jitter)
-			}
-			j.Run()
-		})
+		return &jitterLogJob{inner: j, maxJitter: maxJitter, logger: logger}
 	}
 }
