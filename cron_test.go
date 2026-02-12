@@ -3470,6 +3470,344 @@ func TestUpdateEntryBeforeStart(t *testing.T) {
 	}
 }
 
+// TestPerEntryContext verifies that context-aware jobs receive a per-entry
+// context derived from baseCtx (not baseCtx itself).
+func TestPerEntryContext(t *testing.T) {
+	fc := NewFakeClock(time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC))
+	c := New(WithClock(fc))
+
+	job := newContextAwareJob()
+	_, err := c.AddJob("@every 1s", job)
+	if err != nil {
+		t.Fatalf("add failed: %v", err)
+	}
+	c.Start()
+	defer c.Stop()
+
+	fc.BlockUntil(1)
+	fc.Advance(time.Second)
+
+	select {
+	case <-job.started:
+	case <-time.After(time.Second):
+		t.Fatal("job did not start in time")
+	}
+
+	job.mu.Lock()
+	ctx := job.receivedCtx
+	job.mu.Unlock()
+
+	// The job should have received a context (not nil)
+	if ctx == nil {
+		t.Fatal("job received nil context")
+	}
+	// The context should NOT be baseCtx itself — it should be a derived child
+	if ctx == c.baseCtx {
+		t.Error("job received baseCtx directly, expected a per-entry child context")
+	}
+	// The context should not be canceled yet
+	if ctx.Err() != nil {
+		t.Errorf("entry context should not be canceled yet, got: %v", ctx.Err())
+	}
+}
+
+// TestPerEntryContextCanceledOnRemove verifies that removing an entry cancels
+// its per-entry context while the base context stays live.
+func TestPerEntryContextCanceledOnRemove(t *testing.T) {
+	fc := NewFakeClock(time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC))
+	c := New(WithClock(fc))
+
+	job := newContextAwareJob()
+	id, err := c.AddJob("@every 1s", job)
+	if err != nil {
+		t.Fatalf("add failed: %v", err)
+	}
+	c.Start()
+
+	fc.BlockUntil(1)
+	fc.Advance(time.Second)
+
+	select {
+	case <-job.started:
+	case <-time.After(time.Second):
+		t.Fatal("job did not start in time")
+	}
+
+	job.mu.Lock()
+	ctx := job.receivedCtx
+	job.mu.Unlock()
+
+	// Remove the entry — should cancel the entry context
+	c.Remove(id)
+
+	select {
+	case <-job.canceled:
+		// Entry context was canceled, as expected
+	case <-time.After(time.Second):
+		t.Fatal("entry context was not canceled after Remove")
+	}
+
+	// Base context should still be alive
+	if c.baseCtx.Err() != nil {
+		t.Errorf("baseCtx should not be canceled after Remove, got: %v", c.baseCtx.Err())
+	}
+
+	// The entry's context should report canceled
+	if ctx.Err() == nil {
+		t.Error("entry context should be canceled after Remove")
+	}
+
+	c.Stop()
+}
+
+// TestPerEntryContextCanceledOnUpdateEntry verifies that UpdateEntry with a new
+// job cancels the old entry context and the new job gets a fresh context.
+func TestPerEntryContextCanceledOnUpdateEntry(t *testing.T) {
+	fc := NewFakeClock(time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC))
+	c := New(WithClock(fc), WithParser(secondParser))
+
+	jobA := newContextAwareJob()
+	id, err := c.AddJob("* * * * * *", jobA)
+	if err != nil {
+		t.Fatalf("add failed: %v", err)
+	}
+	c.Start()
+
+	fc.BlockUntil(1)
+	fc.Advance(time.Second)
+
+	select {
+	case <-jobA.started:
+	case <-time.After(time.Second):
+		t.Fatal("job A did not start in time")
+	}
+
+	jobA.mu.Lock()
+	ctxA := jobA.receivedCtx
+	jobA.mu.Unlock()
+
+	// Replace with job B
+	jobB := newContextAwareJob()
+	if err := c.UpdateEntry(id, Every(5*time.Second), jobB); err != nil {
+		t.Fatalf("UpdateEntry failed: %v", err)
+	}
+
+	// Old entry context should be canceled
+	select {
+	case <-jobA.canceled:
+		// Old context was canceled, as expected
+	case <-time.After(time.Second):
+		t.Fatal("old entry context was not canceled after UpdateEntry")
+	}
+
+	if ctxA.Err() == nil {
+		t.Error("old entry context should be canceled after job replacement")
+	}
+
+	// Fire job B by advancing past the 5s schedule
+	fc.BlockUntil(1)
+	fc.Advance(5 * time.Second)
+
+	select {
+	case <-jobB.started:
+	case <-time.After(time.Second):
+		t.Fatal("job B did not start in time")
+	}
+
+	jobB.mu.Lock()
+	ctxB := jobB.receivedCtx
+	jobB.mu.Unlock()
+
+	// New job B should have a fresh, non-canceled context
+	if ctxB == nil {
+		t.Fatal("job B received nil context")
+	}
+	if ctxB.Err() != nil {
+		t.Errorf("job B context should not be canceled, got: %v", ctxB.Err())
+	}
+	// New context should be different from old
+	if ctxA == ctxB {
+		t.Error("job B should have a different context from job A")
+	}
+
+	c.Stop()
+}
+
+// TestPerEntryContextCascadesOnStop verifies that Stop() cancels all entry
+// contexts via the baseCtx cascade.
+func TestPerEntryContextCascadesOnStop(t *testing.T) {
+	fc := NewFakeClock(time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC))
+	c := New(WithClock(fc))
+
+	job := newContextAwareJob()
+	_, err := c.AddJob("@every 1s", job)
+	if err != nil {
+		t.Fatalf("add failed: %v", err)
+	}
+	c.Start()
+
+	fc.BlockUntil(1)
+	fc.Advance(time.Second)
+
+	select {
+	case <-job.started:
+	case <-time.After(time.Second):
+		t.Fatal("job did not start in time")
+	}
+
+	// Stop the scheduler — should cancel baseCtx, which cascades to entry contexts
+	c.Stop()
+
+	select {
+	case <-job.canceled:
+		// Entry context was canceled via cascade
+	case <-time.After(time.Second):
+		t.Fatal("entry context was not canceled after Stop()")
+	}
+}
+
+// TestUpdateEntryJob verifies the spec-string convenience method.
+func TestUpdateEntryJob(t *testing.T) {
+	start := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
+	clock := NewFakeClock(start)
+	c := New(WithClock(clock), WithParser(secondParser))
+	defer c.Stop()
+
+	var runsA, runsB int32
+	id, err := c.AddFunc("* * * * * *", func() { atomic.AddInt32(&runsA, 1) })
+	if err != nil {
+		t.Fatalf("add failed: %v", err)
+	}
+	c.Start()
+	clock.BlockUntil(1)
+	clock.Advance(time.Second)
+	time.Sleep(10 * time.Millisecond)
+	if got := atomic.LoadInt32(&runsA); got != 1 {
+		t.Fatalf("expected 1 run of job A, got %d", got)
+	}
+
+	// Replace with job B via spec string ("@every 5s")
+	if err := c.UpdateEntryJob(id, "@every 5s", FuncJob(func() { atomic.AddInt32(&runsB, 1) })); err != nil {
+		t.Fatalf("UpdateEntryJob failed: %v", err)
+	}
+	clock.BlockUntil(1)
+
+	// Advance 4s — should NOT fire
+	clock.Advance(4 * time.Second)
+	time.Sleep(10 * time.Millisecond)
+	if got := atomic.LoadInt32(&runsB); got != 0 {
+		t.Errorf("expected 0 runs of job B after 4s, got %d", got)
+	}
+
+	// Advance 1 more second (total 5s) — should fire
+	clock.BlockUntil(1)
+	clock.Advance(1 * time.Second)
+	time.Sleep(10 * time.Millisecond)
+	if got := atomic.LoadInt32(&runsB); got != 1 {
+		t.Errorf("expected 1 run of job B after 5s, got %d", got)
+	}
+}
+
+// TestUpdateEntryJobByName verifies the name-based spec-string convenience method.
+func TestUpdateEntryJobByName(t *testing.T) {
+	start := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
+	clock := NewFakeClock(start)
+	c := New(WithClock(clock), WithParser(secondParser))
+	defer c.Stop()
+
+	var runsA, runsB int32
+	_, err := c.AddFunc("* * * * * *", func() { atomic.AddInt32(&runsA, 1) }, WithName("my-entry"))
+	if err != nil {
+		t.Fatalf("add failed: %v", err)
+	}
+	c.Start()
+	clock.BlockUntil(1)
+	clock.Advance(time.Second)
+	time.Sleep(10 * time.Millisecond)
+	if got := atomic.LoadInt32(&runsA); got != 1 {
+		t.Fatalf("expected 1 run of job A, got %d", got)
+	}
+
+	// Replace by name via spec string
+	if err := c.UpdateEntryJobByName("my-entry", "@every 5s", FuncJob(func() { atomic.AddInt32(&runsB, 1) })); err != nil {
+		t.Fatalf("UpdateEntryJobByName failed: %v", err)
+	}
+	clock.BlockUntil(1)
+	clock.Advance(5 * time.Second)
+	time.Sleep(10 * time.Millisecond)
+	if got := atomic.LoadInt32(&runsB); got != 1 {
+		t.Errorf("expected 1 run of job B, got %d", got)
+	}
+}
+
+// TestUpdateEntryJobParseError verifies that invalid specs return a parse error.
+func TestUpdateEntryJobParseError(t *testing.T) {
+	c := New()
+	defer c.Stop()
+
+	id, err := c.AddFunc("@every 1s", func() {})
+	if err != nil {
+		t.Fatalf("add failed: %v", err)
+	}
+
+	// Invalid spec should return parse error
+	if err := c.UpdateEntryJob(id, "not a valid spec!!!", FuncJob(func() {})); err == nil {
+		t.Error("expected parse error for invalid spec, got nil")
+	}
+
+	// Name-based variant
+	c2 := New()
+	defer c2.Stop()
+	_, err = c2.AddFunc("@every 1s", func() {}, WithName("test"))
+	if err != nil {
+		t.Fatalf("add failed: %v", err)
+	}
+	if err := c2.UpdateEntryJobByName("test", "also invalid!!", FuncJob(func() {})); err == nil {
+		t.Error("expected parse error for invalid spec, got nil")
+	}
+}
+
+// TestUpdateScheduleDoesNotCancelContext verifies that UpdateSchedule (schedule-only,
+// no job replacement) does NOT cancel the entry context.
+func TestUpdateScheduleDoesNotCancelContext(t *testing.T) {
+	fc := NewFakeClock(time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC))
+	c := New(WithClock(fc))
+
+	job := newContextAwareJob()
+	id, err := c.AddJob("@every 1s", job)
+	if err != nil {
+		t.Fatalf("add failed: %v", err)
+	}
+	c.Start()
+
+	fc.BlockUntil(1)
+	fc.Advance(time.Second)
+
+	select {
+	case <-job.started:
+	case <-time.After(time.Second):
+		t.Fatal("job did not start in time")
+	}
+
+	job.mu.Lock()
+	ctx := job.receivedCtx
+	job.mu.Unlock()
+
+	// Update schedule only (no job change) — should NOT cancel context
+	if err := c.UpdateSchedule(id, Every(5*time.Second)); err != nil {
+		t.Fatalf("UpdateSchedule failed: %v", err)
+	}
+
+	// Give a moment for any accidental cancellation to propagate
+	time.Sleep(20 * time.Millisecond)
+
+	if ctx.Err() != nil {
+		t.Errorf("entry context should NOT be canceled after schedule-only update, got: %v", ctx.Err())
+	}
+
+	c.Stop()
+}
+
 // TestFuncJobWithContext_Run tests that FuncJobWithContext.Run() calls RunWithContext(context.Background()).
 func TestFuncJobWithContext_Run(t *testing.T) {
 	var called bool
