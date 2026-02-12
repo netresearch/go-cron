@@ -3808,6 +3808,51 @@ func TestUpdateScheduleDoesNotCancelContext(t *testing.T) {
 	c.Stop()
 }
 
+// TestRunOnceDoesNotCancelContext verifies that auto-removal of run-once entries
+// does NOT cancel the entry context, so the dispatched job can complete.
+func TestRunOnceDoesNotCancelContext(t *testing.T) {
+	fc := NewFakeClock(time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC))
+	c := New(WithClock(fc))
+
+	job := newContextAwareJob()
+	_, err := c.AddJob("@every 1s", job, WithRunOnce())
+	if err != nil {
+		t.Fatalf("add failed: %v", err)
+	}
+	c.Start()
+
+	fc.BlockUntil(1)
+	fc.Advance(time.Second)
+
+	select {
+	case <-job.started:
+	case <-time.After(time.Second):
+		t.Fatal("job did not start in time")
+	}
+
+	job.mu.Lock()
+	ctx := job.receivedCtx
+	job.mu.Unlock()
+
+	// The run-once entry was auto-removed, but the context should NOT be canceled.
+	// Give a moment for any accidental cancellation to propagate.
+	time.Sleep(20 * time.Millisecond)
+
+	if ctx.Err() != nil {
+		t.Errorf("run-once job context should NOT be canceled after auto-removal, got: %v", ctx.Err())
+	}
+
+	// Stop should still cancel it via baseCtx cascade
+	c.Stop()
+
+	select {
+	case <-job.canceled:
+		// Context was canceled via Stop cascade, as expected
+	case <-time.After(time.Second):
+		t.Fatal("run-once job context was not canceled after Stop()")
+	}
+}
+
 // TestFuncJobWithContext_Run tests that FuncJobWithContext.Run() calls RunWithContext(context.Background()).
 func TestFuncJobWithContext_Run(t *testing.T) {
 	var called bool

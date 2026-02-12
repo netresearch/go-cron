@@ -848,6 +848,10 @@ func (c *Cron) processDueEntries(now time.Time) {
 		if e.runOnce {
 			// Remove run-once entries after dispatching the job.
 			// The job continues running in its own goroutine.
+			// Preserve the entry context so the dispatched job isn't
+			// canceled prematurely — it will be canceled when baseCtx
+			// is canceled (Stop). Explicit Remove() still cancels.
+			e.cancelEntryCtx = nil
 			c.removeEntry(e.ID)
 			c.logger.Info("run-once", "now", now, "entry", e.ID, "removed", true)
 		} else {
