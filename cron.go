@@ -20,8 +20,8 @@ var ErrMaxEntriesReached = errors.New("cron: max entries limit reached")
 var ErrDuplicateName = errors.New("cron: duplicate entry name")
 
 // ErrEntryNotFound is returned by UpdateSchedule, UpdateScheduleByName,
-// UpdateJob, and UpdateJobByName when the specified entry does not exist
-// in this Cron instance.
+// UpdateJob, UpdateJobByName, UpdateEntry, and UpdateEntryByName when the
+// specified entry does not exist in this Cron instance.
 var ErrEntryNotFound = errors.New("cron: entry not found")
 
 // maxIdleDuration is the sleep duration when no entries are scheduled.
@@ -205,10 +205,11 @@ type nameLookupRequest struct {
 	reply chan Entry
 }
 
-// updateScheduleRequest is used to update the schedule of a job.
+// updateScheduleRequest is used to update the schedule and/or job of an entry.
 type updateScheduleRequest struct {
 	id       EntryID
 	schedule Schedule
+	job      Job // nil means keep existing job
 }
 
 // request is a generic way to make a request to the run loop.
@@ -1003,6 +1004,10 @@ func (c *Cron) updateSchedule(req *updateScheduleRequest) error {
 	}
 
 	entry.Schedule = req.schedule
+	if req.job != nil {
+		entry.Job = req.job
+		entry.WrappedJob = c.chain.Then(req.job)
+	}
 	if c.running {
 		c.scheduleEntryNext(entry, c.now())
 		c.entries.Update(entry)
@@ -1077,6 +1082,43 @@ func (c *Cron) UpdateJobByName(name, spec string) error {
 		return err
 	}
 	return c.UpdateScheduleByName(name, schedule)
+}
+
+// UpdateEntry atomically replaces both the Schedule and the Job of an existing
+// entry identified by id. The new job is re-wrapped through the configured
+// Chain, so middleware (Recover, SkipIfStillRunning, etc.) is applied to the
+// replacement job.
+//
+// This is useful when rescheduling requires a new closure—for example, a fresh
+// context.WithCancel per schedule change (the weaviate pattern).
+//
+// Concurrency semantics are the same as UpdateSchedule.
+//
+// Returns ErrEntryNotFound if no entry with the given id exists.
+func (c *Cron) UpdateEntry(id EntryID, schedule Schedule, job Job) error {
+	c.runningMu.Lock()
+	defer c.runningMu.Unlock()
+	request := updateScheduleRequest{id: id, schedule: schedule, job: job}
+	if c.running {
+		req := makeReq[updateScheduleRequest, error](request)
+		c.update <- req
+		return <-req.reply
+	}
+
+	return c.updateSchedule(&request)
+}
+
+// UpdateEntryByName atomically replaces both the Schedule and the Job of an
+// existing entry identified by its Name. Lookup is O(1) via the internal name
+// index. Delegates to UpdateEntry for the actual update.
+//
+// Returns ErrEntryNotFound if no entry with the given name exists.
+func (c *Cron) UpdateEntryByName(name string, schedule Schedule, job Job) error {
+	e := c.EntryByName(name)
+	if !e.Valid() {
+		return ErrEntryNotFound
+	}
+	return c.UpdateEntry(e.ID, schedule, job)
 }
 
 // now returns current time in c location.
