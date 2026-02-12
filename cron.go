@@ -293,6 +293,48 @@ type Entry struct {
 
 	// cancelEntryCtx cancels entryCtx. Called on Remove or job replacement.
 	cancelEntryCtx context.CancelFunc
+
+	// running tracks in-flight job executions for this entry.
+	// WaitForJob / WaitForJobByName block until the count reaches zero.
+	// Uses jobTracker instead of sync.WaitGroup to avoid the documented race
+	// between Add(positive) and Wait when the counter is zero.
+	running *jobTracker
+}
+
+// jobTracker tracks in-flight executions for a single entry.
+// Safe for concurrent use by startJob (start/finish) and WaitForJob (wait).
+type jobTracker struct {
+	mu   sync.Mutex
+	n    int
+	done chan struct{} // closed when n reaches 0; nil when idle
+}
+
+func (t *jobTracker) start() {
+	t.mu.Lock()
+	if t.n == 0 {
+		t.done = make(chan struct{})
+	}
+	t.n++
+	t.mu.Unlock()
+}
+
+func (t *jobTracker) finish() {
+	t.mu.Lock()
+	t.n--
+	if t.n == 0 {
+		close(t.done)
+		t.done = nil
+	}
+	t.mu.Unlock()
+}
+
+func (t *jobTracker) wait() {
+	t.mu.Lock()
+	ch := t.done // nil if idle
+	t.mu.Unlock()
+	if ch != nil {
+		<-ch
+	}
 }
 
 // Valid returns true if this is not the zero entry.
@@ -689,6 +731,7 @@ func (c *Cron) ScheduleJob(schedule Schedule, cmd Job, opts ...JobOption) (Entry
 		WrappedJob: c.chain.Then(cmd),
 		Job:        cmd,
 		heapIndex:  -1,
+		running:    &jobTracker{},
 	}
 
 	// Apply job options
@@ -846,7 +889,7 @@ func (c *Cron) processDueEntries(now time.Time) {
 			break
 		}
 		scheduledTime := e.Next
-		c.startJob(e.entryCtx, e.ID, e.Job, e.WrappedJob, scheduledTime)
+		c.startJob(e.entryCtx, e.running, e.ID, e.Job, e.WrappedJob, scheduledTime)
 		e.Prev = e.Next
 
 		if e.runOnce {
@@ -979,10 +1022,12 @@ func (c *Cron) run() {
 // per-entry context, allowing the job to receive cancellation signals when the entry
 // is removed, its job is replaced, or Stop() is called (which cancels baseCtx,
 // cascading to all entry contexts).
-func (c *Cron) startJob(entryCtx context.Context, entryID EntryID, originalJob, wrappedJob Job, scheduledTime time.Time) {
+func (c *Cron) startJob(entryCtx context.Context, entryRunning *jobTracker, entryID EntryID, originalJob, wrappedJob Job, scheduledTime time.Time) {
 	c.jobWaiter.Add(1)
+	entryRunning.start()
 	go func() {
 		defer c.jobWaiter.Done()
+		defer entryRunning.finish()
 
 		c.hooks.callOnJobStart(entryID, originalJob, scheduledTime)
 
@@ -1522,4 +1567,36 @@ func (c *Cron) RemoveByTag(tag string) int {
 		c.Remove(entry.ID)
 	}
 	return len(entries)
+}
+
+// WaitForJob blocks until all currently-running invocations of the given
+// entry complete. Returns immediately if the entry is not currently running
+// or if the entry does not exist.
+//
+// This is useful for graceful job replacement: callers can wait for the
+// current execution to finish before replacing the job via UpsertJob or
+// UpdateEntry.
+//
+//	cr.WaitForJob(id)
+//	cr.UpsertJob(newSpec, newJob, WithName("my-job"))
+func (c *Cron) WaitForJob(id EntryID) {
+	e := c.Entry(id)
+	if !e.Valid() || e.running == nil {
+		return
+	}
+	e.running.wait()
+}
+
+// WaitForJobByName blocks until all currently-running invocations of the
+// named entry complete. Returns immediately if the entry is not currently
+// running or if no entry has the given name.
+//
+//	cr.WaitForJobByName("my-job")
+//	cr.UpsertJob(newSpec, newJob, WithName("my-job"))
+func (c *Cron) WaitForJobByName(name string) {
+	e := c.EntryByName(name)
+	if !e.Valid() || e.running == nil {
+		return
+	}
+	e.running.wait()
 }
