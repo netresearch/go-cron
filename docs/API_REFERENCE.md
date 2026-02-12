@@ -10,7 +10,9 @@
   - [Entry](#entry)
   - [EntryID](#entryid)
   - [Option](#option)
+  - [JobOption](#joboption)
   - [Schedule](#schedule)
+  - [ScheduleWithPrev](#schedulewithprev)
   - [SpecSchedule](#specschedule)
   - [ConstantDelaySchedule](#constantdelayschedule)
   - [Parser](#parser)
@@ -19,6 +21,16 @@
   - [JobWrapper](#jobwrapper)
   - [Job](#job)
   - [FuncJob](#funcjob)
+  - [JobWithContext](#jobwithcontext)
+  - [FuncJobWithContext](#funcjobwithcontext)
+  - [ErrorJob](#errorjob)
+  - [FuncErrorJob](#funcerrorjob)
+  - [NamedJob](#namedjob)
+  - [MissedPolicy](#missedpolicy)
+  - [ObservabilityHooks](#observabilityhooks)
+  - [SpecAnalysis](#specanalysis)
+  - [ValidationError](#validationerror)
+  - [PanicError](#panicerror)
   - [Logger](#logger)
   - [Clock](#clock)
   - [Timer](#timer)
@@ -26,6 +38,7 @@
   - [RealClock](#realclock)
 - [Functions](#functions)
 - [Constants](#constants)
+- [Errors](#errors)
 
 ---
 
@@ -405,6 +418,64 @@ if cr.IsJobRunningByName("my-job") {
 cr.UpsertJob(newSpec, newJob, cron.WithName("my-job"))
 ```
 
+#### func (*Cron) ScheduleJob
+
+```go
+func (c *Cron) ScheduleJob(schedule Schedule, cmd Job, opts ...JobOption) (EntryID, error)
+```
+
+ScheduleJob adds a Job to the Cron to be run on the given schedule.
+The job is wrapped with the configured Chain. Unlike `Schedule`, returns an error
+instead of silently logging on failure, and supports `JobOption` arguments.
+
+Returns `ErrMaxEntriesReached` if the maximum entry limit has been reached.
+Returns `ErrDuplicateName` if a name is provided and already exists.
+
+#### func (*Cron) AddOnceFunc
+
+```go
+func (c *Cron) AddOnceFunc(spec string, cmd func(), opts ...JobOption) (EntryID, error)
+```
+
+AddOnceFunc adds a func to run once on the given schedule, then automatically
+remove itself. Convenience wrapper combining `AddFunc` with `WithRunOnce()`.
+
+#### func (*Cron) AddOnceJob
+
+```go
+func (c *Cron) AddOnceJob(spec string, cmd Job, opts ...JobOption) (EntryID, error)
+```
+
+AddOnceJob adds a Job to run once on the given schedule, then automatically
+remove itself. Convenience wrapper combining `AddJob` with `WithRunOnce()`.
+
+#### func (*Cron) ScheduleOnceJob
+
+```go
+func (c *Cron) ScheduleOnceJob(schedule Schedule, cmd Job, opts ...JobOption) (EntryID, error)
+```
+
+ScheduleOnceJob adds a Job to run once on the given schedule, then automatically
+remove itself. Convenience wrapper combining `ScheduleJob` with `WithRunOnce()`.
+
+#### func (*Cron) ValidateSpec
+
+```go
+func (c *Cron) ValidateSpec(spec string) error
+```
+
+ValidateSpec validates a cron expression using this Cron instance's configured
+parser. Returns nil if valid, or an error describing the problem. Useful for
+pre-validating user input when the Cron uses a custom parser.
+
+**Example:**
+```go
+c := cron.New(cron.WithSeconds())
+if err := c.ValidateSpec("0 30 * * * *"); err != nil {
+    return fmt.Errorf("invalid cron expression: %w", err)
+}
+```
+
 #### func (*Cron) Entries
 
 ```go
@@ -420,6 +491,42 @@ func (c *Cron) Entry(id EntryID) Entry
 ```
 
 Entry returns a snapshot of the given entry, or a zero Entry if not found.
+This operation is O(1) using the internal index map.
+
+#### func (*Cron) EntryByName
+
+```go
+func (c *Cron) EntryByName(name string) Entry
+```
+
+EntryByName returns a snapshot of the entry with the given name,
+or an invalid Entry (`Entry.Valid() == false`) if not found.
+This operation is O(1) using the internal name index.
+
+**Example:**
+```go
+c.AddFunc("0 9 * * *", job, cron.WithName("daily-report"))
+entry := c.EntryByName("daily-report")
+if entry.Valid() {
+    fmt.Println("Next run:", entry.Next)
+}
+```
+
+#### func (*Cron) EntriesByTag
+
+```go
+func (c *Cron) EntriesByTag(tag string) []Entry
+```
+
+EntriesByTag returns snapshots of all entries that have the given tag.
+Returns an empty slice if no entries match.
+
+**Example:**
+```go
+c.AddFunc("0 9 * * *", job1, cron.WithTags("reports"))
+c.AddFunc("0 * * * *", job2, cron.WithTags("reports"))
+entries := c.EntriesByTag("reports") // Returns both entries
+```
 
 #### func (*Cron) Remove
 
@@ -427,7 +534,33 @@ Entry returns a snapshot of the given entry, or a zero Entry if not found.
 func (c *Cron) Remove(id EntryID)
 ```
 
-Remove an entry from being run in the future.
+Remove an entry from being run in the future. Cancels the entry's per-entry context.
+
+#### func (*Cron) RemoveByName
+
+```go
+func (c *Cron) RemoveByName(name string) bool
+```
+
+RemoveByName removes the entry with the given name.
+Returns true if an entry was removed, false if no entry had that name.
+
+#### func (*Cron) RemoveByTag
+
+```go
+func (c *Cron) RemoveByTag(tag string) int
+```
+
+RemoveByTag removes all entries that have the given tag.
+Returns the number of entries removed.
+
+#### func (*Cron) IsRunning
+
+```go
+func (c *Cron) IsRunning() bool
+```
+
+IsRunning returns true if the cron scheduler is currently running.
 
 #### func (*Cron) Start
 
@@ -458,6 +591,32 @@ A context is returned so the caller can wait for running jobs to complete.
 ```go
 ctx := c.Stop()
 <-ctx.Done() // Wait for all jobs to finish
+```
+
+#### func (*Cron) StopAndWait
+
+```go
+func (c *Cron) StopAndWait()
+```
+
+StopAndWait stops the cron scheduler and blocks until all running jobs complete.
+Equivalent to `<-c.Stop().Done()`.
+
+#### func (*Cron) StopWithTimeout
+
+```go
+func (c *Cron) StopWithTimeout(timeout time.Duration) bool
+```
+
+StopWithTimeout stops the cron scheduler and waits for running jobs to complete
+with a timeout. Returns true if all jobs completed within the timeout, false if
+the timeout was reached. A timeout of zero or negative waits indefinitely.
+
+**Example:**
+```go
+if !c.StopWithTimeout(30 * time.Second) {
+    log.Println("Warning: some jobs did not complete within 30s")
+}
 ```
 
 #### func (*Cron) Location
@@ -723,6 +882,84 @@ fakeClock.Advance(time.Hour) // Trigger jobs deterministically
 
 // RealClock is used by default, no need to specify unless overriding
 ```
+
+#### func WithContext
+
+```go
+func WithContext(ctx context.Context) Option
+```
+
+WithContext sets the base context for all job executions. When `Stop()` is called,
+this context is canceled, signaling all running `JobWithContext` jobs to shut down.
+If not specified, `context.Background()` is used.
+
+**Example:**
+```go
+ctx, cancel := context.WithCancel(context.Background())
+defer cancel()
+c := cron.New(cron.WithContext(ctx))
+```
+
+#### func WithMaxEntries
+
+```go
+func WithMaxEntries(maxEntries int) Option
+```
+
+WithMaxEntries limits the maximum number of entries. When the limit is reached,
+`AddFunc` and `AddJob` return `ErrMaxEntriesReached`. A limit of 0 means unlimited.
+
+#### func WithObservability
+
+```go
+func WithObservability(hooks ObservabilityHooks) Option
+```
+
+WithObservability configures observability hooks for monitoring cron operations.
+
+#### func WithSecondOptional
+
+```go
+func WithSecondOptional() Option
+```
+
+WithSecondOptional overrides the parser to accept an optional seconds field.
+Expressions can have either 5 fields (standard) or 6 fields (with seconds).
+
+#### func WithMinEveryInterval
+
+```go
+func WithMinEveryInterval(d time.Duration) Option
+```
+
+WithMinEveryInterval configures the minimum interval allowed for `@every` expressions.
+Default is 1 second. Set to 0 for sub-second intervals (useful for testing).
+
+#### func WithMaxSearchYears
+
+```go
+func WithMaxSearchYears(years int) Option
+```
+
+WithMaxSearchYears configures how far into the future schedule matching searches
+before giving up. Default is 5 years.
+
+#### func WithRunImmediately
+
+```go
+func WithRunImmediately() JobOption
+```
+
+WithRunImmediately causes the job to run immediately upon registration,
+then follow the normal schedule thereafter.
+
+#### func WithRunOnce
+
+```go
+func WithRunOnce() JobOption
+```
+
+WithRunOnce causes the job to be automatically removed after its first execution.
 
 #### func WithCapacity
 
@@ -1027,6 +1264,95 @@ func JitterWithLogger(logger Logger, maxJitter time.Duration) JobWrapper
 JitterWithLogger is like Jitter but logs the applied delay.
 Propagates context to context-aware inner jobs.
 
+#### func RetryWithBackoff
+
+```go
+func RetryWithBackoff(logger Logger, maxRetries int, initialDelay, maxDelay time.Duration, multiplier float64) JobWrapper
+```
+
+RetryWithBackoff wraps a job to retry on panic with exponential backoff.
+- `maxRetries`: 0 = no retries, >0 = retry up to N times, -1 = unlimited
+- `initialDelay`: First retry delay
+- `maxDelay`: Maximum delay cap
+- `multiplier`: Delay multiplier per retry (typically 2.0)
+
+Jitter of +/-10% is applied to prevent thundering herd.
+
+**Example:**
+```go
+c := cron.New(cron.WithChain(
+    cron.Recover(logger),
+    cron.RetryWithBackoff(logger, 3, time.Second, time.Minute, 2.0),
+))
+```
+
+#### func RetryOnError
+
+```go
+func RetryOnError(logger Logger, maxRetries int, initialDelay, maxDelay time.Duration, multiplier float64) JobWrapper
+```
+
+RetryOnError wraps an `ErrorJob` to retry on returned errors with exponential backoff.
+Unlike `RetryWithBackoff` which catches panics, this wrapper uses Go-idiomatic error
+returns. Jobs must implement `ErrorJob`; regular `Job` implementations are passed through
+unchanged.
+
+**Example:**
+```go
+c := cron.New(cron.WithChain(
+    cron.Recover(logger),
+    cron.RetryOnError(logger, 3, time.Second, time.Minute, 2.0),
+))
+c.AddJob("@every 5m", cron.FuncErrorJob(func() error {
+    return callAPI()
+}))
+```
+
+#### func CircuitBreaker
+
+```go
+func CircuitBreaker(logger Logger, threshold int, cooldown time.Duration) JobWrapper
+```
+
+CircuitBreaker wraps a job to stop execution after consecutive failures.
+- **Closed**: Normal execution. Failures increment counter.
+- **Open**: Execution skipped for `cooldown` duration after `threshold` failures.
+- **Half-Open**: After cooldown, one execution attempted. Success closes, failure reopens.
+
+**Example:**
+```go
+c := cron.New(cron.WithChain(
+    cron.Recover(logger),
+    cron.CircuitBreaker(logger, 5, 5*time.Minute),
+))
+```
+
+#### func TimeoutWithContext
+
+```go
+func TimeoutWithContext(logger Logger, timeout time.Duration, opts ...TimeoutOption) JobWrapper
+```
+
+TimeoutWithContext wraps a job with a timeout that supports true cancellation.
+Unlike `Timeout`, this passes a context with deadline to `JobWithContext` jobs,
+allowing cooperative cancellation. A 5-second grace period is allowed after
+context cancellation before the goroutine is abandoned.
+
+**Example:**
+```go
+c := cron.New(cron.WithChain(
+    cron.TimeoutWithContext(cron.DefaultLogger, 5*time.Minute),
+))
+c.AddJob("@every 1h", cron.FuncJobWithContext(func(ctx context.Context) {
+    select {
+    case <-ctx.Done():
+        return // Timeout - clean up
+    case <-doWork():
+        // Done
+    }
+}))
+```
+
 ---
 
 ### Job
@@ -1056,6 +1382,207 @@ func (f FuncJob) Run()
 ```
 
 Run calls the wrapped function.
+
+---
+
+### JobWithContext
+
+```go
+type JobWithContext interface {
+    Job
+    RunWithContext(ctx context.Context)
+}
+```
+
+JobWithContext is an optional interface for jobs that support `context.Context`.
+If a job implements this interface, `RunWithContext` is called instead of `Run`,
+allowing the job to receive cancellation signals, respect deadlines, and access
+request-scoped values.
+
+Each entry has its own per-entry context derived from the Cron's base context.
+The context is canceled when the entry is removed or its job is replaced.
+
+---
+
+### FuncJobWithContext
+
+```go
+type FuncJobWithContext func(ctx context.Context)
+```
+
+FuncJobWithContext is a wrapper that turns a `func(context.Context)` into a
+`JobWithContext`. This enables context-aware jobs using simple functions.
+
+#### func (FuncJobWithContext) Run
+
+```go
+func (f FuncJobWithContext) Run()
+```
+
+Run implements Job by calling `RunWithContext(context.Background())`.
+
+#### func (FuncJobWithContext) RunWithContext
+
+```go
+func (f FuncJobWithContext) RunWithContext(ctx context.Context)
+```
+
+RunWithContext implements JobWithContext.
+
+**Example:**
+```go
+c.AddJob("@every 1m", cron.FuncJobWithContext(func(ctx context.Context) {
+    select {
+    case <-ctx.Done():
+        return // Entry removed or Stop() called
+    default:
+        doWork()
+    }
+}))
+```
+
+---
+
+### ErrorJob
+
+```go
+type ErrorJob interface {
+    Job
+    RunE() error
+}
+```
+
+ErrorJob is an optional interface for jobs that return errors instead of panicking.
+Used by `RetryOnError` for Go-idiomatic error-based retry.
+
+---
+
+### FuncErrorJob
+
+```go
+type FuncErrorJob func() error
+```
+
+FuncErrorJob is a wrapper that turns a `func() error` into an `ErrorJob`.
+
+#### func (FuncErrorJob) Run
+
+```go
+func (f FuncErrorJob) Run()
+```
+
+Run implements Job by calling `RunE()` and panicking on error.
+
+#### func (FuncErrorJob) RunE
+
+```go
+func (f FuncErrorJob) RunE() error
+```
+
+RunE implements ErrorJob.
+
+**Example:**
+```go
+c.AddJob("@every 5m", cron.FuncErrorJob(func() error {
+    return callExternalAPI()
+}))
+```
+
+---
+
+### NamedJob
+
+```go
+type NamedJob interface {
+    Job
+    Name() string
+}
+```
+
+NamedJob is an optional interface for jobs that provide a name for observability.
+If implemented, the name is passed to `ObservabilityHooks` callbacks.
+
+---
+
+### ObservabilityHooks
+
+```go
+type ObservabilityHooks struct {
+    OnJobStart    func(entryID EntryID, name string, scheduledTime time.Time)
+    OnJobComplete func(entryID EntryID, name string, duration time.Duration, recovered any)
+    OnSchedule    func(entryID EntryID, name string, nextRun time.Time)
+}
+```
+
+ObservabilityHooks provides callbacks for monitoring cron operations.
+All callbacks are optional. Hooks are called asynchronously in separate goroutines
+to prevent slow callbacks from blocking the scheduler.
+
+**Example with Prometheus:**
+```go
+hooks := cron.ObservabilityHooks{
+    OnJobStart: func(id cron.EntryID, name string, scheduled time.Time) {
+        jobsStarted.WithLabelValues(name).Inc()
+    },
+    OnJobComplete: func(id cron.EntryID, name string, dur time.Duration, recovered any) {
+        jobDuration.WithLabelValues(name).Observe(dur.Seconds())
+        if recovered != nil {
+            jobPanics.WithLabelValues(name).Inc()
+        }
+    },
+}
+c := cron.New(cron.WithObservability(hooks))
+```
+
+---
+
+### SpecAnalysis
+
+```go
+type SpecAnalysis struct {
+    Valid        bool
+    Error        error
+    NextRun      time.Time
+    Location     *time.Location
+    Fields       map[string]string
+    IsDescriptor bool
+    Interval     time.Duration
+    Schedule     Schedule
+    Warnings     []string
+}
+```
+
+SpecAnalysis contains detailed information about a parsed cron specification.
+Returned by `AnalyzeSpec`.
+
+---
+
+### ValidationError
+
+```go
+type ValidationError struct {
+    Message string
+    Field   string
+    Value   string
+}
+```
+
+ValidationError represents a cron expression validation error with optional
+field and value context.
+
+---
+
+### PanicError
+
+```go
+type PanicError struct {
+    Value any
+    Stack []byte
+}
+```
+
+PanicError wraps a panic value with the stack trace at the point of panic.
+Implements `error` and `Unwrap()`. Used by `RetryWithBackoff` and `safeExecute`.
 
 ---
 
@@ -1244,6 +1771,87 @@ if err != nil {
 next := schedule.Next(time.Now())
 ```
 
+### Every
+
+```go
+func Every(duration time.Duration) ConstantDelaySchedule
+```
+
+Every returns a crontab Schedule that activates once every duration.
+Delays of less than 1 second are rounded up to 1 second.
+
+### ValidateSpec
+
+```go
+func ValidateSpec(spec string, options ...ParseOption) error
+```
+
+ValidateSpec validates a cron expression without scheduling a job.
+Returns nil if valid. Uses the standard parser by default; pass `ParseOption`
+flags to customize validation (e.g., to require a seconds field).
+
+**Example:**
+```go
+if err := cron.ValidateSpec("0 9 * * MON-FRI"); err != nil {
+    return fmt.Errorf("invalid: %w", err)
+}
+```
+
+### ValidateSpecWith
+
+```go
+func ValidateSpecWith(spec string, parser ScheduleParser) error
+```
+
+ValidateSpecWith validates a cron expression using any `ScheduleParser` implementation.
+Useful with custom parsers or pre-configured `Parser` instances.
+
+### ValidateSpecs
+
+```go
+func ValidateSpecs(specs []string, options ...ParseOption) map[int]error
+```
+
+ValidateSpecs validates multiple cron expressions at once.
+Returns a map of index to error for any invalid specs.
+
+**Example:**
+```go
+specs := []string{"* * * * *", "invalid", "0 9 * * MON-FRI"}
+errs := cron.ValidateSpecs(specs)
+for idx, err := range errs {
+    log.Printf("Spec %d invalid: %v", idx, err)
+}
+```
+
+### AnalyzeSpec
+
+```go
+func AnalyzeSpec(spec string, options ...ParseOption) SpecAnalysis
+```
+
+AnalyzeSpec provides detailed analysis of a cron expression including validation
+status, next run time, parsed fields, timezone, and warnings.
+
+**Example:**
+```go
+result := cron.AnalyzeSpec("0 9 * * MON-FRI")
+if result.Valid {
+    fmt.Println("Next run:", result.NextRun)
+    fmt.Println("Fields:", result.Fields)
+    fmt.Println("Warnings:", result.Warnings)
+}
+```
+
+### AnalyzeSpecWithHash
+
+```go
+func AnalyzeSpecWithHash(spec string, options ParseOption, hashSeed string) SpecAnalysis
+```
+
+AnalyzeSpecWithHash analyzes a cron expression containing H hash expressions.
+The seed (e.g., job name) produces deterministic, distributed scheduling times.
+
 ---
 
 ## Constants
@@ -1266,7 +1874,8 @@ MaxSpecLength is the maximum allowed length for a cron spec string.
 var ErrEntryNotFound = errors.New("cron: entry not found")
 ```
 
-`ErrEntryNotFound` is returned by `UpdateSchedule`, `UpdateScheduleByName`, `UpdateJob`, `UpdateJobByName`, `UpdateEntry`, `UpdateEntryByName`, `UpdateEntryJob`, and `UpdateEntryJobByName` when the requested entry is not found.
+Returned by update methods (`UpdateSchedule`, `UpdateEntry`, `UpsertJob`, etc.)
+when the specified entry does not exist.
 
 ### ErrNilJob
 
@@ -1274,7 +1883,8 @@ var ErrEntryNotFound = errors.New("cron: entry not found")
 var ErrNilJob = errors.New("cron: job must not be nil; use UpdateSchedule to update only the schedule")
 ```
 
-`ErrNilJob` is returned by `UpdateEntry`, `UpdateEntryByName`, `UpdateEntryJob`, and `UpdateEntryJobByName` when a nil job is passed. Use `UpdateSchedule` or `UpdateScheduleByName` to update only the schedule.
+Returned by `UpdateEntry`, `UpdateEntryByName`, `UpdateEntryJob`, and
+`UpdateEntryJobByName` when a nil job is passed.
 
 ### ErrNameRequired
 
@@ -1282,8 +1892,33 @@ var ErrNilJob = errors.New("cron: job must not be nil; use UpdateSchedule to upd
 var ErrNameRequired = errors.New("cron: UpsertJob requires WithName option")
 ```
 
-`ErrNameRequired` is returned by `UpsertJob` when no `WithName` option is provided.
+Returned by `UpsertJob` when no `WithName` option is provided.
+
+### ErrMaxEntriesReached
+
+```go
+var ErrMaxEntriesReached = errors.New("cron: max entries limit reached")
+```
+
+Returned by `AddFunc`, `AddJob`, and `ScheduleJob` when the `WithMaxEntries` limit
+has been reached.
+
+### ErrDuplicateName
+
+```go
+var ErrDuplicateName = errors.New("cron: duplicate entry name")
+```
+
+Returned when adding an entry with a name that already exists.
+
+### ErrEmptySpec
+
+```go
+var ErrEmptySpec = &ValidationError{Message: "empty spec string"}
+```
+
+Returned by `AnalyzeSpec` when an empty spec string is provided.
 
 ---
 
-*Generated: 2025-11-28*
+*Generated: 2026-02-12*
