@@ -222,6 +222,59 @@ if err := c.UpdateScheduleByName("daily-report", schedule); err != nil {
 }
 ```
 
+#### func (*Cron) UpdateEntry
+
+```go
+func (c *Cron) UpdateEntry(id EntryID, schedule Schedule, job Job) error
+```
+
+UpdateEntry atomically replaces both the Schedule and the Job of an existing entry.
+The new job is re-wrapped through the configured Chain, so middleware (Recover,
+SkipIfStillRunning, etc.) is applied to the replacement job.
+
+This is useful when rescheduling requires a new closure — for example, a fresh
+`context.WithCancel` per schedule change.
+
+Returns `ErrEntryNotFound` if the entry does not exist.
+Returns `ErrNilJob` if job is nil (use `UpdateSchedule` to update only the schedule).
+
+Concurrency semantics are the same as `UpdateSchedule`.
+
+**Example:**
+```go
+id, _ := c.AddFunc("0 9 * * *", dailyReport)
+// Replace both schedule and job atomically
+newCtx, cancel := context.WithCancel(context.Background())
+if err := c.UpdateEntry(id, cron.Every(5*time.Second), cron.FuncJob(func() {
+    doWork(newCtx)
+})); err != nil {
+    cancel()
+    log.Println("update failed:", err)
+}
+```
+
+#### func (*Cron) UpdateEntryByName
+
+```go
+func (c *Cron) UpdateEntryByName(name string, schedule Schedule, job Job) error
+```
+
+UpdateEntryByName atomically replaces both the Schedule and the Job of an existing
+entry identified by its Name. Lookup is O(1) via the internal name index.
+Delegates to `UpdateEntry` for the actual update.
+
+Returns `ErrEntryNotFound` if the entry does not exist.
+Returns `ErrNilJob` if job is nil.
+
+**Example:**
+```go
+c.AddFunc("0 9 * * *", dailyReport, cron.WithName("daily-report"))
+// Replace both schedule and job by name
+if err := c.UpdateEntryByName("daily-report", cron.Every(5*time.Second), newJob); err != nil {
+    log.Println("update failed:", err)
+}
+```
+
 #### func (*Cron) Entries
 
 ```go
@@ -1050,7 +1103,15 @@ MaxSpecLength is the maximum allowed length for a cron spec string.
 var ErrEntryNotFound = errors.New("cron: entry not found")
 ```
 
-`ErrEntryNotFound` is returned by `UpdateSchedule`, `UpdateJob`, `UpdateScheduleByName`, and `UpdateJobByName` when the requested entry is not found.
+`ErrEntryNotFound` is returned by `UpdateSchedule`, `UpdateScheduleByName`, `UpdateJob`, `UpdateJobByName`, `UpdateEntry`, and `UpdateEntryByName` when the requested entry is not found.
+
+### ErrNilJob
+
+```go
+var ErrNilJob = errors.New("cron: job must not be nil; use UpdateSchedule to update only the schedule")
+```
+
+`ErrNilJob` is returned by `UpdateEntry` and `UpdateEntryByName` when a nil job is passed. Use `UpdateSchedule` or `UpdateScheduleByName` to update only the schedule.
 
 ---
 

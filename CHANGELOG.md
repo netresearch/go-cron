@@ -10,6 +10,15 @@ features, bug fixes, and modernization improvements.
 
 ## [Unreleased]
 
+### Added
+- **`UpdateEntry`/`UpdateEntryByName`** ([#313], [PR#314]): Atomically replace both
+  schedule and job function of an existing entry. The new job is re-wrapped through
+  the configured Chain. Useful when rescheduling requires a new closure (e.g.,
+  `context.WithCancel` per schedule change). Returns `ErrNilJob` if job is nil.
+
+[#313]: https://github.com/netresearch/go-cron/issues/313
+[PR#314]: https://github.com/netresearch/go-cron/pull/314
+
 ### Planned for v2
 - Context-aware Job interface with graceful shutdown support
 
