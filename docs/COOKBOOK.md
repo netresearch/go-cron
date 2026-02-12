@@ -597,7 +597,14 @@ func (s *Scheduler) Stop() {
 // AddJob adds a new job or replaces an existing one with the given name.
 // UpsertJob handles the create-or-update logic atomically, preserving EntryID
 // on updates and handling TOCTOU races internally.
+//
+// WaitForJobByName ensures the currently-running invocation finishes before
+// replacement, preventing overlapping executions during schedule changes.
 func (s *Scheduler) AddJob(name, spec string, fn func()) error {
+    // Wait for any in-flight execution to complete before replacing.
+    // Called outside the lock to avoid blocking other callers.
+    s.cron.WaitForJobByName(name)
+
     s.mu.Lock()
     defer s.mu.Unlock()
 

@@ -37,9 +37,15 @@ features, bug fixes, and modernization improvements.
   the name exists, its schedule and job are atomically updated; otherwise a new
   entry is created. Handles TOCTOU races via retry. Returns `ErrNameRequired` if
   no name is provided.
+- **`WaitForJob`/`WaitForJobByName`** ([#317]): Block until all currently-running
+  invocations of an entry complete. Returns immediately if the entry is not running
+  or does not exist. Enables graceful job replacement without manual WaitGroup
+  tracking: `cr.WaitForJobByName("job"); cr.UpsertJob(...)`. Per-entry tracking
+  uses a `*sync.WaitGroup` on each entry, wired into `startJob`.
 
 [#313]: https://github.com/netresearch/go-cron/issues/313
 [PR#314]: https://github.com/netresearch/go-cron/pull/314
+[#317]: https://github.com/netresearch/go-cron/issues/317
 
 ### Planned for v2
 - Context-aware Job interface with graceful shutdown support

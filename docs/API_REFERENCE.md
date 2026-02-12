@@ -347,6 +347,39 @@ if err := c.UpdateEntryJobByName(name, spec, job); errors.Is(err, cron.ErrEntryN
 id, err := c.UpsertJob(spec, job, cron.WithName(name))
 ```
 
+#### func (*Cron) WaitForJob
+
+```go
+func (c *Cron) WaitForJob(id EntryID)
+```
+
+WaitForJob blocks until all currently-running invocations of the given entry
+complete. Returns immediately if the entry is not currently running or does not
+exist.
+
+This enables graceful job replacement — wait for the current execution to finish
+before replacing the job:
+
+```go
+cr.WaitForJob(id)
+cr.UpsertJob(newSpec, newJob, cron.WithName("my-job"))
+```
+
+#### func (*Cron) WaitForJobByName
+
+```go
+func (c *Cron) WaitForJobByName(name string)
+```
+
+WaitForJobByName is the named variant of WaitForJob. Blocks until all
+currently-running invocations of the named entry complete. Returns immediately
+if the entry is not currently running or no entry has the given name.
+
+```go
+cr.WaitForJobByName("my-job")
+cr.UpsertJob(newSpec, newJob, cron.WithName("my-job"))
+```
+
 #### func (*Cron) Entries
 
 ```go

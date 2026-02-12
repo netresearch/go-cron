@@ -4442,3 +4442,207 @@ func TestUpsertJobMaxEntriesExceeded(t *testing.T) {
 		t.Errorf("UpsertJob should return ErrMaxEntriesReached, got: %v", err)
 	}
 }
+
+// TestWaitForJobBlocksUntilComplete verifies that WaitForJob blocks until a
+// running job finishes.
+func TestWaitForJobBlocksUntilComplete(t *testing.T) {
+	c := New()
+	c.Start()
+	defer c.Stop()
+
+	jobStarted := make(chan struct{})
+	jobRelease := make(chan struct{})
+	jobDone := make(chan struct{})
+	var startOnce, doneOnce sync.Once
+
+	id, _ := c.AddFunc("@every 1s", func() {
+		startOnce.Do(func() { close(jobStarted) })
+		<-jobRelease
+		doneOnce.Do(func() { close(jobDone) })
+	}, WithName("slow-job"), WithRunImmediately())
+
+	// Wait for the job to start running
+	select {
+	case <-jobStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("job did not start")
+	}
+
+	// WaitForJob should block because the job is still running
+	waitDone := make(chan struct{})
+	go func() {
+		c.WaitForJob(id)
+		close(waitDone)
+	}()
+
+	// Verify WaitForJob hasn't returned yet
+	select {
+	case <-waitDone:
+		t.Fatal("WaitForJob returned before job completed")
+	case <-time.After(50 * time.Millisecond):
+		// Expected: still blocking
+	}
+
+	// Release the job
+	close(jobRelease)
+
+	// WaitForJob should now return
+	select {
+	case <-waitDone:
+		// Expected
+	case <-time.After(2 * time.Second):
+		t.Fatal("WaitForJob did not return after job completed")
+	}
+
+	<-jobDone
+}
+
+// TestWaitForJobByNameBlocksUntilComplete verifies the named variant.
+func TestWaitForJobByNameBlocksUntilComplete(t *testing.T) {
+	c := New()
+	c.Start()
+	defer c.Stop()
+
+	jobStarted := make(chan struct{})
+	jobRelease := make(chan struct{})
+
+	var startOnce sync.Once
+	c.AddFunc("@every 1s", func() {
+		startOnce.Do(func() { close(jobStarted) })
+		<-jobRelease
+	}, WithName("named-slow-job"), WithRunImmediately())
+
+	select {
+	case <-jobStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("job did not start")
+	}
+
+	waitDone := make(chan struct{})
+	go func() {
+		c.WaitForJobByName("named-slow-job")
+		close(waitDone)
+	}()
+
+	// Still blocking
+	select {
+	case <-waitDone:
+		t.Fatal("WaitForJobByName returned before job completed")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(jobRelease)
+
+	select {
+	case <-waitDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("WaitForJobByName did not return after job completed")
+	}
+}
+
+// TestWaitForJobReturnsImmediatelyWhenNotRunning verifies that WaitForJob
+// returns immediately when the job is not currently executing.
+func TestWaitForJobReturnsImmediatelyWhenNotRunning(t *testing.T) {
+	c := New()
+
+	id, _ := c.AddFunc("@every 1h", func() {}, WithName("idle-job"))
+
+	// Job has never run — WaitForJob should return immediately
+	done := make(chan struct{})
+	go func() {
+		c.WaitForJob(id)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Expected: returns immediately
+	case <-time.After(1 * time.Second):
+		t.Fatal("WaitForJob blocked on non-running job")
+	}
+}
+
+// TestWaitForJobNonExistentEntry verifies WaitForJob returns immediately
+// for an entry that doesn't exist.
+func TestWaitForJobNonExistentEntry(t *testing.T) {
+	c := New()
+
+	done := make(chan struct{})
+	go func() {
+		c.WaitForJob(EntryID(999))
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(1 * time.Second):
+		t.Fatal("WaitForJob blocked on non-existent entry")
+	}
+}
+
+// TestWaitForJobByNameNonExistent verifies WaitForJobByName returns
+// immediately for a name that doesn't exist.
+func TestWaitForJobByNameNonExistent(t *testing.T) {
+	c := New()
+
+	done := make(chan struct{})
+	go func() {
+		c.WaitForJobByName("no-such-job")
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(1 * time.Second):
+		t.Fatal("WaitForJobByName blocked on non-existent name")
+	}
+}
+
+// TestWaitForJobThenUpsert demonstrates the graceful replacement pattern:
+// wait for current execution to finish, then replace the job.
+func TestWaitForJobThenUpsert(t *testing.T) {
+	c := New()
+	c.Start()
+	defer c.Stop()
+
+	jobStarted := make(chan struct{})
+	jobRelease := make(chan struct{})
+	firstRan := make(chan struct{})
+
+	var startOnce, ranOnce sync.Once
+	c.AddFunc("@every 1s", func() {
+		startOnce.Do(func() { close(jobStarted) })
+		<-jobRelease
+		ranOnce.Do(func() { close(firstRan) })
+	}, WithName("replaceable"), WithRunImmediately())
+
+	select {
+	case <-jobStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first job did not start")
+	}
+
+	// Release the job so it completes
+	close(jobRelease)
+
+	// Wait for it to finish
+	c.WaitForJobByName("replaceable")
+	<-firstRan
+
+	// Now replace with a new job via UpsertJob
+	secondRan := make(chan struct{})
+	var secondOnce sync.Once
+	_, err := c.UpsertJob("@every 1s", FuncJob(func() {
+		secondOnce.Do(func() { close(secondRan) })
+	}), WithName("replaceable"), WithRunImmediately())
+	if err != nil {
+		t.Fatalf("UpsertJob failed: %v", err)
+	}
+
+	select {
+	case <-secondRan:
+		// New job ran successfully after graceful replacement
+	case <-time.After(2 * time.Second):
+		t.Fatal("replacement job did not run")
+	}
+}
