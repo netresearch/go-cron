@@ -1347,7 +1347,7 @@ c.AddJob("@every 1h", cron.FuncJobWithContext(func(ctx context.Context) {
     select {
     case <-ctx.Done():
         return // Timeout - clean up
-    case <-doWork():
+    case <-time.After(1 * time.Minute):
         // Done
     }
 }))
@@ -1432,11 +1432,12 @@ RunWithContext implements JobWithContext.
 **Example:**
 ```go
 c.AddJob("@every 1m", cron.FuncJobWithContext(func(ctx context.Context) {
-    select {
-    case <-ctx.Done():
-        return // Entry removed or Stop() called
-    default:
-        doWork()
+    for i := 0; i < 6; i++ {
+        if ctx.Err() != nil {
+            return // Entry removed or Stop() called
+        }
+        // Do a chunk of work...
+        time.Sleep(5 * time.Second)
     }
 }))
 ```

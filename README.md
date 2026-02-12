@@ -262,7 +262,7 @@ c.AddJob("@every 1m", cron.FuncJobWithContext(func(ctx context.Context) {
     select {
     case <-ctx.Done():
         return // Entry removed or job replaced
-    case <-doWork():
+    case <-time.After(10 * time.Second):
         // Work completed
     }
 }))
