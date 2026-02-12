@@ -3327,8 +3327,8 @@ func TestUpdateEntry(t *testing.T) {
 	clock.BlockUntil(1)
 	clock.Advance(time.Second)
 	time.Sleep(10 * time.Millisecond)
-	if atomic.LoadInt32(&runsA) != 1 {
-		t.Fatalf("expected 1 run of job A before update, got %d", runsA)
+	if got := atomic.LoadInt32(&runsA); got != 1 {
+		t.Fatalf("expected 1 run of job A before update, got %d", got)
 	}
 
 	// Replace with job B on a 5-second schedule.
@@ -3340,21 +3340,21 @@ func TestUpdateEntry(t *testing.T) {
 	// Advance 4s — new schedule should NOT fire yet.
 	clock.Advance(4 * time.Second)
 	time.Sleep(10 * time.Millisecond)
-	if atomic.LoadInt32(&runsB) != 0 {
-		t.Errorf("expected 0 runs of job B after 4s, got %d", runsB)
+	if got := atomic.LoadInt32(&runsB); got != 0 {
+		t.Errorf("expected 0 runs of job B after 4s, got %d", got)
 	}
 
 	// Advance 1 more second (total 5s) — new job B should fire.
 	clock.BlockUntil(1)
 	clock.Advance(1 * time.Second)
 	time.Sleep(10 * time.Millisecond)
-	if atomic.LoadInt32(&runsB) != 1 {
-		t.Errorf("expected 1 run of job B after 5s, got %d", runsB)
+	if got := atomic.LoadInt32(&runsB); got != 1 {
+		t.Errorf("expected 1 run of job B after 5s, got %d", got)
 	}
 
 	// Old job A should NOT have run again.
-	if atomic.LoadInt32(&runsA) != 1 {
-		t.Errorf("expected job A still at 1 run, got %d", runsA)
+	if got := atomic.LoadInt32(&runsA); got != 1 {
+		t.Errorf("expected job A still at 1 run, got %d", got)
 	}
 
 	// Verify the entry snapshot exposes the new Job.
@@ -3380,8 +3380,8 @@ func TestUpdateEntryByName(t *testing.T) {
 	clock.BlockUntil(1)
 	clock.Advance(time.Second)
 	time.Sleep(10 * time.Millisecond)
-	if atomic.LoadInt32(&runsA) != 1 {
-		t.Fatalf("expected 1 run of job A, got %d", runsA)
+	if got := atomic.LoadInt32(&runsA); got != 1 {
+		t.Fatalf("expected 1 run of job A, got %d", got)
 	}
 
 	// Replace by name.
@@ -3391,11 +3391,11 @@ func TestUpdateEntryByName(t *testing.T) {
 	clock.BlockUntil(1)
 	clock.Advance(5 * time.Second)
 	time.Sleep(10 * time.Millisecond)
-	if atomic.LoadInt32(&runsB) != 1 {
-		t.Errorf("expected 1 run of job B, got %d", runsB)
+	if got := atomic.LoadInt32(&runsB); got != 1 {
+		t.Errorf("expected 1 run of job B, got %d", got)
 	}
-	if atomic.LoadInt32(&runsA) != 1 {
-		t.Errorf("expected job A still at 1 run, got %d", runsA)
+	if got := atomic.LoadInt32(&runsA); got != 1 {
+		t.Errorf("expected job A still at 1 run, got %d", got)
 	}
 }
 
@@ -3414,6 +3414,19 @@ func TestUpdateEntryByNameNotFound(t *testing.T) {
 	defer c.Stop()
 	if err := c.UpdateEntryByName("no-such-name", Every(time.Second), FuncJob(func() {})); !errors.Is(err, ErrEntryNotFound) {
 		t.Errorf("expected ErrEntryNotFound, got %v", err)
+	}
+}
+
+// TestUpdateEntryNilJob verifies UpdateEntry rejects a nil job.
+func TestUpdateEntryNilJob(t *testing.T) {
+	c := New()
+	defer c.Stop()
+	id, err := c.AddFunc("@every 1s", func() {})
+	if err != nil {
+		t.Fatalf("add failed: %v", err)
+	}
+	if err := c.UpdateEntry(id, Every(time.Second), nil); !errors.Is(err, ErrNilJob) {
+		t.Errorf("expected ErrNilJob, got %v", err)
 	}
 }
 
