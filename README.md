@@ -13,18 +13,22 @@
 
 # go-cron
 
-A maintained fork of [robfig/cron](https://github.com/robfig/cron) — the most popular cron library for Go — with critical bug fixes, DST handling improvements, and modern toolchain support.
+A maintained fork of [robfig/cron](https://github.com/robfig/cron) — the most popular cron library for Go — with bug fixes, runtime schedule updates, per-entry context, resilience middleware, and modern toolchain support.
 
 ## Why?
 
-The original `robfig/cron` has been unmaintained since 2020, accumulating 50+ open PRs and several critical panic bugs that affect production systems. Rather than waiting indefinitely, this fork provides:
+The original `robfig/cron` has been unmaintained since 2020, accumulating 50+ open PRs and several critical panic bugs that affect production systems. This fork fixes those issues and adds features demanded by real-world dependents like [weaviate](https://github.com/weaviate/weaviate):
 
-| Issue | Original | This Fork |
-|-------|----------|-----------|
-| TZ= parsing panics | Crashes on malformed input | Fixed (#554, #555) |
+| Area | Original | This Fork |
+|------|----------|-----------|
+| TZ= parsing | Panics on malformed input | Fixed (#554, #555) |
 | Chain decorators | `Entry.Run()` bypasses chains | Properly invokes wrappers (#551) |
 | DST spring-forward | Jobs silently skipped | Runs immediately (ISC behavior, #541) |
 | DOM/DOW logic | OR (confusing) | AND (logical, consistent) |
+| Runtime updates | Remove + re-add | `UpdateSchedule`, `UpsertJob` |
+| Context support | None | Per-entry context, `FuncJobWithContext` |
+| Resilience | None | Retry, circuit breaker, timeout |
+| Observability | None | Hooks for metrics (Prometheus, etc.) |
 | Go version | Stuck on 1.13 | Go 1.25+ with modern toolchain |
 
 ## Installation
@@ -207,6 +211,65 @@ This library implements ISC cron-compatible DST behavior:
 
 See [docs/DST_HANDLING.md](docs/DST_HANDLING.md) for comprehensive DST documentation including examples, testing strategies, and edge cases.
 
+## Named Jobs and Lookup
+
+Assign names and tags to entries for lookup, update, and removal:
+
+```go
+c.AddFunc("0 9 * * *", dailyReport,
+    cron.WithName("daily-report"),
+    cron.WithTags("reports", "daily"),
+)
+
+// Lookup by name (O(1))
+entry := c.EntryByName("daily-report")
+
+// Filter by tag
+entries := c.EntriesByTag("reports")
+
+// Remove by name
+c.RemoveByName("daily-report")
+```
+
+## Runtime Updates
+
+Update schedules and jobs without remove+re-add:
+
+```go
+// Update schedule only (preserves job and context)
+c.UpdateScheduleByName("daily-report", cron.Every(5*time.Minute))
+
+// Update both schedule and job atomically (cancels old context)
+c.UpdateEntryJobByName("daily-report", "30 10 * * *", newJob)
+
+// Create-or-update in one call
+id, err := c.UpsertJob("0 9 * * *", myJob, cron.WithName("my-job"))
+```
+
+For graceful replacement of long-running jobs:
+
+```go
+c.WaitForJobByName("my-job")  // Block until current execution finishes
+c.UpsertJob(newSpec, newJob, cron.WithName("my-job"))
+```
+
+## Context Support
+
+Jobs implementing `JobWithContext` receive a per-entry context that is automatically canceled on removal or job replacement:
+
+```go
+c.AddJob("@every 1m", cron.FuncJobWithContext(func(ctx context.Context) {
+    select {
+    case <-ctx.Done():
+        return // Entry removed or job replaced
+    case <-time.After(10 * time.Second):
+        // Work completed
+    }
+}))
+```
+
+All chain wrappers propagate context through the wrapper chain, so per-entry context reaches the innermost job.
+
 ## Job Wrappers (Middleware)
 
 Add cross-cutting behavior using chains:
@@ -225,19 +288,104 @@ job := cron.NewChain(
 ```
 
 Available wrappers:
-- **Recover** — Catch panics, log, and continue
-- **SkipIfStillRunning** — Skip execution if previous run hasn't finished
-- **DelayIfStillRunning** — Queue execution until previous run finishes
+
+| Wrapper | Description |
+|---------|-------------|
+| `Recover` | Catch panics, log, and continue |
+| `SkipIfStillRunning` | Skip if previous run hasn't finished |
+| `DelayIfStillRunning` | Queue until previous run finishes |
+| `Timeout` | Abandon after duration (goroutine keeps running) |
+| `TimeoutWithContext` | Cancel context after duration (cooperative cancellation) |
+| `Jitter` / `JitterWithLogger` | Random delay to prevent thundering herd |
+| `RetryWithBackoff` | Retry on panic with exponential backoff |
+| `RetryOnError` | Retry on error return (`ErrorJob` interface) |
+| `CircuitBreaker` | Stop execution after consecutive failures |
+
+Concurrency and resilience wrappers (`Recover`, `SkipIfStillRunning`, `DelayIfStillRunning`, `Timeout`, `TimeoutWithContext`, `Jitter`, `JitterWithLogger`) implement `JobWithContext` and propagate the incoming context to inner jobs. Retry and circuit breaker wrappers (`RetryWithBackoff`, `RetryOnError`, `CircuitBreaker`) do not currently forward context.
+
+## Validation
+
+Validate cron expressions before scheduling:
+
+```go
+// Package-level validation (no Cron instance needed)
+if err := cron.ValidateSpec("0 9 * * MON-FRI"); err != nil {
+    log.Fatal(err)
+}
+
+// Instance-level validation (uses configured parser)
+c := cron.New(cron.WithSeconds())
+if err := c.ValidateSpec("0 30 * * * *"); err != nil {
+    log.Fatal(err)
+}
+
+// Detailed analysis
+result := cron.AnalyzeSpec("0 9 * * MON-FRI")
+fmt.Println("Next run:", result.NextRun)
+fmt.Println("Fields:", result.Fields)
+```
+
+## Observability
+
+Monitor cron operations with hooks:
+
+```go
+c := cron.New(cron.WithObservability(cron.ObservabilityHooks{
+    OnJobStart: func(id cron.EntryID, name string, scheduled time.Time) {
+        jobsStarted.WithLabelValues(name).Inc()
+    },
+    OnJobComplete: func(id cron.EntryID, name string, dur time.Duration, recovered any) {
+        jobDuration.WithLabelValues(name).Observe(dur.Seconds())
+    },
+}))
+```
+
+Query job status at runtime:
+
+```go
+if c.IsJobRunningByName("my-job") {
+    fmt.Println("Job is currently running")
+}
+```
+
+## Testing with FakeClock
+
+Deterministic testing without real time waits:
+
+```go
+fakeClock := cron.NewFakeClock(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+c := cron.New(cron.WithClock(fakeClock))
+c.AddFunc("0 * * * *", myJob)
+c.Start()
+
+fakeClock.BlockUntil(1)        // Wait for scheduler to register timer
+fakeClock.Advance(time.Hour)   // Trigger the job deterministically
+```
 
 ## Logging
 
-Compatible with [go-logr/logr](https://github.com/go-logr/logr):
+Compatible with [go-logr/logr](https://github.com/go-logr/logr) and `log/slog`:
 
 ```go
-// Verbose logging
+// Printf-style
 c := cron.New(cron.WithLogger(
     cron.VerbosePrintfLogger(log.New(os.Stdout, "cron: ", log.LstdFlags)),
 ))
+
+// slog
+c := cron.New(cron.WithLogger(cron.NewSlogLogger(slog.Default())))
+```
+
+## Graceful Shutdown
+
+```go
+// Block until all jobs finish
+c.StopAndWait()
+
+// With timeout
+if !c.StopWithTimeout(30 * time.Second) {
+    log.Println("Warning: some jobs did not complete within 30s")
+}
 ```
 
 ## Missed Job Catch-Up
@@ -265,9 +413,15 @@ c.AddFunc("0 9 * * *", dailyReport,
 > and store it yourself (database, file, etc.). See [docs/PERSISTENCE_GUIDE.md](docs/PERSISTENCE_GUIDE.md)
 > for complete integration patterns.
 
-## API Reference
+## Documentation
 
-Full documentation: [pkg.go.dev/github.com/netresearch/go-cron](https://pkg.go.dev/github.com/netresearch/go-cron)
+- [API Reference](docs/API_REFERENCE.md) — Complete type and method documentation
+- [Cookbook](docs/COOKBOOK.md) — Recipes for common patterns
+- [Migration Guide](docs/MIGRATION.md) — Migrating from robfig/cron
+- [DST Handling](docs/DST_HANDLING.md) — Daylight Saving Time behavior
+- [Persistence Guide](docs/PERSISTENCE_GUIDE.md) — Storing and restoring job state
+- [Changelog](CHANGELOG.md) — Release history
+- [pkg.go.dev](https://pkg.go.dev/github.com/netresearch/go-cron) — Go reference documentation
 
 ## Contributing
 
