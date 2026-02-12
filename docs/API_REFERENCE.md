@@ -889,9 +889,11 @@ fakeClock.Advance(time.Hour) // Trigger jobs deterministically
 func WithContext(ctx context.Context) Option
 ```
 
-WithContext sets the base context for all job executions. When `Stop()` is called,
-this context is canceled, signaling all running `JobWithContext` jobs to shut down.
-If not specified, `context.Background()` is used.
+WithContext sets the parent context from which the cron scheduler derives its
+own cancelable child context (via `context.WithCancel`) for all job executions.
+`Stop()` cancels only that derived child context, signaling all running
+`JobWithContext` jobs to shut down; the caller-provided context is not canceled
+by `Stop()`. If not specified, `context.Background()` is used as the parent.
 
 **Example:**
 ```go
@@ -1875,8 +1877,8 @@ MaxSpecLength is the maximum allowed length for a cron spec string.
 var ErrEntryNotFound = errors.New("cron: entry not found")
 ```
 
-Returned by update methods (`UpdateSchedule`, `UpdateEntry`, `UpsertJob`, etc.)
-when the specified entry does not exist.
+Returned by update methods (`UpdateSchedule`, `UpdateEntry`, `UpdateEntryByName`,
+`UpdateEntryJob`, `UpdateEntryJobByName`) when the specified entry does not exist.
 
 ### ErrNilJob
 
@@ -1918,7 +1920,8 @@ Returned when adding an entry with a name that already exists.
 var ErrEmptySpec = &ValidationError{Message: "empty spec string"}
 ```
 
-Returned by `AnalyzeSpec` when an empty spec string is provided.
+Set as the `Error` field on the `SpecAnalysis` result returned by `AnalyzeSpec`
+and `AnalyzeSpecWithHash` when an empty spec string is provided.
 
 ---
 

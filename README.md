@@ -301,7 +301,7 @@ Available wrappers:
 | `RetryOnError` | Retry on error return (`ErrorJob` interface) |
 | `CircuitBreaker` | Stop execution after consecutive failures |
 
-All wrappers implement `JobWithContext` and propagate the incoming context to inner jobs.
+Concurrency and resilience wrappers (`Recover`, `SkipIfStillRunning`, `DelayIfStillRunning`, `Timeout`, `TimeoutWithContext`, `Jitter`, `JitterWithLogger`) implement `JobWithContext` and propagate the incoming context to inner jobs. Retry and circuit breaker wrappers (`RetryWithBackoff`, `RetryOnError`, `CircuitBreaker`) do not currently forward context.
 
 ## Validation
 
