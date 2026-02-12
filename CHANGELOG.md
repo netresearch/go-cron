@@ -41,7 +41,10 @@ features, bug fixes, and modernization improvements.
   invocations of an entry complete. Returns immediately if the entry is not running
   or does not exist. Enables graceful job replacement without manual WaitGroup
   tracking: `cr.WaitForJobByName("job"); cr.UpsertJob(...)`. Per-entry tracking
-  uses a `*sync.WaitGroup` on each entry, wired into `startJob`.
+  uses a mutex-protected counter on each entry, wired into `startJob`.
+- **`IsJobRunning`/`IsJobRunningByName`**: Non-blocking query to check whether an
+  entry has any invocations currently in flight. Useful for monitoring dashboards
+  and conditional logic (e.g., skip waiting if not running).
 
 [#313]: https://github.com/netresearch/go-cron/issues/313
 [PR#314]: https://github.com/netresearch/go-cron/pull/314

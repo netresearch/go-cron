@@ -380,6 +380,31 @@ cr.WaitForJobByName("my-job")
 cr.UpsertJob(newSpec, newJob, cron.WithName("my-job"))
 ```
 
+#### func (*Cron) IsJobRunning
+
+```go
+func (c *Cron) IsJobRunning(id EntryID) bool
+```
+
+IsJobRunning reports whether the entry with the given ID has any invocations
+currently in flight. Returns false for non-existent entries.
+
+#### func (*Cron) IsJobRunningByName
+
+```go
+func (c *Cron) IsJobRunningByName(name string) bool
+```
+
+IsJobRunningByName reports whether the named entry has any invocations currently
+in flight. Returns false if no entry has the given name.
+
+```go
+if cr.IsJobRunningByName("my-job") {
+    cr.WaitForJobByName("my-job")
+}
+cr.UpsertJob(newSpec, newJob, cron.WithName("my-job"))
+```
+
 #### func (*Cron) Entries
 
 ```go

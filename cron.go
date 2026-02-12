@@ -328,6 +328,12 @@ func (t *jobTracker) finish() {
 	t.mu.Unlock()
 }
 
+func (t *jobTracker) isRunning() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.n > 0
+}
+
 func (t *jobTracker) wait() {
 	t.mu.Lock()
 	ch := t.done // nil if idle
@@ -1599,4 +1605,24 @@ func (c *Cron) WaitForJobByName(name string) {
 		return
 	}
 	e.running.wait()
+}
+
+// IsJobRunning reports whether the entry with the given ID has any
+// invocations currently in flight. Returns false if the entry does not exist.
+func (c *Cron) IsJobRunning(id EntryID) bool {
+	e := c.Entry(id)
+	if !e.Valid() || e.running == nil {
+		return false
+	}
+	return e.running.isRunning()
+}
+
+// IsJobRunningByName reports whether the named entry has any invocations
+// currently in flight. Returns false if no entry has the given name.
+func (c *Cron) IsJobRunningByName(name string) bool {
+	e := c.EntryByName(name)
+	if !e.Valid() || e.running == nil {
+		return false
+	}
+	return e.running.isRunning()
 }
