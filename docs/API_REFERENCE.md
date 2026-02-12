@@ -232,8 +232,10 @@ UpdateEntry atomically replaces both the Schedule and the Job of an existing ent
 The new job is re-wrapped through the configured Chain, so middleware (Recover,
 SkipIfStillRunning, etc.) is applied to the replacement job.
 
-This is useful when rescheduling requires a new closure — for example, a fresh
-`context.WithCancel` per schedule change.
+When the job is replaced, the old entry's per-entry context is canceled (signaling
+any running `JobWithContext` to stop), and a fresh context is created for the new job.
+This eliminates the need for callers to manage their own `context.WithCancel` per
+reschedule.
 
 Returns `ErrEntryNotFound` if the entry does not exist.
 Returns `ErrNilJob` if job is nil (use `UpdateSchedule` to update only the schedule).
@@ -244,11 +246,10 @@ Concurrency semantics are the same as `UpdateSchedule`.
 ```go
 id, _ := c.AddFunc("0 9 * * *", dailyReport)
 // Replace both schedule and job atomically
-newCtx, cancel := context.WithCancel(context.Background())
+// The old job's context is automatically canceled.
 if err := c.UpdateEntry(id, cron.Every(5*time.Second), cron.FuncJob(func() {
-    doWork(newCtx)
+    doWork()
 })); err != nil {
-    cancel()
     log.Println("update failed:", err)
 }
 ```
@@ -271,6 +272,52 @@ Returns `ErrNilJob` if job is nil.
 c.AddFunc("0 9 * * *", dailyReport, cron.WithName("daily-report"))
 // Replace both schedule and job by name
 if err := c.UpdateEntryByName("daily-report", cron.Every(5*time.Second), newJob); err != nil {
+    log.Println("update failed:", err)
+}
+```
+
+#### func (*Cron) UpdateEntryJob
+
+```go
+func (c *Cron) UpdateEntryJob(id EntryID, spec string, job Job) error
+```
+
+UpdateEntryJob parses spec with the Cron's configured parser, then atomically
+replaces both schedule and job. This eliminates the need for callers to construct
+their own parser matching the Cron's configuration.
+
+Returns a parse error if spec is invalid for the configured parser.
+Returns `ErrEntryNotFound` if the entry does not exist.
+Returns `ErrNilJob` if job is nil.
+
+**Example:**
+```go
+id, _ := c.AddFunc("0 9 * * *", dailyReport)
+// Update both schedule and job using a spec string
+if err := c.UpdateEntryJob(id, "@every 5m", newJob); err != nil {
+    log.Println("update failed:", err)
+}
+```
+
+#### func (*Cron) UpdateEntryJobByName
+
+```go
+func (c *Cron) UpdateEntryJobByName(name, spec string, job Job) error
+```
+
+UpdateEntryJobByName is the name-based variant of `UpdateEntryJob`.
+Parses spec with the Cron's configured parser, then atomically replaces both
+schedule and job of the entry identified by name.
+
+Returns a parse error if spec is invalid for the configured parser.
+Returns `ErrEntryNotFound` if the entry does not exist.
+Returns `ErrNilJob` if job is nil.
+
+**Example:**
+```go
+c.AddFunc("0 9 * * *", dailyReport, cron.WithName("daily-report"))
+// Update both schedule and job by name using a spec string
+if err := c.UpdateEntryJobByName("daily-report", "@every 5m", newJob); err != nil {
     log.Println("update failed:", err)
 }
 ```
@@ -357,6 +404,14 @@ type Entry struct {
 ```
 
 Entry consists of a schedule and the func to execute on that schedule.
+
+**Per-entry context:** Each entry has its own `context.Context` derived from the
+Cron's base context. Jobs implementing `JobWithContext` receive this per-entry
+context, enabling fine-grained cancellation:
+- **Remove/RemoveByName**: cancels the removed entry's context
+- **UpdateEntry** (with new job): cancels the old context, creates a fresh one
+- **UpdateSchedule** (schedule-only): does NOT cancel the context
+- **Stop()**: cancels the base context, which cascades to all entry contexts
 
 #### func (Entry) Valid
 
@@ -1103,7 +1158,7 @@ MaxSpecLength is the maximum allowed length for a cron spec string.
 var ErrEntryNotFound = errors.New("cron: entry not found")
 ```
 
-`ErrEntryNotFound` is returned by `UpdateSchedule`, `UpdateScheduleByName`, `UpdateJob`, `UpdateJobByName`, `UpdateEntry`, and `UpdateEntryByName` when the requested entry is not found.
+`ErrEntryNotFound` is returned by `UpdateSchedule`, `UpdateScheduleByName`, `UpdateJob`, `UpdateJobByName`, `UpdateEntry`, `UpdateEntryByName`, `UpdateEntryJob`, and `UpdateEntryJobByName` when the requested entry is not found.
 
 ### ErrNilJob
 
@@ -1111,7 +1166,7 @@ var ErrEntryNotFound = errors.New("cron: entry not found")
 var ErrNilJob = errors.New("cron: job must not be nil; use UpdateSchedule to update only the schedule")
 ```
 
-`ErrNilJob` is returned by `UpdateEntry` and `UpdateEntryByName` when a nil job is passed. Use `UpdateSchedule` or `UpdateScheduleByName` to update only the schedule.
+`ErrNilJob` is returned by `UpdateEntry`, `UpdateEntryByName`, `UpdateEntryJob`, and `UpdateEntryJobByName` when a nil job is passed. Use `UpdateSchedule` or `UpdateScheduleByName` to update only the schedule.
 
 ---
 

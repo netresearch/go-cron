@@ -15,6 +15,16 @@ features, bug fixes, and modernization improvements.
   schedule and job function of an existing entry. The new job is re-wrapped through
   the configured Chain. Useful when rescheduling requires a new closure (e.g.,
   `context.WithCancel` per schedule change). Returns `ErrNilJob` if job is nil.
+- **Per-entry context**: Each entry now has its own `context.Context` derived from the
+  Cron's base context. Jobs implementing `JobWithContext` receive this per-entry context
+  instead of the shared base context. The entry context is automatically canceled when
+  the entry is removed or when its job is replaced via `UpdateEntry`. Schedule-only
+  updates (`UpdateSchedule`) do not cancel the context. `Stop()` cancels the base
+  context, which cascades to all entry contexts.
+- **`UpdateEntryJob`/`UpdateEntryJobByName`**: Convenience methods that parse a spec
+  string with the Cron's configured parser, then atomically replace both schedule and
+  job. Eliminates the need for callers to construct their own parser matching the Cron's
+  configuration.
 
 [#313]: https://github.com/netresearch/go-cron/issues/313
 [PR#314]: https://github.com/netresearch/go-cron/pull/314

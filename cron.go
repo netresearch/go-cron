@@ -20,8 +20,9 @@ var ErrMaxEntriesReached = errors.New("cron: max entries limit reached")
 var ErrDuplicateName = errors.New("cron: duplicate entry name")
 
 // ErrEntryNotFound is returned by UpdateSchedule, UpdateScheduleByName,
-// UpdateJob, UpdateJobByName, UpdateEntry, and UpdateEntryByName when the
-// specified entry does not exist in this Cron instance.
+// UpdateJob, UpdateJobByName, UpdateEntry, UpdateEntryByName,
+// UpdateEntryJob, and UpdateEntryJobByName when the specified entry does
+// not exist in this Cron instance.
 var ErrEntryNotFound = errors.New("cron: entry not found")
 
 // maxIdleDuration is the sleep duration when no entries are scheduled.
@@ -279,6 +280,15 @@ type Entry struct {
 	// should be caught up. If zero, all missed executions (within safety limits)
 	// are eligible for catch-up. Set via WithMissedGracePeriod().
 	MissedGracePeriod time.Duration
+
+	// entryCtx is a per-entry context derived from the Cron's baseCtx.
+	// It is canceled when the entry is removed or when its job is replaced
+	// via UpdateEntry. Jobs implementing JobWithContext receive this context,
+	// allowing per-entry cancellation without stopping the entire scheduler.
+	entryCtx context.Context
+
+	// cancelEntryCtx cancels entryCtx. Called on Remove or job replacement.
+	cancelEntryCtx context.CancelFunc
 }
 
 // Valid returns true if this is not the zero entry.
@@ -682,6 +692,10 @@ func (c *Cron) ScheduleJob(schedule Schedule, cmd Job, opts ...JobOption) (Entry
 		opt(entry)
 	}
 
+	// Create per-entry context derived from the cron's base context.
+	// This allows per-entry cancellation on Remove or job replacement.
+	entry.entryCtx, entry.cancelEntryCtx = context.WithCancel(c.baseCtx)
+
 	// Log info if both DOM and DOW are restricted (AND logic in effect)
 	if spec, ok := schedule.(*SpecSchedule); ok {
 		if spec.Dom&starBit == 0 && spec.Dow&starBit == 0 && !spec.DowOrDom {
@@ -828,12 +842,16 @@ func (c *Cron) processDueEntries(now time.Time) {
 			break
 		}
 		scheduledTime := e.Next
-		c.startJob(e.ID, e.Job, e.WrappedJob, scheduledTime)
+		c.startJob(e.entryCtx, e.ID, e.Job, e.WrappedJob, scheduledTime)
 		e.Prev = e.Next
 
 		if e.runOnce {
 			// Remove run-once entries after dispatching the job.
 			// The job continues running in its own goroutine.
+			// Preserve the entry context so the dispatched job isn't
+			// canceled prematurely — it will be canceled when baseCtx
+			// is canceled (Stop). Explicit Remove() still cancels.
+			e.cancelEntryCtx = nil
 			c.removeEntry(e.ID)
 			c.logger.Info("run-once", "now", now, "entry", e.ID, "removed", true)
 		} else {
@@ -953,9 +971,11 @@ func (c *Cron) run() {
 // startJob runs the given job in a new goroutine with observability hooks.
 // The originalJob is used for name extraction, wrappedJob is the actual job to run.
 //
-// If wrappedJob implements JobWithContext, RunWithContext is called with the cron's
-// base context, allowing the job to receive cancellation signals when Stop() is called.
-func (c *Cron) startJob(entryID EntryID, originalJob, wrappedJob Job, scheduledTime time.Time) {
+// If wrappedJob implements JobWithContext, RunWithContext is called with the entry's
+// per-entry context, allowing the job to receive cancellation signals when the entry
+// is removed, its job is replaced, or Stop() is called (which cancels baseCtx,
+// cascading to all entry contexts).
+func (c *Cron) startJob(entryCtx context.Context, entryID EntryID, originalJob, wrappedJob Job, scheduledTime time.Time) {
 	c.jobWaiter.Add(1)
 	go func() {
 		defer c.jobWaiter.Done()
@@ -970,7 +990,7 @@ func (c *Cron) startJob(entryID EntryID, originalJob, wrappedJob Job, scheduledT
 			}()
 			// Check if the job supports context and call appropriate method
 			if jc, ok := wrappedJob.(JobWithContext); ok {
-				jc.RunWithContext(c.baseCtx)
+				jc.RunWithContext(entryCtx)
 			} else {
 				wrappedJob.Run()
 			}
@@ -1007,6 +1027,13 @@ func (c *Cron) updateSchedule(req *updateScheduleRequest) error {
 
 	entry.Schedule = req.schedule
 	if req.job != nil {
+		// Cancel the old entry context so running jobs for the old closure
+		// receive a cancellation signal, then create a fresh context for
+		// the replacement job.
+		if entry.cancelEntryCtx != nil {
+			entry.cancelEntryCtx()
+		}
+		entry.entryCtx, entry.cancelEntryCtx = context.WithCancel(c.baseCtx)
 		entry.Job = req.job
 		entry.WrappedJob = c.chain.Then(req.job)
 	}
@@ -1130,6 +1157,36 @@ func (c *Cron) UpdateEntryByName(name string, schedule Schedule, job Job) error 
 		return ErrEntryNotFound
 	}
 	return c.UpdateEntry(e.ID, schedule, job)
+}
+
+// UpdateEntryJob parses spec with the Cron's configured parser, then atomically
+// replaces both schedule and job. This eliminates the need for callers to
+// construct their own parser matching the Cron's configuration.
+//
+// Returns a parse error if spec is invalid for the configured parser.
+// Returns ErrEntryNotFound if the id does not correspond to an existing entry.
+// Returns ErrNilJob if job is nil.
+func (c *Cron) UpdateEntryJob(id EntryID, spec string, job Job) error {
+	schedule, err := c.parser.Parse(spec)
+	if err != nil {
+		return err
+	}
+	return c.UpdateEntry(id, schedule, job)
+}
+
+// UpdateEntryJobByName is the name-based variant of UpdateEntryJob.
+// It parses spec with the Cron's configured parser, then atomically replaces
+// both schedule and job of the entry identified by name.
+//
+// Returns a parse error if spec is invalid for the configured parser.
+// Returns ErrEntryNotFound if the name does not correspond to an existing entry.
+// Returns ErrNilJob if job is nil.
+func (c *Cron) UpdateEntryJobByName(name, spec string, job Job) error {
+	schedule, err := c.parser.Parse(spec)
+	if err != nil {
+		return err
+	}
+	return c.UpdateEntryByName(name, schedule, job)
 }
 
 // now returns current time in c location.
@@ -1283,6 +1340,11 @@ func (c *Cron) removeEntry(id EntryID) {
 	entry, ok := c.entryIndex[id]
 	if !ok {
 		return
+	}
+
+	// Cancel the per-entry context to signal running jobs for this entry.
+	if entry.cancelEntryCtx != nil {
+		entry.cancelEntryCtx()
 	}
 
 	c.entries.RemoveAt(entry)
