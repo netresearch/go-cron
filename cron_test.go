@@ -4646,3 +4646,64 @@ func TestWaitForJobThenUpsert(t *testing.T) {
 		t.Fatal("replacement job did not run")
 	}
 }
+
+func TestIsJobRunningWhileExecuting(t *testing.T) {
+	c := New(WithSeconds())
+	c.Start()
+	defer c.Stop()
+
+	jobStarted := make(chan struct{})
+	jobRelease := make(chan struct{})
+
+	var startOnce sync.Once
+	id, _ := c.AddFunc("@every 1s", func() {
+		startOnce.Do(func() { close(jobStarted) })
+		<-jobRelease
+	}, WithName("running-job"), WithRunImmediately())
+
+	<-jobStarted
+
+	// While the job is running, both methods should return true
+	if !c.IsJobRunning(id) {
+		t.Error("IsJobRunning should return true while job is executing")
+	}
+	if !c.IsJobRunningByName("running-job") {
+		t.Error("IsJobRunningByName should return true while job is executing")
+	}
+
+	close(jobRelease)
+	c.WaitForJob(id)
+
+	// After job completes, both should return false
+	if c.IsJobRunning(id) {
+		t.Error("IsJobRunning should return false after job completes")
+	}
+	if c.IsJobRunningByName("running-job") {
+		t.Error("IsJobRunningByName should return false after job completes")
+	}
+}
+
+func TestIsJobRunningWhenIdle(t *testing.T) {
+	c := New(WithSeconds())
+
+	id, _ := c.AddFunc("@every 1h", func() {}, WithName("idle-job"))
+
+	// Never started, should be false
+	if c.IsJobRunning(id) {
+		t.Error("IsJobRunning should return false for idle job")
+	}
+	if c.IsJobRunningByName("idle-job") {
+		t.Error("IsJobRunningByName should return false for idle job")
+	}
+}
+
+func TestIsJobRunningNonExistent(t *testing.T) {
+	c := New()
+
+	if c.IsJobRunning(EntryID(9999)) {
+		t.Error("IsJobRunning should return false for non-existent entry")
+	}
+	if c.IsJobRunningByName("no-such-job") {
+		t.Error("IsJobRunningByName should return false for non-existent entry")
+	}
+}
