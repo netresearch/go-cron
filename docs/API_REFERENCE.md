@@ -244,7 +244,7 @@ Concurrency semantics are the same as `UpdateSchedule`.
 ```go
 id, _ := c.AddFunc("0 9 * * *", dailyReport)
 // Replace both schedule and job atomically
-newCtx, cancel := context.WithCancel(ctx)
+newCtx, cancel := context.WithCancel(context.Background())
 if err := c.UpdateEntry(id, cron.Every(5*time.Second), cron.FuncJob(func() {
     doWork(newCtx)
 })); err != nil {
