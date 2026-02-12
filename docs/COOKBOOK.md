@@ -594,18 +594,29 @@ func (s *Scheduler) Stop() {
     s.cron.Stop()
 }
 
-// AddJob adds or updates a job with the given name
+// AddJob adds a new job or replaces an existing one with the given name.
+// For existing jobs, UpdateEntryByName atomically replaces both schedule and
+// job without changing the EntryID — no Remove+Add race window.
 func (s *Scheduler) AddJob(name, spec string, fn func()) error {
     s.mu.Lock()
     defer s.mu.Unlock()
 
-    // Remove existing job if it exists
-    if existingID, exists := s.jobs[name]; exists {
-        s.cron.Remove(existingID)
+    schedule, err := cron.ParseStandard(spec)
+    if err != nil {
+        return err
+    }
+
+    // Try atomic update first (preserves EntryID)
+    if _, exists := s.jobs[name]; exists {
+        if err := s.cron.UpdateEntryByName(name, schedule, cron.FuncJob(fn)); err == nil {
+            log.Printf("Job %q updated with spec %q", name, spec)
+            return nil
+        }
+        // Fall through to add if entry was removed concurrently
     }
 
     // Add new job
-    id, err := s.cron.AddFunc(spec, fn)
+    id, err := s.cron.AddFunc(spec, fn, cron.WithName(name))
     if err != nil {
         return err
     }
