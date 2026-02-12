@@ -21,9 +21,13 @@ var ErrDuplicateName = errors.New("cron: duplicate entry name")
 
 // ErrEntryNotFound is returned by UpdateSchedule, UpdateScheduleByName,
 // UpdateJob, UpdateJobByName, UpdateEntry, UpdateEntryByName,
-// UpdateEntryJob, and UpdateEntryJobByName when the specified entry does
-// not exist in this Cron instance.
+// UpdateEntryJob, UpdateEntryJobByName, and UpsertJob when the specified
+// entry does not exist in this Cron instance.
 var ErrEntryNotFound = errors.New("cron: entry not found")
+
+// ErrNameRequired is returned by UpsertJob when no WithName option is provided.
+// UpsertJob requires a name to determine whether to create or update.
+var ErrNameRequired = errors.New("cron: UpsertJob requires WithName option")
 
 // maxIdleDuration is the sleep duration when no entries are scheduled.
 // Using a very long duration (~11.4 years) instead of blocking indefinitely
@@ -1187,6 +1191,66 @@ func (c *Cron) UpdateEntryJobByName(name, spec string, job Job) error {
 		return err
 	}
 	return c.UpdateEntryByName(name, schedule, job)
+}
+
+// extractName applies JobOptions to a temporary Entry and returns the Name.
+func extractName(opts []JobOption) string {
+	var e Entry
+	for _, opt := range opts {
+		opt(&e)
+	}
+	return e.Name
+}
+
+// UpsertJob creates or updates a named job entry. If an entry with the given
+// name already exists, its schedule and job are atomically replaced via
+// UpdateEntry. If no entry with that name exists, a new one is created via
+// AddJob. The name is determined from the opts; a WithName option is required.
+//
+// This eliminates the common "try update, fallback to add" boilerplate pattern:
+//
+//	// Before (manual upsert):
+//	if err := c.UpdateEntryJobByName(name, spec, job); errors.Is(err, cron.ErrEntryNotFound) {
+//	    c.AddJob(spec, job, cron.WithName(name))
+//	}
+//
+//	// After:
+//	c.UpsertJob(spec, job, cron.WithName(name))
+//
+// Returns:
+//   - ErrNameRequired if no WithName option is provided
+//   - Parse errors if spec is invalid for the configured parser
+//   - ErrMaxEntriesReached if creating a new entry would exceed the limit
+func (c *Cron) UpsertJob(spec string, cmd Job, opts ...JobOption) (EntryID, error) {
+	name := extractName(opts)
+	if name == "" {
+		return 0, ErrNameRequired
+	}
+
+	schedule, err := c.parser.Parse(spec)
+	if err != nil {
+		return 0, err
+	}
+
+	return c.upsertScheduled(name, schedule, cmd, opts)
+}
+
+// upsertScheduled implements the create-or-update logic for UpsertJob.
+// It first attempts to update an existing entry; on ErrEntryNotFound it
+// falls through to create.
+func (c *Cron) upsertScheduled(name string, schedule Schedule, cmd Job, opts []JobOption) (EntryID, error) {
+	// Try update first (entry exists)
+	e := c.EntryByName(name)
+	if e.Valid() {
+		err := c.UpdateEntry(e.ID, schedule, cmd)
+		if !errors.Is(err, ErrEntryNotFound) {
+			return e.ID, err
+		}
+		// Entry was removed between lookup and update — fall through to add
+	}
+
+	// Entry doesn't exist — create it
+	return c.ScheduleJob(schedule, cmd, opts...)
 }
 
 // now returns current time in c location.
