@@ -322,6 +322,31 @@ if err := c.UpdateEntryJobByName("daily-report", "@every 5m", newJob); err != ni
 }
 ```
 
+#### func (*Cron) UpsertJob
+
+```go
+func (c *Cron) UpsertJob(spec string, cmd Job, opts ...JobOption) (EntryID, error)
+```
+
+UpsertJob creates or updates a named job entry. If an entry with the given
+name already exists, its schedule and job are atomically replaced via
+`UpdateEntry`. If no entry exists, a new one is created via `ScheduleJob`.
+
+A `WithName` option is required. Returns `ErrNameRequired` if no name is provided.
+
+This eliminates the common "try update, fallback to add" boilerplate:
+
+**Example:**
+```go
+// Before (manual upsert):
+if err := c.UpdateEntryJobByName(name, spec, job); errors.Is(err, cron.ErrEntryNotFound) {
+    c.AddJob(spec, job, cron.WithName(name))
+}
+
+// After:
+id, err := c.UpsertJob(spec, job, cron.WithName(name))
+```
+
 #### func (*Cron) Entries
 
 ```go
@@ -878,13 +903,18 @@ type JobWrapper func(Job) Job
 
 JobWrapper is a function that wraps a Job with additional behavior.
 
+All chain wrappers implement `JobWithContext` and propagate the incoming context
+to inner jobs that also implement `JobWithContext`. This means per-entry context
+flows through the entire wrapper chain to context-aware jobs.
+
 #### func Recover
 
 ```go
-func Recover(logger Logger) JobWrapper
+func Recover(logger Logger, opts ...RecoverOption) JobWrapper
 ```
 
 Recover catches panics in jobs, logs them, and continues.
+Propagates context to context-aware inner jobs.
 
 #### func SkipIfStillRunning
 
@@ -893,6 +923,7 @@ func SkipIfStillRunning(logger Logger) JobWrapper
 ```
 
 SkipIfStillRunning skips a job invocation if the previous one is still running.
+Propagates context to context-aware inner jobs.
 
 #### func DelayIfStillRunning
 
@@ -901,23 +932,42 @@ func DelayIfStillRunning(logger Logger) JobWrapper
 ```
 
 DelayIfStillRunning delays a job invocation until the previous one completes.
+Propagates context to context-aware inner jobs.
 
 #### func Timeout
 
 ```go
-func Timeout(timeout time.Duration) JobWrapper
+func Timeout(logger Logger, timeout time.Duration, opts ...TimeoutOption) JobWrapper
 ```
 
-Timeout cancels a job's context after the given duration.
-Requires jobs to check `ctx.Done()` for cancellation.
+Timeout wraps a job with a timeout using the abandonment model.
+Propagates context to context-aware inner jobs.
 
 **Example:**
 ```go
 c := cron.New(cron.WithChain(
-    cron.Timeout(30*time.Second),
+    cron.Timeout(logger, 30*time.Second),
     cron.Recover(logger),
 ))
 ```
+
+#### func Jitter
+
+```go
+func Jitter(maxJitter time.Duration) JobWrapper
+```
+
+Jitter adds a random delay before job execution to prevent thundering herd.
+Propagates context to context-aware inner jobs.
+
+#### func JitterWithLogger
+
+```go
+func JitterWithLogger(logger Logger, maxJitter time.Duration) JobWrapper
+```
+
+JitterWithLogger is like Jitter but logs the applied delay.
+Propagates context to context-aware inner jobs.
 
 ---
 
@@ -1167,6 +1217,14 @@ var ErrNilJob = errors.New("cron: job must not be nil; use UpdateSchedule to upd
 ```
 
 `ErrNilJob` is returned by `UpdateEntry`, `UpdateEntryByName`, `UpdateEntryJob`, and `UpdateEntryJobByName` when a nil job is passed. Use `UpdateSchedule` or `UpdateScheduleByName` to update only the schedule.
+
+### ErrNameRequired
+
+```go
+var ErrNameRequired = errors.New("cron: UpsertJob requires WithName option")
+```
+
+`ErrNameRequired` is returned by `UpsertJob` when no `WithName` option is provided.
 
 ---
 

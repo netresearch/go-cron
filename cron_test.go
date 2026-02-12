@@ -4012,3 +4012,433 @@ func TestRemoveNamedEntryByID(t *testing.T) {
 		t.Errorf("re-adding with same name should succeed after removal, got: %v", err)
 	}
 }
+
+// --- Context propagation tests for chain wrappers ---
+
+// TestRecoverPropagatesContext verifies that the Recover wrapper propagates
+// context to the inner job when it implements JobWithContext.
+func TestRecoverPropagatesContext(t *testing.T) {
+	var receivedCtx context.Context
+	inner := FuncJobWithContext(func(ctx context.Context) {
+		receivedCtx = ctx
+	})
+	wrapped := NewChain(Recover(DiscardLogger)).Then(inner)
+
+	testCtx := context.WithValue(context.Background(), testCtxKey{}, "recover-test")
+	jc, ok := wrapped.(JobWithContext)
+	if !ok {
+		t.Fatal("Recover-wrapped job should implement JobWithContext")
+	}
+	jc.RunWithContext(testCtx)
+
+	if receivedCtx != testCtx {
+		t.Error("Recover wrapper did not propagate context to inner job")
+	}
+}
+
+// TestDelayIfStillRunningLogsDelay verifies that the delay log branch is
+// exercised when the mutex acquisition takes longer than logThreshold.
+func TestDelayIfStillRunningLogsDelay(t *testing.T) {
+	var sw syncWriter
+	logger := VerbosePrintfLogger(log.New(&sw, "", 0))
+
+	ran := make(chan struct{})
+	inner := FuncJob(func() { close(ran) })
+
+	// Build via public API and lower the threshold to make it testable.
+	wrapped := NewChain(DelayIfStillRunning(logger)).Then(inner)
+	dj := wrapped.(*delayJob)
+	dj.logThreshold = time.Nanosecond // any real mutex wait exceeds 1ns
+
+	// Pre-lock the mutex so RunWithContext blocks until we release it.
+	dj.mu.Lock()
+
+	done := make(chan struct{})
+	go func() {
+		dj.RunWithContext(context.Background())
+		close(done)
+	}()
+
+	// Let the goroutine reach the Lock() call, then release.
+	time.Sleep(5 * time.Millisecond)
+	dj.mu.Unlock()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunWithContext timed out")
+	}
+
+	<-ran // inner job must have executed
+
+	output := sw.String()
+	if !strings.Contains(output, "delay") || !strings.Contains(output, "duration") {
+		t.Errorf("expected delay log message, got: %q", output)
+	}
+}
+
+// TestDelayIfStillRunningPropagatesContext verifies that DelayIfStillRunning
+// propagates context to the inner job.
+func TestDelayIfStillRunningPropagatesContext(t *testing.T) {
+	var receivedCtx context.Context
+	inner := FuncJobWithContext(func(ctx context.Context) {
+		receivedCtx = ctx
+	})
+	wrapped := NewChain(DelayIfStillRunning(DiscardLogger)).Then(inner)
+
+	testCtx := context.WithValue(context.Background(), testCtxKey{}, "delay-test")
+	jc, ok := wrapped.(JobWithContext)
+	if !ok {
+		t.Fatal("DelayIfStillRunning-wrapped job should implement JobWithContext")
+	}
+	jc.RunWithContext(testCtx)
+
+	if receivedCtx != testCtx {
+		t.Error("DelayIfStillRunning wrapper did not propagate context to inner job")
+	}
+}
+
+// TestSkipIfStillRunningPropagatesContext verifies that SkipIfStillRunning
+// propagates context to the inner job.
+func TestSkipIfStillRunningPropagatesContext(t *testing.T) {
+	var receivedCtx context.Context
+	inner := FuncJobWithContext(func(ctx context.Context) {
+		receivedCtx = ctx
+	})
+	wrapped := NewChain(SkipIfStillRunning(DiscardLogger)).Then(inner)
+
+	testCtx := context.WithValue(context.Background(), testCtxKey{}, "skip-test")
+	jc, ok := wrapped.(JobWithContext)
+	if !ok {
+		t.Fatal("SkipIfStillRunning-wrapped job should implement JobWithContext")
+	}
+	jc.RunWithContext(testCtx)
+
+	if receivedCtx != testCtx {
+		t.Error("SkipIfStillRunning wrapper did not propagate context to inner job")
+	}
+}
+
+// TestTimeoutPropagatesContext verifies that the Timeout wrapper propagates
+// context to the inner job.
+func TestTimeoutPropagatesContext(t *testing.T) {
+	var receivedCtx context.Context
+	inner := FuncJobWithContext(func(ctx context.Context) {
+		receivedCtx = ctx
+	})
+	wrapped := NewChain(Timeout(DiscardLogger, time.Minute)).Then(inner)
+
+	testCtx := context.WithValue(context.Background(), testCtxKey{}, "timeout-test")
+	jc, ok := wrapped.(JobWithContext)
+	if !ok {
+		t.Fatal("Timeout-wrapped job should implement JobWithContext")
+	}
+	jc.RunWithContext(testCtx)
+
+	if receivedCtx != testCtx {
+		t.Error("Timeout wrapper did not propagate context to inner job")
+	}
+}
+
+// TestJitterPropagatesContext verifies that the Jitter wrapper propagates
+// context to the inner job. Uses maxJitter=0 to avoid sleep.
+func TestJitterPropagatesContext(t *testing.T) {
+	var receivedCtx context.Context
+	inner := FuncJobWithContext(func(ctx context.Context) {
+		receivedCtx = ctx
+	})
+	wrapped := NewChain(Jitter(0)).Then(inner)
+
+	testCtx := context.WithValue(context.Background(), testCtxKey{}, "jitter-test")
+	jc, ok := wrapped.(JobWithContext)
+	if !ok {
+		t.Fatal("Jitter-wrapped job should implement JobWithContext")
+	}
+	jc.RunWithContext(testCtx)
+
+	if receivedCtx != testCtx {
+		t.Error("Jitter wrapper did not propagate context to inner job")
+	}
+}
+
+// TestJitterWithLoggerPropagatesContext verifies that JitterWithLogger
+// propagates context to the inner job. Uses maxJitter=0 to avoid sleep.
+func TestJitterWithLoggerPropagatesContext(t *testing.T) {
+	var receivedCtx context.Context
+	inner := FuncJobWithContext(func(ctx context.Context) {
+		receivedCtx = ctx
+	})
+	wrapped := NewChain(JitterWithLogger(DiscardLogger, 0)).Then(inner)
+
+	testCtx := context.WithValue(context.Background(), testCtxKey{}, "jitter-log-test")
+	jc, ok := wrapped.(JobWithContext)
+	if !ok {
+		t.Fatal("JitterWithLogger-wrapped job should implement JobWithContext")
+	}
+	jc.RunWithContext(testCtx)
+
+	if receivedCtx != testCtx {
+		t.Error("JitterWithLogger wrapper did not propagate context to inner job")
+	}
+}
+
+// testCtxKey is used as a context key in chain wrapper tests.
+type testCtxKey struct{}
+
+// TestChainWrappersBackwardCompatible verifies that all chain wrappers
+// still work with plain FuncJob (non-context-aware inner jobs).
+func TestChainWrappersBackwardCompatible(t *testing.T) {
+	wrappers := []struct {
+		name    string
+		wrapper JobWrapper
+	}{
+		{"Recover", Recover(DiscardLogger)},
+		{"DelayIfStillRunning", DelayIfStillRunning(DiscardLogger)},
+		{"SkipIfStillRunning", SkipIfStillRunning(DiscardLogger)},
+		{"Timeout", Timeout(DiscardLogger, time.Minute)},
+		{"Jitter", Jitter(0)},
+		{"JitterWithLogger", JitterWithLogger(DiscardLogger, 0)},
+	}
+
+	for _, w := range wrappers {
+		t.Run(w.name, func(t *testing.T) {
+			var ran bool
+			inner := FuncJob(func() { ran = true })
+			wrapped := w.wrapper(inner)
+
+			// Should implement both Job and JobWithContext
+			if _, ok := wrapped.(JobWithContext); !ok {
+				t.Fatalf("%s wrapper should implement JobWithContext", w.name)
+			}
+
+			// Plain Run() should work
+			wrapped.Run()
+			if !ran {
+				t.Errorf("%s wrapper: Run() did not execute inner job", w.name)
+			}
+		})
+	}
+}
+
+// TestPerEntryContextThroughChain verifies that jobs receive the per-entry
+// context even when the job passes through chain wrappers like
+// SkipIfStillRunning and Recover.
+func TestPerEntryContextThroughChain(t *testing.T) {
+	fc := NewFakeClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
+	c := New(
+		WithClock(fc),
+		WithChain(SkipIfStillRunning(DiscardLogger), Recover(DiscardLogger)),
+	)
+
+	receivedCtx := make(chan context.Context, 1)
+	_, err := c.AddJob("@every 1s", FuncJobWithContext(func(ctx context.Context) {
+		receivedCtx <- ctx
+	}))
+	if err != nil {
+		t.Fatalf("AddJob failed: %v", err)
+	}
+
+	c.Start()
+	defer c.Stop()
+
+	fc.BlockUntil(1)
+	fc.Advance(time.Second)
+
+	select {
+	case ctx := <-receivedCtx:
+		if ctx == nil {
+			t.Error("expected non-nil context from per-entry context through chain")
+		}
+		if ctx == context.Background() {
+			t.Error("expected per-entry context (not context.Background()) through chain")
+		}
+		// Context should not be canceled while running
+		if ctx.Err() != nil {
+			t.Errorf("per-entry context should not be canceled while running, got: %v", ctx.Err())
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("job did not run within timeout")
+	}
+}
+
+// --- UpsertJob tests ---
+
+// TestUpsertJobCreatesNew verifies that UpsertJob creates a new entry when
+// no entry with the given name exists.
+func TestUpsertJobCreatesNew(t *testing.T) {
+	c := New()
+
+	var ran bool
+	id, err := c.UpsertJob("@every 1h", FuncJob(func() { ran = true }), WithName("upsert-test"))
+	if err != nil {
+		t.Fatalf("UpsertJob failed: %v", err)
+	}
+	if id == 0 {
+		t.Error("UpsertJob should return a valid EntryID")
+	}
+
+	entry := c.EntryByName("upsert-test")
+	if !entry.Valid() {
+		t.Error("UpsertJob should create an entry findable by name")
+	}
+	if entry.ID != id {
+		t.Errorf("entry ID mismatch: got %v, want %v", entry.ID, id)
+	}
+
+	entry.WrappedJob.Run()
+	if !ran {
+		t.Error("upserted job should be runnable")
+	}
+}
+
+// TestUpsertJobUpdatesExisting verifies that UpsertJob updates an existing
+// entry's job when the name already exists.
+func TestUpsertJobUpdatesExisting(t *testing.T) {
+	c := New()
+
+	// Create initial entry
+	origID, err := c.UpsertJob("@every 1h", FuncJob(func() {}), WithName("upsert-update"))
+	if err != nil {
+		t.Fatalf("initial UpsertJob failed: %v", err)
+	}
+
+	// Upsert with same name — should update, not create
+	var newRan bool
+	updatedID, err := c.UpsertJob("@every 2h", FuncJob(func() { newRan = true }), WithName("upsert-update"))
+	if err != nil {
+		t.Fatalf("update UpsertJob failed: %v", err)
+	}
+
+	if updatedID != origID {
+		t.Errorf("UpsertJob update should preserve EntryID: got %v, want %v", updatedID, origID)
+	}
+
+	// Verify only one entry exists
+	entries := c.Entries()
+	if len(entries) != 1 {
+		t.Errorf("expected 1 entry after upsert, got %d", len(entries))
+	}
+
+	// Verify the new job runs
+	entries[0].WrappedJob.Run()
+	if !newRan {
+		t.Error("updated job should be the one running")
+	}
+}
+
+// TestUpsertJobRequiresName verifies that UpsertJob returns ErrNameRequired
+// when no WithName option is provided.
+func TestUpsertJobRequiresName(t *testing.T) {
+	c := New()
+
+	_, err := c.UpsertJob("@every 1h", FuncJob(func() {}))
+	if !errors.Is(err, ErrNameRequired) {
+		t.Errorf("UpsertJob without name should return ErrNameRequired, got: %v", err)
+	}
+}
+
+// TestUpsertJobPreservesEntryID verifies that repeated upserts keep the same ID.
+func TestUpsertJobPreservesEntryID(t *testing.T) {
+	c := New()
+
+	id1, err := c.UpsertJob("@every 1h", FuncJob(func() {}), WithName("preserve-id"))
+	if err != nil {
+		t.Fatalf("first UpsertJob failed: %v", err)
+	}
+
+	id2, err := c.UpsertJob("@every 2h", FuncJob(func() {}), WithName("preserve-id"))
+	if err != nil {
+		t.Fatalf("second UpsertJob failed: %v", err)
+	}
+
+	id3, err := c.UpsertJob("@every 3h", FuncJob(func() {}), WithName("preserve-id"))
+	if err != nil {
+		t.Fatalf("third UpsertJob failed: %v", err)
+	}
+
+	if id1 != id2 || id2 != id3 {
+		t.Errorf("UpsertJob should preserve EntryID across updates: %v, %v, %v", id1, id2, id3)
+	}
+}
+
+// TestUpsertJobWhileRunning verifies UpsertJob works when the scheduler is running.
+func TestUpsertJobWhileRunning(t *testing.T) {
+	fc := NewFakeClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
+	c := New(WithClock(fc))
+	c.Start()
+	defer c.Stop()
+
+	// Create via upsert
+	id1, err := c.UpsertJob("@every 1h", FuncJob(func() {}), WithName("running-upsert"))
+	if err != nil {
+		t.Fatalf("initial UpsertJob while running failed: %v", err)
+	}
+
+	// Update via upsert
+	done := make(chan struct{})
+	id2, err := c.UpsertJob("@every 2h", FuncJob(func() { close(done) }), WithName("running-upsert"))
+	if err != nil {
+		t.Fatalf("update UpsertJob while running failed: %v", err)
+	}
+
+	if id1 != id2 {
+		t.Errorf("UpsertJob while running should preserve ID: got %v, want %v", id2, id1)
+	}
+
+	// Verify job is updated (run it via advancing the clock)
+	fc.BlockUntil(1)
+	fc.Advance(2 * time.Hour)
+
+	select {
+	case <-done:
+		// Job ran successfully
+	case <-time.After(2 * time.Second):
+		t.Error("updated job should have been run")
+	}
+}
+
+// TestUpsertJobInvalidSpec verifies that UpsertJob returns parse errors.
+func TestUpsertJobInvalidSpec(t *testing.T) {
+	c := New()
+
+	_, err := c.UpsertJob("invalid-spec!!!", FuncJob(func() {}), WithName("bad-spec"))
+	if err == nil {
+		t.Error("UpsertJob with invalid spec should return error")
+	}
+}
+
+// TestUpsertJobUpdateNilJob verifies that UpsertJob propagates ErrNilJob
+// when the existing entry is found but the provided job is nil.
+func TestUpsertJobUpdateNilJob(t *testing.T) {
+	c := New()
+
+	// Create an existing entry
+	_, err := c.AddFunc("@every 1h", func() {}, WithName("nil-job-test"))
+	if err != nil {
+		t.Fatalf("AddFunc failed: %v", err)
+	}
+
+	// UpsertJob with nil job should return ErrNilJob from UpdateEntry
+	_, err = c.UpsertJob("@every 2h", nil, WithName("nil-job-test"))
+	if !errors.Is(err, ErrNilJob) {
+		t.Errorf("UpsertJob with nil job on existing entry should return ErrNilJob, got: %v", err)
+	}
+}
+
+// TestUpsertJobMaxEntriesExceeded verifies UpsertJob returns ErrMaxEntriesReached
+// when creating a new entry would exceed the limit.
+func TestUpsertJobMaxEntriesExceeded(t *testing.T) {
+	c := New(WithMaxEntries(1))
+
+	// Fill up the single slot
+	_, err := c.AddFunc("@every 1h", func() {}, WithName("existing"))
+	if err != nil {
+		t.Fatalf("AddFunc failed: %v", err)
+	}
+
+	// UpsertJob for a NEW name should fail with ErrMaxEntriesReached
+	_, err = c.UpsertJob("@every 2h", FuncJob(func() {}), WithName("new-entry"))
+	if !errors.Is(err, ErrMaxEntriesReached) {
+		t.Errorf("UpsertJob should return ErrMaxEntriesReached, got: %v", err)
+	}
+}

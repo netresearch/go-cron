@@ -566,7 +566,6 @@ package main
 
 import (
     "encoding/json"
-    "errors"
     "log"
     "net/http"
     "sync"
@@ -596,35 +595,19 @@ func (s *Scheduler) Stop() {
 }
 
 // AddJob adds a new job or replaces an existing one with the given name.
-// For existing jobs, UpdateEntryJobByName atomically replaces both schedule and
-// job without changing the EntryID — no Remove+Add race window, no manual parser.
-// The old job's per-entry context is automatically canceled.
+// UpsertJob handles the create-or-update logic atomically, preserving EntryID
+// on updates and handling TOCTOU races internally.
 func (s *Scheduler) AddJob(name, spec string, fn func()) error {
     s.mu.Lock()
     defer s.mu.Unlock()
 
-    // Try atomic update first (preserves EntryID, uses cron's own parser)
-    if _, exists := s.jobs[name]; exists {
-        err := s.cron.UpdateEntryJobByName(name, spec, cron.FuncJob(fn))
-        if err == nil {
-            log.Printf("Job %q updated with spec %q", name, spec)
-            return nil
-        }
-        // Only fall through to add if entry was removed concurrently.
-        // For any other error (e.g. parse error), return immediately.
-        if !errors.Is(err, cron.ErrEntryNotFound) {
-            return err
-        }
-    }
-
-    // Add new job
-    id, err := s.cron.AddFunc(spec, fn, cron.WithName(name))
+    id, err := s.cron.UpsertJob(spec, cron.FuncJob(fn), cron.WithName(name))
     if err != nil {
         return err
     }
 
     s.jobs[name] = id
-    log.Printf("Job %q scheduled with spec %q (ID: %d)", name, spec, id)
+    log.Printf("Job %q upserted with spec %q (ID: %d)", name, spec, id)
     return nil
 }
 
