@@ -566,6 +566,7 @@ package main
 
 import (
     "encoding/json"
+    "errors"
     "log"
     "net/http"
     "sync"
@@ -604,11 +605,16 @@ func (s *Scheduler) AddJob(name, spec string, fn func()) error {
 
     // Try atomic update first (preserves EntryID, uses cron's own parser)
     if _, exists := s.jobs[name]; exists {
-        if err := s.cron.UpdateEntryJobByName(name, spec, cron.FuncJob(fn)); err == nil {
+        err := s.cron.UpdateEntryJobByName(name, spec, cron.FuncJob(fn))
+        if err == nil {
             log.Printf("Job %q updated with spec %q", name, spec)
             return nil
         }
-        // Fall through to add if entry was removed concurrently
+        // Only fall through to add if entry was removed concurrently.
+        // For any other error (e.g. parse error), return immediately.
+        if !errors.Is(err, cron.ErrEntryNotFound) {
+            return err
+        }
     }
 
     // Add new job
