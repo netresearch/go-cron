@@ -501,6 +501,18 @@ func TestPrevNWithDailySchedule(t *testing.T) {
 	}
 }
 
+// TestPrevN_EarlyStopOnZeroTime tests that PrevN stops when Prev() returns zero time.
+func TestPrevN_EarlyStopOnZeroTime(t *testing.T) {
+	// TriggeredSchedule.Prev() always returns zero time
+	sched := TriggeredSchedule{}
+	times := PrevN(sched, time.Now(), 5)
+	if times == nil {
+		t.Fatal("PrevN(TriggeredSchedule, 5) returned nil, want empty slice")
+	} else if len(times) != 0 {
+		t.Errorf("PrevN(TriggeredSchedule, 5) returned %d times, want 0", len(times))
+	}
+}
+
 // TestPrevN_ScheduleWithoutPrev tests PrevN with a schedule that doesn't implement ScheduleWithPrev.
 func TestPrevN_ScheduleWithoutPrev(t *testing.T) {
 	sched := scheduleWithoutPrev{}
