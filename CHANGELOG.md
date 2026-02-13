@@ -16,8 +16,15 @@ features, bug fixes, and modernization improvements.
   schedule advancing, but execution is skipped. Includes `ByName` variants,
   `IsEntryPaused`/`IsEntryPausedByName` query methods, `WithPaused()` JobOption,
   and exported `Entry.Paused` field visible in snapshots.
+- **Triggered jobs** ([#311]): Jobs that never fire automatically, only when explicitly
+  triggered. Register with `@triggered`, `@manual`, or `@none` descriptors, then
+  execute on demand via `TriggerEntry`/`TriggerEntryByName`. Includes
+  `TriggeredSchedule` type, `IsTriggered()` helper, exported `Entry.Triggered` field,
+  `ErrEntryPaused`/`ErrNotRunning` sentinel errors, and compatibility with all existing
+  features (middleware, context, pause/resume, run-once, observability hooks).
 
 [#203]: https://github.com/netresearch/go-cron/issues/203
+[#311]: https://github.com/netresearch/go-cron/issues/311
 [PR#323]: https://github.com/netresearch/go-cron/pull/323
 
 ### Planned for v2

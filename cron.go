@@ -22,13 +22,22 @@ var ErrDuplicateName = errors.New("cron: duplicate entry name")
 // ErrEntryNotFound is returned by UpdateSchedule, UpdateScheduleByName,
 // UpdateJob, UpdateJobByName, UpdateEntry, UpdateEntryByName,
 // UpdateEntryJob, UpdateEntryJobByName, UpsertJob, PauseEntry,
-// PauseEntryByName, ResumeEntry, and ResumeEntryByName when the specified
-// entry does not exist in this Cron instance.
+// PauseEntryByName, ResumeEntry, ResumeEntryByName, TriggerEntry,
+// and TriggerEntryByName when the specified entry does not exist in
+// this Cron instance.
 var ErrEntryNotFound = errors.New("cron: entry not found")
 
 // ErrNameRequired is returned by UpsertJob when no WithName option is provided.
 // UpsertJob requires a name to determine whether to create or update.
 var ErrNameRequired = errors.New("cron: UpsertJob requires WithName option")
+
+// ErrEntryPaused is returned by TriggerEntry and TriggerEntryByName when
+// attempting to trigger a paused entry. Resume the entry first.
+var ErrEntryPaused = errors.New("cron: entry is paused")
+
+// ErrNotRunning is returned by TriggerEntry and TriggerEntryByName when
+// the scheduler is not running. Start the scheduler first.
+var ErrNotRunning = errors.New("cron: scheduler is not running")
 
 // maxIdleDuration is the sleep duration when no entries are scheduled.
 // Using a very long duration (~11.4 years) instead of blocking indefinitely
@@ -53,6 +62,7 @@ type Cron struct {
 	remove      chan request[EntryID, struct{}]
 	update      chan request[updateScheduleRequest, error]
 	pause       chan request[pauseRequest, error]
+	trigger     chan request[EntryID, error]
 	snapshot    chan chan []Entry
 	entryLookup chan entryLookupRequest // O(1) single-entry lookup when running
 	nameLookup  chan nameLookupRequest  // O(1) entry lookup by name when running
@@ -299,6 +309,12 @@ type Entry struct {
 	// to toggle. Visible in Entry snapshots.
 	Paused bool
 
+	// Triggered indicates whether this entry uses a TriggeredSchedule
+	// (@triggered, @manual, @none). Triggered entries never fire automatically;
+	// they must be executed via TriggerEntry or TriggerEntryByName.
+	// Visible in Entry snapshots.
+	Triggered bool
+
 	// entryCtx is a per-entry context derived from the Cron's baseCtx.
 	// It is canceled when the entry is removed or when its job is replaced
 	// via UpdateEntry. Jobs implementing JobWithContext receive this context,
@@ -402,6 +418,7 @@ func New(opts ...Option) *Cron {
 		remove:      make(chan request[EntryID, struct{}]),
 		update:      make(chan request[updateScheduleRequest, error]),
 		pause:       make(chan request[pauseRequest, error]),
+		trigger:     make(chan request[EntryID, error]),
 		running:     false,
 		runningMu:   sync.Mutex{},
 		logger:      DefaultLogger,
@@ -780,6 +797,9 @@ func (c *Cron) ScheduleJob(schedule Schedule, cmd Job, opts ...JobOption) (Entry
 		opt(entry)
 	}
 
+	// Mark entry as triggered if using a TriggeredSchedule
+	entry.Triggered = IsTriggered(entry.Schedule)
+
 	// Create per-entry context derived from the cron's base context.
 	// This allows per-entry cancellation on Remove or job replacement.
 	entry.entryCtx, entry.cancelEntryCtx = context.WithCancel(c.baseCtx)
@@ -1070,6 +1090,11 @@ func (c *Cron) run() {
 					}
 					c.logger.Info(action, "entry", req.value.id)
 				}
+				continue // no timer reset needed
+
+			case req := <-c.trigger:
+				err := c.triggerEntry(req.value)
+				req.reply <- err
 				continue // no timer reset needed
 			}
 
@@ -1374,6 +1399,76 @@ func (c *Cron) setPausedState(id EntryID, pause bool) error {
 		return <-req.reply
 	}
 	return c.setPaused(&request)
+}
+
+// triggerEntry immediately executes the entry with the given ID.
+// Must be called only from the run loop.
+func (c *Cron) triggerEntry(id EntryID) error {
+	entry, found := c.entryIndex[id]
+	if !found {
+		return ErrEntryNotFound
+	}
+	if entry.Paused {
+		return ErrEntryPaused
+	}
+
+	now := c.now()
+	c.startJob(entry.entryCtx, entry.running, entry.ID, entry.Job, entry.WrappedJob, now)
+	entry.Prev = now
+
+	if entry.runOnce {
+		entry.cancelEntryCtx = nil
+		c.removeEntry(entry.ID)
+		c.logger.Info("triggered-run-once", "now", now, "entry", id, "removed", true)
+	} else {
+		c.logger.Info("triggered", "now", now, "entry", id)
+	}
+	return nil
+}
+
+// TriggerEntry immediately executes the entry with the given ID, regardless
+// of its schedule. The entry's middleware chain (Recover, SkipIfStillRunning,
+// etc.) is applied as usual. This works on both triggered (@triggered) and
+// regularly scheduled entries — providing a "run now" capability for any entry.
+//
+// The scheduler must be running; returns ErrNotRunning otherwise.
+// Returns ErrEntryPaused if the entry is paused.
+// Returns ErrEntryNotFound if no entry with the given ID exists.
+//
+// Example:
+//
+//	id, _ := c.AddFunc("@triggered", deploy, cron.WithName("deploy"))
+//	c.Start()
+//	c.TriggerEntry(id) // Run on demand
+func (c *Cron) TriggerEntry(id EntryID) error {
+	c.runningMu.Lock()
+	defer c.runningMu.Unlock()
+	if !c.running {
+		return ErrNotRunning
+	}
+	req := makeReq[EntryID, error](id)
+	c.trigger <- req
+	return <-req.reply
+}
+
+// TriggerEntryByName immediately executes the entry identified by its Name.
+// Lookup is O(1) via the internal name index.
+//
+// Returns ErrNotRunning if the scheduler is not running.
+// Returns ErrEntryPaused if the entry is paused.
+// Returns ErrEntryNotFound if no entry with the given name exists.
+//
+// Example:
+//
+//	c.AddFunc("@triggered", deploy, cron.WithName("deploy"))
+//	c.Start()
+//	c.TriggerEntryByName("deploy") // Run on demand
+func (c *Cron) TriggerEntryByName(name string) error {
+	e := c.EntryByName(name)
+	if !e.Valid() {
+		return ErrEntryNotFound
+	}
+	return c.TriggerEntry(e.ID)
 }
 
 // extractName applies JobOptions to a temporary Entry and returns the Name.

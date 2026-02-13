@@ -1478,6 +1478,8 @@ func parseDescriptor(descriptor string, loc *time.Location, minEveryInterval tim
 		return newDescriptorSchedule(1<<hours.min, all(dom), all(months), allDow, loc, maxSearchYears), nil
 	case "@hourly":
 		return newDescriptorSchedule(all(hours), all(dom), all(months), allDow, loc, maxSearchYears), nil
+	case "@triggered", "@manual", "@none":
+		return TriggeredSchedule{}, nil
 	}
 
 	const every = "@every "

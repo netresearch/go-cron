@@ -14,6 +14,7 @@ Practical recipes for common scheduling patterns. Each recipe is self-contained 
 8. [Multi-Timezone](#8-multi-timezone)
 9. [Production-Ready Template](#9-production-ready-template)
 10. [Pause/Resume](#10-pauseresume)
+11. [Triggered Jobs](#11-triggered-jobs)
 
 ---
 
@@ -1098,6 +1099,69 @@ c.PauseEntryByName("experimental-sync")
 
 ---
 
+## 11. Triggered Jobs
+
+Jobs that never fire automatically — only when explicitly triggered. Useful for
+API-triggered deployments, workflow orchestration, and event-driven patterns that
+still benefit from the scheduler's middleware chain.
+
+### API-Triggered Pattern
+
+```go
+c := cron.New()
+
+// Register a triggered job — never fires on its own
+deployID, _ := c.AddFunc("@triggered", func() {
+    log.Println("Deploying...")
+    runDeployPipeline()
+}, cron.WithName("deploy"))
+
+c.Start()
+defer c.Stop()
+
+// HTTP handler triggers the job on demand
+http.HandleFunc("/api/deploy", func(w http.ResponseWriter, r *http.Request) {
+    if err := c.TriggerEntryByName("deploy"); err != nil {
+        http.Error(w, err.Error(), http.StatusBadRequest)
+        return
+    }
+    w.WriteHeader(http.StatusAccepted)
+})
+```
+
+### Workflow Orchestration
+
+```go
+c := cron.New(cron.WithChain(cron.Recover(cron.DefaultLogger)))
+
+// Job B is triggered, only runs when Job A completes
+c.AddFunc("@triggered", processData, cron.WithName("step-B"))
+
+// Job A runs on schedule and triggers Job B on success
+c.AddFunc("@every 1h", func() {
+    if err := fetchData(); err != nil {
+        log.Println("fetch failed:", err)
+        return
+    }
+    // Chain to next step
+    if err := c.TriggerEntryByName("step-B"); err != nil {
+        log.Println("trigger step-B failed:", err)
+    }
+}, cron.WithName("step-A"))
+
+c.Start()
+```
+
+**Key Points**:
+- Use `@triggered`, `@manual`, or `@none` — all are aliases
+- The full middleware chain (Recover, SkipIfStillRunning, Timeout, etc.) applies to triggered runs
+- `TriggerEntry` also works on regularly scheduled entries as a "run now" button
+- Returns `ErrEntryPaused` for paused entries, `ErrNotRunning` if scheduler is stopped
+- Combined with `WithRunOnce()`, a triggered entry runs once then removes itself
+- Check `entry.Triggered` or `cron.IsTriggered(entry.Schedule)` to identify triggered entries
+
+---
+
 ## Summary
 
 | Recipe | When to Use |
@@ -1112,6 +1176,7 @@ c.PauseEntryByName("experimental-sync")
 | Multi-Timezone | Global applications, regional schedules |
 | Production Template | Complete production setup |
 | Pause/Resume | Maintenance windows, feature-flagged jobs |
+| Triggered Jobs | API-triggered jobs, workflow orchestration |
 
 For more details, see:
 - [API Reference](API_REFERENCE.md)
