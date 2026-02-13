@@ -10,6 +10,16 @@ features, bug fixes, and modernization improvements.
 
 ## [Unreleased]
 
+### Added
+- **`PauseEntry`/`ResumeEntry`** ([#203], [PR#323]): Temporarily suspend individual
+  entries without removing them. Paused entries remain in the scheduler with their
+  schedule advancing, but execution is skipped. Includes `ByName` variants,
+  `IsEntryPaused`/`IsEntryPausedByName` query methods, `WithPaused()` JobOption,
+  and exported `Entry.Paused` field visible in snapshots.
+
+[#203]: https://github.com/netresearch/go-cron/issues/203
+[PR#323]: https://github.com/netresearch/go-cron/pull/323
+
 ### Planned for v2
 - Context-aware Job interface with graceful shutdown support
 

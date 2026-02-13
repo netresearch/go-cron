@@ -418,6 +418,106 @@ if cr.IsJobRunningByName("my-job") {
 cr.UpsertJob(newSpec, newJob, cron.WithName("my-job"))
 ```
 
+#### func (*Cron) PauseEntry
+
+```go
+func (c *Cron) PauseEntry(id EntryID) error
+```
+
+PauseEntry temporarily suspends execution of the entry with the given ID.
+While paused, the entry remains registered and its schedule advances, but
+execution is skipped. Use `ResumeEntry` to re-enable execution.
+
+Pausing an already-paused entry is a no-op (returns nil).
+Returns `ErrEntryNotFound` if no entry with the given ID exists.
+
+**Example:**
+```go
+id, _ := c.AddFunc("@every 5m", syncData, cron.WithName("sync"))
+c.Start()
+
+// Pause during maintenance
+if err := c.PauseEntry(id); err != nil {
+    log.Println("pause failed:", err)
+}
+```
+
+#### func (*Cron) PauseEntryByName
+
+```go
+func (c *Cron) PauseEntryByName(name string) error
+```
+
+PauseEntryByName temporarily suspends the entry identified by its Name.
+Lookup is O(1) via the internal name index.
+Returns `ErrEntryNotFound` if no entry with the given name exists.
+
+**Example:**
+```go
+c.AddFunc("@every 5m", syncData, cron.WithName("sync"))
+c.PauseEntryByName("sync")
+```
+
+#### func (*Cron) ResumeEntry
+
+```go
+func (c *Cron) ResumeEntry(id EntryID) error
+```
+
+ResumeEntry re-enables execution of a previously paused entry. The entry's
+schedule is preserved; it will execute at its next scheduled time.
+
+Resuming an already-active entry is a no-op (returns nil).
+Returns `ErrEntryNotFound` if no entry with the given ID exists.
+
+**Example:**
+```go
+// Resume after maintenance
+if err := c.ResumeEntry(id); err != nil {
+    log.Println("resume failed:", err)
+}
+```
+
+#### func (*Cron) ResumeEntryByName
+
+```go
+func (c *Cron) ResumeEntryByName(name string) error
+```
+
+ResumeEntryByName re-enables execution of a previously paused entry
+identified by its Name. Lookup is O(1) via the internal name index.
+Returns `ErrEntryNotFound` if no entry with the given name exists.
+
+**Example:**
+```go
+c.ResumeEntryByName("sync")
+```
+
+#### func (*Cron) IsEntryPaused
+
+```go
+func (c *Cron) IsEntryPaused(id EntryID) bool
+```
+
+IsEntryPaused reports whether the entry with the given ID is currently paused.
+Returns false if the entry does not exist.
+
+#### func (*Cron) IsEntryPausedByName
+
+```go
+func (c *Cron) IsEntryPausedByName(name string) bool
+```
+
+IsEntryPausedByName reports whether the named entry is currently paused.
+Returns false if no entry has the given name.
+
+**Example:**
+```go
+if c.IsEntryPausedByName("sync") {
+    fmt.Println("sync job is paused")
+}
+```
+
 #### func (*Cron) ScheduleJob
 
 ```go
@@ -640,8 +740,10 @@ type Entry struct {
     WrappedJob        Job           // Job with chain wrappers applied
     Job               Job           // Original job as submitted
     Name              string        // Optional name for the entry
+    Tags              []string      // Optional tags for categorizing entries
     MissedPolicy      MissedPolicy  // Policy for handling missed executions
     MissedGracePeriod time.Duration // Maximum age for catch-up runs
+    Paused            bool          // Whether this entry is paused
 }
 ```
 
@@ -962,6 +1064,26 @@ func WithRunOnce() JobOption
 ```
 
 WithRunOnce causes the job to be automatically removed after its first execution.
+
+#### func WithPaused
+
+```go
+func WithPaused() JobOption
+```
+
+WithPaused causes the entry to be added in a paused state. Paused entries remain
+registered with their schedule intact but are skipped during execution. Use
+`ResumeEntry` or `ResumeEntryByName` to activate the entry later.
+
+This is useful for pre-registering jobs that should only run after explicit
+activation, maintenance windows, or feature-flagged jobs.
+
+**Example:**
+```go
+id, _ := c.AddFunc("@every 5m", syncData, cron.WithPaused(), cron.WithName("sync"))
+// Later, when ready:
+c.ResumeEntry(id)
+```
 
 #### func WithCapacity
 
@@ -1877,8 +1999,10 @@ MaxSpecLength is the maximum allowed length for a cron spec string.
 var ErrEntryNotFound = errors.New("cron: entry not found")
 ```
 
-Returned by update methods (`UpdateSchedule`, `UpdateEntry`, `UpdateEntryByName`,
-`UpdateEntryJob`, `UpdateEntryJobByName`) when the specified entry does not exist.
+Returned by update methods (`UpdateSchedule`, `UpdateScheduleByName`, `UpdateJob`,
+`UpdateJobByName`, `UpdateEntry`, `UpdateEntryByName`, `UpdateEntryJob`,
+`UpdateEntryJobByName`) and pause/resume methods (`PauseEntry`, `PauseEntryByName`,
+`ResumeEntry`, `ResumeEntryByName`) when the specified entry does not exist.
 
 ### ErrNilJob
 

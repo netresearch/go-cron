@@ -26,6 +26,7 @@ The original `robfig/cron` has been unmaintained since 2020, accumulating 50+ op
 | DST spring-forward | Jobs silently skipped | Runs immediately (ISC behavior, #541) |
 | DOM/DOW logic | OR (confusing) | AND (logical, consistent) |
 | Runtime updates | Remove + re-add | `UpdateSchedule`, `UpsertJob` |
+| Pause/Resume | None | `PauseEntry`, `ResumeEntry` |
 | Context support | None | Per-entry context, `FuncJobWithContext` |
 | Resilience | None | Retry, circuit breaker, timeout |
 | Observability | None | Hooks for metrics (Prometheus, etc.) |
@@ -252,6 +253,28 @@ For graceful replacement of long-running jobs:
 c.WaitForJobByName("my-job")  // Block until current execution finishes
 c.UpsertJob(newSpec, newJob, cron.WithName("my-job"))
 ```
+
+## Pause/Resume
+
+Temporarily suspend individual entries without removing them:
+
+```go
+// Pause a running entry
+c.PauseEntryByName("sync-job")
+
+// Check if paused
+if c.IsEntryPausedByName("sync-job") {
+    fmt.Println("Job is paused")
+}
+
+// Resume when ready
+c.ResumeEntryByName("sync-job")
+
+// Add entry in paused state (activate later)
+c.AddFunc("@every 5m", syncData, cron.WithPaused(), cron.WithName("sync"))
+```
+
+Paused entries remain registered with their schedule advancing, but execution is skipped. No catch-up flood occurs on resume.
 
 ## Context Support
 
