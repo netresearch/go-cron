@@ -36,11 +36,16 @@ features, bug fixes, and modernization improvements.
   job executions across all wrapped entries (wait for slot). `MaxConcurrentSkip(logger, n)`
   skips execution when full. Both propagate context and share state across all wrapped
   jobs, unlike per-job `SkipIfStillRunning`/`DelayIfStillRunning`.
+- **`PrevN` schedule introspection** ([#297]): Query the previous n execution times
+  for any schedule implementing `ScheduleWithPrev`. Returns times in reverse
+  chronological order. Complements the existing `NextN`, `Between`, `Count`, and
+  `Matches` introspection functions.
 
 [#167]: https://github.com/netresearch/go-cron/issues/167
 [#185]: https://github.com/netresearch/go-cron/issues/185
 [#186]: https://github.com/netresearch/go-cron/issues/186
 [#203]: https://github.com/netresearch/go-cron/issues/203
+[#297]: https://github.com/netresearch/go-cron/issues/297
 [#311]: https://github.com/netresearch/go-cron/issues/311
 [PR#323]: https://github.com/netresearch/go-cron/pull/323
 

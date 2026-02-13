@@ -2251,6 +2251,90 @@ func AnalyzeSpecWithHash(spec string, options ParseOption, hashSeed string) Spec
 AnalyzeSpecWithHash analyzes a cron expression containing H hash expressions.
 The seed (e.g., job name) produces deterministic, distributed scheduling times.
 
+### Schedule Introspection
+
+#### NextN
+
+```go
+func NextN(schedule Schedule, t time.Time, n int) []time.Time
+```
+
+NextN returns the next n execution times for the schedule, starting after t.
+Returns nil if schedule is nil or n <= 0.
+
+**Example:**
+```go
+schedule, _ := cron.ParseStandard("0 9 * * MON-FRI")
+times := cron.NextN(schedule, time.Now(), 10)
+for _, t := range times {
+    fmt.Println("Next run:", t)
+}
+```
+
+#### PrevN
+
+```go
+func PrevN(schedule Schedule, t time.Time, n int) []time.Time
+```
+
+PrevN returns the previous n execution times for the schedule, before t.
+Returns nil if schedule is nil, n <= 0, or schedule doesn't implement `ScheduleWithPrev`.
+
+Times are returned in reverse chronological order (most recent first).
+Stops early if `Prev()` returns zero time (no earlier execution exists).
+
+**Example:**
+```go
+schedule, _ := cron.ParseStandard("0 9 * * MON-FRI")
+times := cron.PrevN(schedule, time.Now(), 10)
+for _, t := range times {
+    fmt.Println("Previous run:", t)
+}
+```
+
+#### Between
+
+```go
+func Between(schedule Schedule, start, end time.Time) []time.Time
+```
+
+Between returns all execution times in the range [start, end).
+The end time is exclusive. Returns nil if schedule is nil.
+
+#### BetweenWithLimit
+
+```go
+func BetweenWithLimit(schedule Schedule, start, end time.Time, limit int) []time.Time
+```
+
+BetweenWithLimit returns execution times in the range [start, end) up to limit.
+If limit is 0 or negative, no limit is applied.
+
+#### Count
+
+```go
+func Count(schedule Schedule, start, end time.Time) int
+```
+
+Count returns the number of executions in the range [start, end).
+
+#### CountWithLimit
+
+```go
+func CountWithLimit(schedule Schedule, start, end time.Time, limit int) int
+```
+
+CountWithLimit counts executions in the range [start, end) up to limit.
+
+#### Matches
+
+```go
+func Matches(schedule Schedule, t time.Time) bool
+```
+
+Matches reports whether the given time matches the schedule.
+Returns false if schedule is nil or doesn't implement `ScheduleWithPrev`.
+
 ---
 
 ## Constants

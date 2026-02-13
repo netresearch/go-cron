@@ -392,6 +392,194 @@ func TestMatchesWithSeconds(t *testing.T) {
 	}
 }
 
+// TestPrevN tests the PrevN function for retrieving multiple previous execution times.
+func TestPrevN(t *testing.T) {
+	// Parse a schedule that runs every hour at minute 0
+	schedule, err := ParseStandard("0 * * * *")
+	if err != nil {
+		t.Fatalf("ParseStandard failed: %v", err)
+	}
+
+	// Start time: 2024-06-15 10:30:00 UTC
+	start := time.Date(2024, 6, 15, 10, 30, 0, 0, time.UTC)
+
+	tests := []struct {
+		name     string
+		n        int
+		wantLen  int
+		wantHour []int // expected hours (reverse chronological)
+	}{
+		{
+			name:     "prev 3 hourly executions",
+			n:        3,
+			wantLen:  3,
+			wantHour: []int{10, 9, 8},
+		},
+		{
+			name:     "prev 5 hourly executions",
+			n:        5,
+			wantLen:  5,
+			wantHour: []int{10, 9, 8, 7, 6},
+		},
+		{
+			name:    "prev 0 returns nil",
+			n:       0,
+			wantLen: 0,
+		},
+		{
+			name:    "negative n returns nil",
+			n:       -1,
+			wantLen: 0,
+		},
+		{
+			name:     "prev 1",
+			n:        1,
+			wantLen:  1,
+			wantHour: []int{10},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			times := PrevN(schedule, start, tt.n)
+			if len(times) != tt.wantLen {
+				t.Errorf("PrevN(%d) returned %d times, want %d", tt.n, len(times), tt.wantLen)
+			}
+
+			for i, wantHour := range tt.wantHour {
+				if i < len(times) {
+					if times[i].Hour() != wantHour {
+						t.Errorf("PrevN(%d)[%d] hour = %d, want %d", tt.n, i, times[i].Hour(), wantHour)
+					}
+					if times[i].Minute() != 0 {
+						t.Errorf("PrevN(%d)[%d] minute = %d, want 0", tt.n, i, times[i].Minute())
+					}
+				}
+			}
+
+			// Verify times are in descending order
+			for i := 1; i < len(times); i++ {
+				if !times[i].Before(times[i-1]) {
+					t.Errorf("PrevN times not in descending order: %v >= %v", times[i], times[i-1])
+				}
+			}
+		})
+	}
+}
+
+// TestPrevNWithDailySchedule tests PrevN with a daily schedule.
+func TestPrevNWithDailySchedule(t *testing.T) {
+	schedule, err := ParseStandard("0 9 * * *") // Daily at 9am
+	if err != nil {
+		t.Fatalf("ParseStandard failed: %v", err)
+	}
+
+	start := time.Date(2024, 6, 15, 10, 0, 0, 0, time.UTC) // After 9am
+
+	times := PrevN(schedule, start, 7)
+	if len(times) != 7 {
+		t.Fatalf("PrevN(7) returned %d times, want 7", len(times))
+	}
+
+	// Verify we get 7 consecutive days going backward
+	for i, tm := range times {
+		expectedDay := 15 - i // Starting from June 15
+		if tm.Month() == time.June && tm.Day() != expectedDay {
+			t.Errorf("PrevN[%d] day = %d, want %d", i, tm.Day(), expectedDay)
+		}
+		if tm.Hour() != 9 {
+			t.Errorf("PrevN[%d] hour = %d, want 9", i, tm.Hour())
+		}
+	}
+}
+
+// TestPrevN_NilSchedule tests PrevN with a nil schedule.
+func TestPrevN_NilSchedule(t *testing.T) {
+	times := PrevN(nil, time.Now(), 5)
+	if times != nil {
+		t.Errorf("PrevN(nil) = %v, want nil", times)
+	}
+}
+
+// TestPrevN_ZeroOrNegativeN tests PrevN with zero or negative n.
+func TestPrevN_ZeroOrNegativeN(t *testing.T) {
+	schedule, err := ParseStandard("0 * * * *")
+	if err != nil {
+		t.Fatalf("ParseStandard failed: %v", err)
+	}
+
+	if times := PrevN(schedule, time.Now(), 0); times != nil {
+		t.Errorf("PrevN(0) = %v, want nil", times)
+	}
+	if times := PrevN(schedule, time.Now(), -1); times != nil {
+		t.Errorf("PrevN(-1) = %v, want nil", times)
+	}
+	if times := PrevN(schedule, time.Now(), -100); times != nil {
+		t.Errorf("PrevN(-100) = %v, want nil", times)
+	}
+}
+
+// TestPrevN_ScheduleWithoutPrev tests PrevN with a schedule that doesn't implement ScheduleWithPrev.
+func TestPrevN_ScheduleWithoutPrev(t *testing.T) {
+	sched := scheduleWithoutPrev{}
+	times := PrevN(sched, time.Now(), 5)
+	if times != nil {
+		t.Errorf("PrevN(scheduleWithoutPrev) = %v, want nil", times)
+	}
+}
+
+// TestPrevN_EverySchedule tests PrevN with @every schedules.
+func TestPrevN_EverySchedule(t *testing.T) {
+	schedule, err := ParseStandard("@every 15m")
+	if err != nil {
+		t.Fatalf("ParseStandard failed: %v", err)
+	}
+
+	start := time.Date(2024, 6, 15, 10, 0, 0, 0, time.UTC)
+	times := PrevN(schedule, start, 4)
+
+	if len(times) != 4 {
+		t.Fatalf("PrevN(4) returned %d times, want 4", len(times))
+	}
+
+	// Verify 15-minute intervals going backward
+	for i := 1; i < len(times); i++ {
+		diff := times[i-1].Sub(times[i])
+		if diff != 15*time.Minute {
+			t.Errorf("Interval between times[%d] and times[%d] = %v, want 15m", i-1, i, diff)
+		}
+	}
+}
+
+// TestPrevN_Timezone tests PrevN with timezone-aware schedules.
+func TestPrevN_Timezone(t *testing.T) {
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Skipf("Failed to load timezone: %v", err)
+	}
+
+	schedule, err := ParseStandard("TZ=America/New_York 0 9 * * *")
+	if err != nil {
+		t.Fatalf("ParseStandard failed: %v", err)
+	}
+
+	// Start in UTC, but schedule is in New York time
+	startUTC := time.Date(2024, 6, 15, 14, 0, 0, 0, time.UTC) // 10am in NY (EDT)
+
+	times := PrevN(schedule, startUTC, 3)
+	if len(times) != 3 {
+		t.Fatalf("PrevN(3) returned %d times, want 3", len(times))
+	}
+
+	// Verify times are at 9am in New York
+	for i, tm := range times {
+		nyTime := tm.In(loc)
+		if nyTime.Hour() != 9 {
+			t.Errorf("times[%d] in NY = %v, want 9am", i, nyTime)
+		}
+	}
+}
+
 // TestNextNWithEverySchedule tests NextN with @every schedules.
 func TestNextNWithEverySchedule(t *testing.T) {
 	schedule, err := ParseStandard("@every 15m")
@@ -482,6 +670,11 @@ func TestIntrospectionNilSchedule(t *testing.T) {
 		t.Errorf("NextN(nil) = %v, want nil", times)
 	}
 
+	times = PrevN(nil, time.Now(), 5)
+	if times != nil {
+		t.Errorf("PrevN(nil) = %v, want nil", times)
+	}
+
 	times = Between(nil, time.Now(), time.Now().Add(time.Hour))
 	if times != nil {
 		t.Errorf("Between(nil) = %v, want nil", times)
@@ -529,6 +722,7 @@ func TestIntrospectionConcurrent(t *testing.T) {
 		go func() {
 			for j := 0; j < 100; j++ {
 				_ = NextN(schedule, start, 10)
+				_ = PrevN(schedule, start, 10)
 				_ = Between(schedule, start, end)
 				_ = Count(schedule, start, end)
 				_ = Matches(schedule, start)
