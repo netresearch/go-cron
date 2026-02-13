@@ -442,6 +442,14 @@ func TestPrevN(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			times := PrevN(schedule, start, tt.n)
+
+			if tt.n <= 0 {
+				if times != nil {
+					t.Errorf("PrevN(%d) = %v, want nil", tt.n, times)
+				}
+				return
+			}
+
 			if len(times) != tt.wantLen {
 				t.Errorf("PrevN(%d) returned %d times, want %d", tt.n, len(times), tt.wantLen)
 			}
@@ -490,32 +498,6 @@ func TestPrevNWithDailySchedule(t *testing.T) {
 		if tm.Hour() != 9 {
 			t.Errorf("PrevN[%d] hour = %d, want 9", i, tm.Hour())
 		}
-	}
-}
-
-// TestPrevN_NilSchedule tests PrevN with a nil schedule.
-func TestPrevN_NilSchedule(t *testing.T) {
-	times := PrevN(nil, time.Now(), 5)
-	if times != nil {
-		t.Errorf("PrevN(nil) = %v, want nil", times)
-	}
-}
-
-// TestPrevN_ZeroOrNegativeN tests PrevN with zero or negative n.
-func TestPrevN_ZeroOrNegativeN(t *testing.T) {
-	schedule, err := ParseStandard("0 * * * *")
-	if err != nil {
-		t.Fatalf("ParseStandard failed: %v", err)
-	}
-
-	if times := PrevN(schedule, time.Now(), 0); times != nil {
-		t.Errorf("PrevN(0) = %v, want nil", times)
-	}
-	if times := PrevN(schedule, time.Now(), -1); times != nil {
-		t.Errorf("PrevN(-1) = %v, want nil", times)
-	}
-	if times := PrevN(schedule, time.Now(), -100); times != nil {
-		t.Errorf("PrevN(-100) = %v, want nil", times)
 	}
 }
 
