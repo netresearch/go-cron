@@ -609,3 +609,124 @@ func JitterWithLogger(logger Logger, maxJitter time.Duration) JobWrapper {
 		return &jitterLogJob{inner: j, maxJitter: maxJitter, logger: logger}
 	}
 }
+
+// maxConcurrentJob implements Job and JobWithContext for the MaxConcurrent wrapper.
+type maxConcurrentJob struct {
+	inner Job
+	sem   chan struct{}
+}
+
+// Run implements Job by delegating to RunWithContext with context.Background().
+func (m *maxConcurrentJob) Run() {
+	m.RunWithContext(context.Background())
+}
+
+// RunWithContext implements JobWithContext, propagating ctx to the inner job.
+// If the context is canceled while waiting for a slot, the job is abandoned.
+func (m *maxConcurrentJob) RunWithContext(ctx context.Context) {
+	select {
+	case m.sem <- struct{}{}: // acquire slot
+		defer func() { <-m.sem }()
+		runJob(ctx, m.inner)
+	case <-ctx.Done():
+		return // context canceled while waiting for slot
+	}
+}
+
+// MaxConcurrent limits the total number of jobs that can run concurrently
+// across all entries wrapped by this chain. When all slots are occupied,
+// new job executions wait until a slot becomes available or the context is
+// canceled (e.g., during scheduler shutdown).
+//
+// This is useful when many jobs are scheduled at the same time (e.g., many
+// @hourly jobs at minute 0) to limit concurrent resource usage (database
+// connections, API rate limits, CPU).
+//
+// # Goroutine Accumulation
+//
+// The scheduler spawns a goroutine for each due job. MaxConcurrent blocks
+// those goroutines while waiting for a slot, so goroutines still accumulate
+// if jobs are triggered faster than they complete. If this is a concern,
+// use [MaxConcurrentSkip] instead, which drops excess executions immediately.
+//
+// Unlike [SkipIfStillRunning] (which limits per-job), MaxConcurrent limits
+// across all jobs sharing the same wrapper instance.
+//
+// A limit of 0 or negative panics — use no wrapper if you want no limit.
+//
+// The returned wrapper implements [JobWithContext], propagating the incoming
+// context to the inner job if it also implements JobWithContext. If the
+// context is canceled while waiting for a slot, the job is abandoned.
+//
+// Example:
+//
+//	// Limit all jobs to 10 concurrent executions
+//	c := cron.New(cron.WithChain(
+//	    cron.Recover(logger),
+//	    cron.MaxConcurrent(10),
+//	))
+//
+//	// Compose with jitter to prevent thundering herd AND limit concurrency
+//	c := cron.New(cron.WithChain(
+//	    cron.Recover(logger),
+//	    cron.Jitter(30 * time.Second),
+//	    cron.MaxConcurrent(10),
+//	))
+func MaxConcurrent(n int) JobWrapper {
+	if n <= 0 {
+		panic("cron: MaxConcurrent requires n > 0")
+	}
+	sem := make(chan struct{}, n)
+	return func(j Job) Job {
+		return &maxConcurrentJob{inner: j, sem: sem}
+	}
+}
+
+// maxConcurrentSkipJob implements Job and JobWithContext for MaxConcurrentSkip.
+type maxConcurrentSkipJob struct {
+	inner  Job
+	sem    chan struct{}
+	logger Logger
+}
+
+// Run implements Job by delegating to RunWithContext with context.Background().
+func (m *maxConcurrentSkipJob) Run() {
+	m.RunWithContext(context.Background())
+}
+
+// RunWithContext implements JobWithContext, propagating ctx to the inner job.
+func (m *maxConcurrentSkipJob) RunWithContext(ctx context.Context) {
+	select {
+	case m.sem <- struct{}{}: // try to acquire slot
+		defer func() { <-m.sem }()
+		runJob(ctx, m.inner)
+	default:
+		m.logger.Info("skip", "reason", "max concurrent reached")
+	}
+}
+
+// MaxConcurrentSkip is like [MaxConcurrent] but skips execution instead of
+// waiting when the concurrency limit is reached. This is useful when you
+// prefer to drop executions rather than queue them up.
+//
+// Unlike [SkipIfStillRunning] (which limits per-job), MaxConcurrentSkip limits
+// across all jobs sharing the same wrapper instance.
+//
+// The returned wrapper implements [JobWithContext], propagating the incoming
+// context to the inner job if it also implements JobWithContext.
+//
+// Example:
+//
+//	c := cron.New(cron.WithChain(
+//	    cron.Recover(logger),
+//	    cron.MaxConcurrentSkip(logger, 5),
+//	))
+func MaxConcurrentSkip(logger Logger, n int) JobWrapper {
+	if n <= 0 {
+		panic("cron: MaxConcurrentSkip requires n > 0")
+	}
+	sem := make(chan struct{}, n)
+	return func(j Job) Job {
+		return &maxConcurrentSkipJob{inner: j, sem: sem, logger: logger}
+	}
+}

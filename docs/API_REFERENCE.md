@@ -1474,6 +1474,47 @@ func JitterWithLogger(logger Logger, maxJitter time.Duration) JobWrapper
 JitterWithLogger is like Jitter but logs the applied delay.
 Propagates context to context-aware inner jobs.
 
+#### func MaxConcurrent
+
+```go
+func MaxConcurrent(n int) JobWrapper
+```
+
+MaxConcurrent limits the total number of jobs that can run concurrently across
+all entries wrapped by this chain. When all slots are occupied, new job executions
+**wait** until a slot becomes available or the context is canceled.
+
+Note: waiting goroutines still accumulate. Use `MaxConcurrentSkip` to drop excess
+executions instead. Unlike `SkipIfStillRunning` (per-job), this limits across all
+jobs sharing the same wrapper instance. Panics if n <= 0. Propagates context to
+context-aware inner jobs.
+
+**Example:**
+```go
+c := cron.New(cron.WithChain(
+    cron.Recover(logger),
+    cron.MaxConcurrent(10),
+))
+```
+
+#### func MaxConcurrentSkip
+
+```go
+func MaxConcurrentSkip(logger Logger, n int) JobWrapper
+```
+
+MaxConcurrentSkip is like `MaxConcurrent` but **skips** execution instead of
+waiting when the concurrency limit is reached. Logs skips at Info level.
+Panics if n <= 0. Propagates context to context-aware inner jobs.
+
+**Example:**
+```go
+c := cron.New(cron.WithChain(
+    cron.Recover(logger),
+    cron.MaxConcurrentSkip(logger, 5),
+))
+```
+
 #### func RetryWithBackoff
 
 ```go

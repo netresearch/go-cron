@@ -29,7 +29,7 @@ The original `robfig/cron` has been unmaintained since 2020, accumulating 50+ op
 | Pause/Resume | None | `PauseEntry`, `ResumeEntry` |
 | Triggered jobs | None | `@triggered`, `TriggerEntry` |
 | Context support | None | Per-entry context, `FuncJobWithContext` |
-| Resilience | None | Retry, circuit breaker, timeout |
+| Resilience | None | Retry, circuit breaker, timeout, rate limiting |
 | Observability | None | Hooks for metrics (Prometheus, etc.) |
 | Go version | Stuck on 1.13 | Go 1.25+ with modern toolchain |
 
@@ -340,6 +340,8 @@ Available wrappers:
 | `Timeout` | Abandon after duration (goroutine keeps running) |
 | `TimeoutWithContext` | Cancel context after duration (cooperative cancellation) |
 | `Jitter` / `JitterWithLogger` | Random delay to prevent thundering herd |
+| `MaxConcurrent` | Limit total concurrent jobs (wait for slot) |
+| `MaxConcurrentSkip` | Limit total concurrent jobs (skip when full) |
 | `RetryWithBackoff` | Retry on panic with exponential backoff; `WithRetryCallback` for metrics |
 | `RetryOnError` | Retry on error return (`ErrorJob` interface); `WithRetryCallback` for metrics |
 | `CircuitBreaker` | Stop execution after consecutive failures; `WithStateChangeCallback` + `CircuitBreakerWithHandle` for monitoring |
