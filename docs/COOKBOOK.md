@@ -1122,7 +1122,16 @@ defer c.Stop()
 // HTTP handler triggers the job on demand
 http.HandleFunc("/api/deploy", func(w http.ResponseWriter, r *http.Request) {
     if err := c.TriggerEntryByName("deploy"); err != nil {
-        http.Error(w, err.Error(), http.StatusBadRequest)
+        switch {
+        case errors.Is(err, cron.ErrEntryNotFound):
+            http.Error(w, err.Error(), http.StatusNotFound)
+        case errors.Is(err, cron.ErrEntryPaused):
+            http.Error(w, err.Error(), http.StatusConflict)
+        case errors.Is(err, cron.ErrNotRunning):
+            http.Error(w, "Scheduler not running", http.StatusServiceUnavailable)
+        default:
+            http.Error(w, err.Error(), http.StatusInternalServerError)
+        }
         return
     }
     w.WriteHeader(http.StatusAccepted)
