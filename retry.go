@@ -350,7 +350,7 @@ func RetryWithBackoff(logger Logger, maxRetries int, initialDelay, maxDelay time
 				if attempt > 1 {
 					delay = calculateBackoffDelay(attempt, initialDelay, maxDelay, multiplier)
 				}
-				lastPanic = executeRetryAttempt(j, logger, attempt, lastPanic, initialDelay, maxDelay, multiplier)
+				lastPanic = executeRetryAttempt(j, logger, attempt, delay, lastPanic)
 				willRetry := lastPanic != nil && (maxAttempts == 0 || attempt < maxAttempts)
 				if cfg.callback != nil {
 					cfg.callback(RetryAttempt{
@@ -373,9 +373,10 @@ func RetryWithBackoff(logger Logger, maxRetries int, initialDelay, maxDelay time
 }
 
 // executeRetryAttempt runs a single retry attempt with optional delay.
-func executeRetryAttempt(j Job, logger Logger, attempt int, lastPanic any, initialDelay, maxDelay time.Duration, multiplier float64) any {
+// The delay must be pre-computed by the caller so that the same value
+// is used for both sleeping and reporting to callbacks.
+func executeRetryAttempt(j Job, logger Logger, attempt int, delay time.Duration, lastPanic any) any {
 	if attempt > 1 {
-		delay := calculateBackoffDelay(attempt, initialDelay, maxDelay, multiplier)
 		panicVal, _ := extractPanicValueAndStack(lastPanic)
 		logger.Info("retry", "attempt", attempt, "delay", delay, "last_panic", panicVal)
 		time.Sleep(delay)
