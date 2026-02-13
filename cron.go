@@ -1061,8 +1061,15 @@ func (c *Cron) run() {
 				c.logger.Info("updated", "entry", req.value.id)
 
 			case req := <-c.pause:
-				req.reply <- c.setPaused(&req.value)
-				c.logger.Info("pause", "entry", req.value.id, "paused", req.value.pause)
+				err := c.setPaused(&req.value)
+				req.reply <- err
+				if err == nil {
+					action := "pause"
+					if !req.value.pause {
+						action = "resume"
+					}
+					c.logger.Info(action, "entry", req.value.id)
+				}
 				continue // no timer reset needed
 			}
 
@@ -1317,15 +1324,7 @@ func (c *Cron) UpdateEntryJobByName(name, spec string, job Job) error {
 //
 // Returns ErrEntryNotFound if no entry with the given id exists.
 func (c *Cron) PauseEntry(id EntryID) error {
-	c.runningMu.Lock()
-	defer c.runningMu.Unlock()
-	request := pauseRequest{id: id, pause: true}
-	if c.running {
-		req := makeReq[pauseRequest, error](request)
-		c.pause <- req
-		return <-req.reply
-	}
-	return c.setPaused(&request)
+	return c.setPausedState(id, true)
 }
 
 // PauseEntryByName temporarily suspends the entry identified by its Name.
@@ -1337,7 +1336,7 @@ func (c *Cron) PauseEntryByName(name string) error {
 	if !e.Valid() {
 		return ErrEntryNotFound
 	}
-	return c.PauseEntry(e.ID)
+	return c.setPausedState(e.ID, true)
 }
 
 // ResumeEntry re-enables execution of a previously paused entry.
@@ -1347,15 +1346,7 @@ func (c *Cron) PauseEntryByName(name string) error {
 //
 // Returns ErrEntryNotFound if no entry with the given id exists.
 func (c *Cron) ResumeEntry(id EntryID) error {
-	c.runningMu.Lock()
-	defer c.runningMu.Unlock()
-	request := pauseRequest{id: id, pause: false}
-	if c.running {
-		req := makeReq[pauseRequest, error](request)
-		c.pause <- req
-		return <-req.reply
-	}
-	return c.setPaused(&request)
+	return c.setPausedState(id, false)
 }
 
 // ResumeEntryByName re-enables execution of a previously paused entry
@@ -1367,7 +1358,22 @@ func (c *Cron) ResumeEntryByName(name string) error {
 	if !e.Valid() {
 		return ErrEntryNotFound
 	}
-	return c.ResumeEntry(e.ID)
+	return c.setPausedState(e.ID, false)
+}
+
+// setPausedState sends a pause/resume request through the run loop (when
+// running) or applies it directly (when stopped). This is the shared
+// implementation for PauseEntry and ResumeEntry.
+func (c *Cron) setPausedState(id EntryID, pause bool) error {
+	c.runningMu.Lock()
+	defer c.runningMu.Unlock()
+	request := pauseRequest{id: id, pause: pause}
+	if c.running {
+		req := makeReq[pauseRequest, error](request)
+		c.pause <- req
+		return <-req.reply
+	}
+	return c.setPaused(&request)
 }
 
 // extractName applies JobOptions to a temporary Entry and returns the Name.
