@@ -1482,11 +1482,12 @@ func MaxConcurrent(n int) JobWrapper
 
 MaxConcurrent limits the total number of jobs that can run concurrently across
 all entries wrapped by this chain. When all slots are occupied, new job executions
-**wait** until a slot becomes available.
+**wait** until a slot becomes available or the context is canceled.
 
-Unlike `SkipIfStillRunning` (per-job), this limits across all jobs sharing the
-same wrapper instance. Panics if n <= 0. Propagates context to context-aware
-inner jobs.
+Note: waiting goroutines still accumulate. Use `MaxConcurrentSkip` to drop excess
+executions instead. Unlike `SkipIfStillRunning` (per-job), this limits across all
+jobs sharing the same wrapper instance. Panics if n <= 0. Propagates context to
+context-aware inner jobs.
 
 **Example:**
 ```go

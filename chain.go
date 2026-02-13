@@ -622,19 +622,32 @@ func (m *maxConcurrentJob) Run() {
 }
 
 // RunWithContext implements JobWithContext, propagating ctx to the inner job.
+// If the context is canceled while waiting for a slot, the job is abandoned.
 func (m *maxConcurrentJob) RunWithContext(ctx context.Context) {
-	m.sem <- struct{}{} // acquire slot (blocks if full)
-	defer func() { <-m.sem }()
-	runJob(ctx, m.inner)
+	select {
+	case m.sem <- struct{}{}: // acquire slot
+		defer func() { <-m.sem }()
+		runJob(ctx, m.inner)
+	case <-ctx.Done():
+		return // context canceled while waiting for slot
+	}
 }
 
 // MaxConcurrent limits the total number of jobs that can run concurrently
 // across all entries wrapped by this chain. When all slots are occupied,
-// new job executions wait until a slot becomes available.
+// new job executions wait until a slot becomes available or the context is
+// canceled (e.g., during scheduler shutdown).
 //
 // This is useful when many jobs are scheduled at the same time (e.g., many
-// @hourly jobs at minute 0) to prevent goroutine explosion and resource
-// exhaustion (database connections, API rate limits, CPU).
+// @hourly jobs at minute 0) to limit concurrent resource usage (database
+// connections, API rate limits, CPU).
+//
+// # Goroutine Accumulation
+//
+// The scheduler spawns a goroutine for each due job. MaxConcurrent blocks
+// those goroutines while waiting for a slot, so goroutines still accumulate
+// if jobs are triggered faster than they complete. If this is a concern,
+// use [MaxConcurrentSkip] instead, which drops excess executions immediately.
 //
 // Unlike [SkipIfStillRunning] (which limits per-job), MaxConcurrent limits
 // across all jobs sharing the same wrapper instance.
@@ -642,7 +655,8 @@ func (m *maxConcurrentJob) RunWithContext(ctx context.Context) {
 // A limit of 0 or negative panics — use no wrapper if you want no limit.
 //
 // The returned wrapper implements [JobWithContext], propagating the incoming
-// context to the inner job if it also implements JobWithContext.
+// context to the inner job if it also implements JobWithContext. If the
+// context is canceled while waiting for a slot, the job is abandoned.
 //
 // Example:
 //

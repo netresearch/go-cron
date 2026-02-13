@@ -369,5 +369,49 @@ func TestMaxConcurrent_IntegrationWithCron(t *testing.T) {
 	}
 }
 
+func TestMaxConcurrent_ContextCancellation(t *testing.T) {
+	// When waiting for a slot, context cancellation should abandon the job
+	wrapper := MaxConcurrent(1)
+	proceed := make(chan struct{})
+
+	// Occupy the single slot
+	wrapped1 := wrapper(FuncJob(func() {
+		<-proceed // hold the slot
+	}))
+	go wrapped1.Run()
+	time.Sleep(10 * time.Millisecond) // let it acquire the slot
+
+	// Try to run another job with a cancelable context
+	ctx, cancel := context.WithCancel(context.Background())
+	var executed atomic.Bool
+
+	wrapped2 := wrapper(FuncJob(func() {
+		executed.Store(true)
+	}))
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		wrapped2.(JobWithContext).RunWithContext(ctx)
+	}()
+
+	// Cancel context while waiting
+	time.Sleep(10 * time.Millisecond)
+	cancel()
+
+	select {
+	case <-done:
+		// Good - returned due to context cancellation
+	case <-time.After(time.Second):
+		t.Fatal("RunWithContext should return when context is canceled")
+	}
+
+	if executed.Load() {
+		t.Error("job should not have executed after context cancellation")
+	}
+
+	close(proceed) // release the first job
+}
+
 // testContextKey is a context key type for tests.
 type testContextKey string
