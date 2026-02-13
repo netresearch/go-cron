@@ -10,6 +10,184 @@ import (
 	"time"
 )
 
+// RetryAttempt contains metadata about a single retry attempt.
+// This is passed to the callback configured via WithRetryCallback.
+type RetryAttempt struct {
+	Attempt   int           // 1-based attempt number (1 = first execution)
+	Delay     time.Duration // Delay before this attempt (0 for first attempt)
+	Err       any           // Panic value (RetryWithBackoff) or error (RetryOnError)
+	WillRetry bool          // True if another attempt will follow
+}
+
+// RetryOption configures optional behavior for RetryWithBackoff and RetryOnError.
+type RetryOption func(*retryConfig)
+
+type retryConfig struct {
+	callback func(RetryAttempt)
+}
+
+func applyRetryOptions(opts []RetryOption) retryConfig {
+	var cfg retryConfig
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	return cfg
+}
+
+// WithRetryCallback sets a callback invoked after each attempt (including
+// the initial execution). This enables external monitoring and metrics
+// collection for retry behavior.
+//
+// Example with Prometheus:
+//
+//	RetryWithBackoff(logger, 3, time.Second, time.Minute, 2.0,
+//	    cron.WithRetryCallback(func(a cron.RetryAttempt) {
+//	        retryCounter.WithLabelValues(fmt.Sprint(a.Attempt)).Inc()
+//	        if !a.WillRetry && a.Err != nil {
+//	            retryExhausted.Inc()
+//	        }
+//	    }),
+//	)
+func WithRetryCallback(fn func(RetryAttempt)) RetryOption {
+	return func(c *retryConfig) {
+		c.callback = fn
+	}
+}
+
+// CircuitBreakerState represents the current state of a circuit breaker.
+type CircuitBreakerState int
+
+const (
+	// CircuitClosed means the circuit is operating normally.
+	// Failures increment the counter; threshold failures will open the circuit.
+	CircuitClosed CircuitBreakerState = iota
+
+	// CircuitOpen means the circuit has tripped. Executions are skipped
+	// until the cooldown period expires.
+	CircuitOpen
+
+	// CircuitHalfOpen means the cooldown has expired and one probe execution
+	// is allowed. Success closes the circuit; failure reopens it.
+	CircuitHalfOpen
+)
+
+// String returns the human-readable name of the circuit breaker state.
+func (s CircuitBreakerState) String() string {
+	switch s {
+	case CircuitClosed:
+		return "closed"
+	case CircuitOpen:
+		return "open"
+	case CircuitHalfOpen:
+		return "half-open"
+	default:
+		return fmt.Sprintf("unknown(%d)", int(s))
+	}
+}
+
+// CircuitBreakerEvent represents a state transition in the circuit breaker.
+// This is passed to the callback configured via WithStateChangeCallback.
+type CircuitBreakerEvent struct {
+	OldState CircuitBreakerState // State before the transition
+	NewState CircuitBreakerState // State after the transition
+	Failures int64               // Current consecutive failure count
+	Err      any                 // Panic value that caused the transition (nil on success)
+}
+
+// CircuitBreakerOption configures optional behavior for CircuitBreaker.
+type CircuitBreakerOption func(*circuitBreakerConfig)
+
+type circuitBreakerConfig struct {
+	callback func(CircuitBreakerEvent)
+}
+
+func applyCircuitBreakerOptions(opts []CircuitBreakerOption) circuitBreakerConfig {
+	var cfg circuitBreakerConfig
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	return cfg
+}
+
+// WithStateChangeCallback sets a callback invoked on circuit breaker state
+// transitions. This enables external monitoring and metrics collection.
+//
+// State transitions that trigger the callback:
+//   - Closed → Open (threshold failures reached)
+//   - Open → HalfOpen (cooldown expired, probe attempted)
+//   - HalfOpen → Closed (probe succeeded)
+//   - HalfOpen → Open (probe failed)
+//
+// The callback is invoked synchronously within the job execution goroutine.
+// Keep callbacks fast to avoid delaying job execution.
+//
+// Example with Prometheus:
+//
+//	CircuitBreaker(logger, 5, 5*time.Minute,
+//	    cron.WithStateChangeCallback(func(e cron.CircuitBreakerEvent) {
+//	        circuitState.WithLabelValues(e.NewState.String()).Set(1)
+//	        if e.NewState == cron.CircuitOpen {
+//	            circuitTrips.Inc()
+//	        }
+//	    }),
+//	)
+func WithStateChangeCallback(fn func(CircuitBreakerEvent)) CircuitBreakerOption {
+	return func(c *circuitBreakerConfig) {
+		c.callback = fn
+	}
+}
+
+// CircuitBreakerHandle provides read-only access to the internal state of a
+// circuit breaker. Obtain one via CircuitBreakerWithHandle.
+//
+// All methods are safe for concurrent use.
+type CircuitBreakerHandle struct {
+	state     *circuitState
+	threshold int
+	cooldown  time.Duration
+}
+
+// State returns the current circuit breaker state.
+func (h *CircuitBreakerHandle) State() CircuitBreakerState {
+	if open, _ := h.state.isOpen(h.threshold, h.cooldown); open {
+		return CircuitOpen
+	}
+	if h.state.isHalfOpen(h.threshold) {
+		return CircuitHalfOpen
+	}
+	return CircuitClosed
+}
+
+// Failures returns the current consecutive failure count.
+func (h *CircuitBreakerHandle) Failures() int64 {
+	return atomic.LoadInt64(&h.state.failures)
+}
+
+// LastFailure returns the time of the last recorded failure.
+// Returns the zero time if no failures have been recorded.
+func (h *CircuitBreakerHandle) LastFailure() time.Time {
+	nano := atomic.LoadInt64(&h.state.lastFailNano)
+	if nano == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, nano)
+}
+
+// CooldownEnds returns when the current cooldown period expires.
+// Returns the zero time if the circuit is not open.
+func (h *CircuitBreakerHandle) CooldownEnds() time.Time {
+	nano := atomic.LoadInt64(&h.state.lastFailNano)
+	failures := atomic.LoadInt64(&h.state.failures)
+	if nano == 0 || failures < int64(h.threshold) {
+		return time.Time{}
+	}
+	end := time.Unix(0, nano).Add(h.cooldown)
+	if time.Now().After(end) {
+		return time.Time{} // cooldown already expired
+	}
+	return end
+}
+
 // RetryWithBackoff wraps a job to retry on panic with exponential backoff.
 // A job "fails" if it panics. The wrapper catches panics and retries.
 //
@@ -160,14 +338,28 @@ func computeMaxAttempts(maxRetries int) int {
 	return maxRetries + 1
 }
 
-func RetryWithBackoff(logger Logger, maxRetries int, initialDelay, maxDelay time.Duration, multiplier float64) JobWrapper {
+func RetryWithBackoff(logger Logger, maxRetries int, initialDelay, maxDelay time.Duration, multiplier float64, opts ...RetryOption) JobWrapper {
+	cfg := applyRetryOptions(opts)
 	return func(j Job) Job {
 		return FuncJob(func() {
 			maxAttempts := computeMaxAttempts(maxRetries)
 			var lastPanic any
 
 			for attempt := 1; maxAttempts == 0 || attempt <= maxAttempts; attempt++ {
-				lastPanic = executeRetryAttempt(j, logger, attempt, lastPanic, initialDelay, maxDelay, multiplier)
+				var delay time.Duration
+				if attempt > 1 {
+					delay = calculateBackoffDelay(attempt, initialDelay, maxDelay, multiplier)
+				}
+				lastPanic = executeRetryAttempt(j, logger, attempt, delay, lastPanic)
+				willRetry := lastPanic != nil && (maxAttempts == 0 || attempt < maxAttempts)
+				if cfg.callback != nil {
+					cfg.callback(RetryAttempt{
+						Attempt:   attempt,
+						Delay:     delay,
+						Err:       lastPanic,
+						WillRetry: willRetry,
+					})
+				}
 				if lastPanic == nil {
 					logRetrySuccess(logger, attempt)
 					return
@@ -181,9 +373,10 @@ func RetryWithBackoff(logger Logger, maxRetries int, initialDelay, maxDelay time
 }
 
 // executeRetryAttempt runs a single retry attempt with optional delay.
-func executeRetryAttempt(j Job, logger Logger, attempt int, lastPanic any, initialDelay, maxDelay time.Duration, multiplier float64) any {
+// The delay must be pre-computed by the caller so that the same value
+// is used for both sleeping and reporting to callbacks.
+func executeRetryAttempt(j Job, logger Logger, attempt int, delay time.Duration, lastPanic any) any {
 	if attempt > 1 {
-		delay := calculateBackoffDelay(attempt, initialDelay, maxDelay, multiplier)
 		panicVal, _ := extractPanicValueAndStack(lastPanic)
 		logger.Info("retry", "attempt", attempt, "delay", delay, "last_panic", panicVal)
 		time.Sleep(delay)
@@ -245,7 +438,8 @@ func logRetryExhausted(logger Logger, lastPanic any, maxAttempts int) {
 //	| 3       | 2s    | Retry after delay  |
 //	| 4       | 4s    | Final retry        |
 //	| -       | -     | Log + panic (done) |
-func RetryOnError(logger Logger, maxRetries int, initialDelay, maxDelay time.Duration, multiplier float64) JobWrapper {
+func RetryOnError(logger Logger, maxRetries int, initialDelay, maxDelay time.Duration, multiplier float64, opts ...RetryOption) JobWrapper {
+	cfg := applyRetryOptions(opts)
 	return func(j Job) Job {
 		ej, ok := j.(ErrorJob)
 		if !ok {
@@ -258,13 +452,23 @@ func RetryOnError(logger Logger, maxRetries int, initialDelay, maxDelay time.Dur
 			var lastErr error
 
 			for attempt := 1; maxAttempts == 0 || attempt <= maxAttempts; attempt++ {
+				var delay time.Duration
 				if attempt > 1 {
-					delay := calculateBackoffDelay(attempt, initialDelay, maxDelay, multiplier)
+					delay = calculateBackoffDelay(attempt, initialDelay, maxDelay, multiplier)
 					logger.Info("retry", "attempt", attempt, "delay", delay, "last_error", lastErr)
 					time.Sleep(delay)
 				}
 
 				lastErr = ej.RunE()
+				willRetry := lastErr != nil && (maxAttempts == 0 || attempt < maxAttempts)
+				if cfg.callback != nil {
+					cfg.callback(RetryAttempt{
+						Attempt:   attempt,
+						Delay:     delay,
+						Err:       lastErr,
+						WillRetry: willRetry,
+					})
+				}
 				if lastErr == nil {
 					if attempt > 1 {
 						logger.Info("retry succeeded", "attempt", attempt)
@@ -377,10 +581,63 @@ func logCircuitFailure(logger Logger, panicValue any, newFailures int64, thresho
 	}
 }
 
-func CircuitBreaker(logger Logger, threshold int, cooldown time.Duration) JobWrapper {
-	return func(j Job) Job {
-		state := &circuitState{}
+func CircuitBreaker(logger Logger, threshold int, cooldown time.Duration, opts ...CircuitBreakerOption) JobWrapper {
+	wrapper, _ := circuitBreakerImpl(logger, threshold, cooldown, opts)
+	return wrapper
+}
 
+// CircuitBreakerWithHandle is like CircuitBreaker but also returns a handle
+// for querying the circuit breaker's internal state. The handle is safe for
+// concurrent use and can be used from health checks, dashboards, or metrics
+// exporters.
+//
+// Example:
+//
+//	wrapper, handle := cron.CircuitBreakerWithHandle(logger, 5, 5*time.Minute)
+//	c := cron.New(cron.WithChain(cron.Recover(logger), wrapper))
+//
+//	// In a health check endpoint:
+//	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+//	    state := handle.State()
+//	    if state == cron.CircuitOpen {
+//	        http.Error(w, "circuit open", http.StatusServiceUnavailable)
+//	        return
+//	    }
+//	    w.Write([]byte("ok"))
+//	})
+func CircuitBreakerWithHandle(logger Logger, threshold int, cooldown time.Duration, opts ...CircuitBreakerOption) (JobWrapper, *CircuitBreakerHandle) {
+	return circuitBreakerImpl(logger, threshold, cooldown, opts)
+}
+
+// notifyFailureTransition emits a state-change callback when a failure causes
+// a circuit state transition (Closed→Open or HalfOpen→Open).
+func notifyFailureTransition(cb func(CircuitBreakerEvent), wasHalfOpen bool, newFailures int64, threshold int, panicValue any) {
+	if cb == nil {
+		return
+	}
+	if int(newFailures) == threshold {
+		cb(CircuitBreakerEvent{OldState: CircuitClosed, NewState: CircuitOpen, Failures: newFailures, Err: panicValue})
+	} else if wasHalfOpen {
+		cb(CircuitBreakerEvent{OldState: CircuitHalfOpen, NewState: CircuitOpen, Failures: newFailures, Err: panicValue})
+	}
+}
+
+// notifyRecovery emits a state-change callback when the circuit closes after
+// a successful probe. This is only called from resetOnSuccess which requires
+// failures >= threshold, so the prior state is always HalfOpen.
+func notifyRecovery(cb func(CircuitBreakerEvent)) {
+	if cb == nil {
+		return
+	}
+	cb(CircuitBreakerEvent{OldState: CircuitHalfOpen, NewState: CircuitClosed, Failures: 0})
+}
+
+func circuitBreakerImpl(logger Logger, threshold int, cooldown time.Duration, opts []CircuitBreakerOption) (JobWrapper, *CircuitBreakerHandle) {
+	cfg := applyCircuitBreakerOptions(opts)
+	state := &circuitState{}
+	handle := &CircuitBreakerHandle{state: state, threshold: threshold, cooldown: cooldown}
+
+	wrapper := func(j Job) Job {
 		return FuncJob(func() {
 			// Check if circuit is open
 			if open, remaining := state.isOpen(threshold, cooldown); open {
@@ -390,25 +647,36 @@ func CircuitBreaker(logger Logger, threshold int, cooldown time.Duration) JobWra
 				return
 			}
 
-			// Log half-open state
-			if state.isHalfOpen(threshold) {
+			// Determine current state for event tracking
+			wasHalfOpen := state.isHalfOpen(threshold)
+
+			// Log half-open state and emit transition event
+			if wasHalfOpen {
 				logger.Info("circuit breaker half-open", "attempting_recovery", true)
+				if cfg.callback != nil {
+					cfg.callback(CircuitBreakerEvent{
+						OldState: CircuitOpen, NewState: CircuitHalfOpen,
+						Failures: atomic.LoadInt64(&state.failures),
+					})
+				}
 			}
 
 			// Execute job
 			panicValue := safeExecute(j.Run)
 
-			// Handle failure
 			if panicValue != nil {
 				newFailures := state.recordFailure()
 				logCircuitFailure(logger, panicValue, newFailures, threshold, cooldown)
+				notifyFailureTransition(cfg.callback, wasHalfOpen, newFailures, threshold, panicValue)
 				panic(panicValue)
 			}
 
-			// Handle success
 			if state.resetOnSuccess(threshold) {
 				logger.Info("circuit breaker closed", "recovered", true)
+				notifyRecovery(cfg.callback)
 			}
 		})
 	}
+
+	return wrapper, handle
 }

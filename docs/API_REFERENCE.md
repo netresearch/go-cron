@@ -1477,7 +1477,7 @@ Propagates context to context-aware inner jobs.
 #### func RetryWithBackoff
 
 ```go
-func RetryWithBackoff(logger Logger, maxRetries int, initialDelay, maxDelay time.Duration, multiplier float64) JobWrapper
+func RetryWithBackoff(logger Logger, maxRetries int, initialDelay, maxDelay time.Duration, multiplier float64, opts ...RetryOption) JobWrapper
 ```
 
 RetryWithBackoff wraps a job to retry on panic with exponential backoff.
@@ -1485,6 +1485,7 @@ RetryWithBackoff wraps a job to retry on panic with exponential backoff.
 - `initialDelay`: First retry delay
 - `maxDelay`: Maximum delay cap
 - `multiplier`: Delay multiplier per retry (typically 2.0)
+- `opts`: Optional `RetryOption` values (e.g., `WithRetryCallback`)
 
 Jitter of +/-10% is applied to prevent thundering herd.
 
@@ -1499,7 +1500,7 @@ c := cron.New(cron.WithChain(
 #### func RetryOnError
 
 ```go
-func RetryOnError(logger Logger, maxRetries int, initialDelay, maxDelay time.Duration, multiplier float64) JobWrapper
+func RetryOnError(logger Logger, maxRetries int, initialDelay, maxDelay time.Duration, multiplier float64, opts ...RetryOption) JobWrapper
 ```
 
 RetryOnError wraps an `ErrorJob` to retry on returned errors with exponential backoff.
@@ -1518,16 +1519,60 @@ c.AddJob("@every 5m", cron.FuncErrorJob(func() error {
 }))
 ```
 
+#### type RetryAttempt
+
+```go
+type RetryAttempt struct {
+    Attempt   int           // 1-based attempt number
+    Delay     time.Duration // Delay before this attempt (0 for first)
+    Err       any           // Panic value (RetryWithBackoff) or error (RetryOnError)
+    WillRetry bool          // True if another attempt will follow
+}
+```
+
+RetryAttempt contains metadata about a single retry attempt, passed to the
+callback configured via `WithRetryCallback`.
+
+#### type RetryOption
+
+```go
+type RetryOption func(*retryConfig)
+```
+
+RetryOption configures optional behavior for `RetryWithBackoff` and `RetryOnError`.
+
+#### func WithRetryCallback
+
+```go
+func WithRetryCallback(fn func(RetryAttempt)) RetryOption
+```
+
+WithRetryCallback sets a callback invoked after each attempt (including the
+initial execution). Use this for metrics, alerting, or debugging retry behavior.
+
+**Example with Prometheus:**
+```go
+cron.RetryWithBackoff(logger, 3, time.Second, time.Minute, 2.0,
+    cron.WithRetryCallback(func(a cron.RetryAttempt) {
+        retryCounter.WithLabelValues(fmt.Sprint(a.Attempt)).Inc()
+        if !a.WillRetry && a.Err != nil {
+            retryExhausted.Inc()
+        }
+    }),
+)
+```
+
 #### func CircuitBreaker
 
 ```go
-func CircuitBreaker(logger Logger, threshold int, cooldown time.Duration) JobWrapper
+func CircuitBreaker(logger Logger, threshold int, cooldown time.Duration, opts ...CircuitBreakerOption) JobWrapper
 ```
 
 CircuitBreaker wraps a job to stop execution after consecutive failures.
 - **Closed**: Normal execution. Failures increment counter.
 - **Open**: Execution skipped for `cooldown` duration after `threshold` failures.
 - **Half-Open**: After cooldown, one execution attempted. Success closes, failure reopens.
+- `opts`: Optional `CircuitBreakerOption` values (e.g., `WithStateChangeCallback`)
 
 **Example:**
 ```go
@@ -1535,6 +1580,108 @@ c := cron.New(cron.WithChain(
     cron.Recover(logger),
     cron.CircuitBreaker(logger, 5, 5*time.Minute),
 ))
+```
+
+#### func CircuitBreakerWithHandle
+
+```go
+func CircuitBreakerWithHandle(logger Logger, threshold int, cooldown time.Duration, opts ...CircuitBreakerOption) (JobWrapper, *CircuitBreakerHandle)
+```
+
+CircuitBreakerWithHandle is like `CircuitBreaker` but also returns a
+`*CircuitBreakerHandle` for querying the circuit breaker's internal state.
+The handle is safe for concurrent use and can be used from health checks,
+dashboards, or metrics exporters.
+
+**Example:**
+```go
+wrapper, handle := cron.CircuitBreakerWithHandle(logger, 5, 5*time.Minute)
+c := cron.New(cron.WithChain(cron.Recover(logger), wrapper))
+
+// In a health check endpoint:
+http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+    if handle.State() == cron.CircuitOpen {
+        http.Error(w, "circuit open", http.StatusServiceUnavailable)
+        return
+    }
+    fmt.Fprintf(w, "ok (failures=%d)", handle.Failures())
+})
+```
+
+#### type CircuitBreakerHandle
+
+```go
+type CircuitBreakerHandle struct { /* unexported fields */ }
+```
+
+CircuitBreakerHandle provides read-only access to circuit breaker state.
+All methods are safe for concurrent use.
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `State()` | `CircuitBreakerState` | Current state (Closed, Open, HalfOpen) |
+| `Failures()` | `int64` | Current consecutive failure count |
+| `LastFailure()` | `time.Time` | Time of last failure (zero if none) |
+| `CooldownEnds()` | `time.Time` | When cooldown expires (zero if not open) |
+
+#### type CircuitBreakerState
+
+```go
+type CircuitBreakerState int
+
+const (
+    CircuitClosed   CircuitBreakerState = iota // Normal operation
+    CircuitOpen                                // Skipping execution
+    CircuitHalfOpen                            // Probing recovery
+)
+```
+
+CircuitBreakerState represents the current state of a circuit breaker.
+The `String()` method returns `"closed"`, `"open"`, or `"half-open"`.
+
+#### type CircuitBreakerEvent
+
+```go
+type CircuitBreakerEvent struct {
+    OldState CircuitBreakerState // State before the transition
+    NewState CircuitBreakerState // State after the transition
+    Failures int64               // Current consecutive failure count
+    Err      any                 // Panic value that caused the transition (nil on success)
+}
+```
+
+CircuitBreakerEvent represents a state transition in the circuit breaker,
+passed to the callback configured via `WithStateChangeCallback`.
+
+#### type CircuitBreakerOption
+
+```go
+type CircuitBreakerOption func(*circuitBreakerConfig)
+```
+
+CircuitBreakerOption configures optional behavior for `CircuitBreaker` and
+`CircuitBreakerWithHandle`.
+
+#### func WithStateChangeCallback
+
+```go
+func WithStateChangeCallback(fn func(CircuitBreakerEvent)) CircuitBreakerOption
+```
+
+WithStateChangeCallback sets a callback invoked on circuit breaker state
+transitions (Closed→Open, Open→HalfOpen, HalfOpen→Closed, HalfOpen→Open).
+The callback is invoked synchronously; keep it fast.
+
+**Example with Prometheus:**
+```go
+cron.CircuitBreaker(logger, 5, 5*time.Minute,
+    cron.WithStateChangeCallback(func(e cron.CircuitBreakerEvent) {
+        circuitState.WithLabelValues(e.NewState.String()).Set(1)
+        if e.NewState == cron.CircuitOpen {
+            circuitTrips.Inc()
+        }
+    }),
+)
 ```
 
 #### func TimeoutWithContext

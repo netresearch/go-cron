@@ -22,7 +22,19 @@ features, bug fixes, and modernization improvements.
   `TriggeredSchedule` type, `IsTriggered()` helper, exported `Entry.Triggered` field,
   `ErrEntryPaused`/`ErrNotRunning` sentinel errors, and compatibility with all existing
   features (middleware, context, pause/resume, run-once, observability hooks).
+- **CircuitBreaker state monitoring** ([#185]): `CircuitBreakerWithHandle()` returns a
+  `*CircuitBreakerHandle` for querying state (`State()`, `Failures()`, `LastFailure()`,
+  `CooldownEnds()`). `WithStateChangeCallback()` option emits events on state transitions
+  (Closed→Open, Open→HalfOpen, HalfOpen→Closed, HalfOpen→Open). New exported types:
+  `CircuitBreakerState`, `CircuitBreakerEvent`, `CircuitBreakerHandle`,
+  `CircuitBreakerOption`.
+- **RetryWithBackoff/RetryOnError attempt callback** ([#186]): `WithRetryCallback()`
+  option invokes a callback after each attempt with `RetryAttempt` metadata (attempt
+  number, delay, error/panic value, whether another retry will follow). Enables external
+  metrics collection for retry behavior.
 
+[#185]: https://github.com/netresearch/go-cron/issues/185
+[#186]: https://github.com/netresearch/go-cron/issues/186
 [#203]: https://github.com/netresearch/go-cron/issues/203
 [#311]: https://github.com/netresearch/go-cron/issues/311
 [PR#323]: https://github.com/netresearch/go-cron/pull/323
