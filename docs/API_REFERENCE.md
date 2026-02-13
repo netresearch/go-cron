@@ -740,6 +740,7 @@ type Entry struct {
     WrappedJob        Job           // Job with chain wrappers applied
     Job               Job           // Original job as submitted
     Name              string        // Optional name for the entry
+    Tags              []string      // Optional tags for categorizing entries
     MissedPolicy      MissedPolicy  // Policy for handling missed executions
     MissedGracePeriod time.Duration // Maximum age for catch-up runs
     Paused            bool          // Whether this entry is paused
@@ -1998,10 +1999,10 @@ MaxSpecLength is the maximum allowed length for a cron spec string.
 var ErrEntryNotFound = errors.New("cron: entry not found")
 ```
 
-Returned by update methods (`UpdateSchedule`, `UpdateEntry`, `UpdateEntryByName`,
-`UpdateEntryJob`, `UpdateEntryJobByName`) and pause/resume methods (`PauseEntry`,
-`PauseEntryByName`, `ResumeEntry`, `ResumeEntryByName`) when the specified entry
-does not exist.
+Returned by update methods (`UpdateSchedule`, `UpdateScheduleByName`, `UpdateJob`,
+`UpdateJobByName`, `UpdateEntry`, `UpdateEntryByName`, `UpdateEntryJob`,
+`UpdateEntryJobByName`) and pause/resume methods (`PauseEntry`, `PauseEntryByName`,
+`ResumeEntry`, `ResumeEntryByName`) when the specified entry does not exist.
 
 ### ErrNilJob
 

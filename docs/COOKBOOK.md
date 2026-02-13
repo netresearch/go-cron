@@ -1094,7 +1094,7 @@ c.PauseEntryByName("experimental-sync")
 - No catch-up flood occurs on resume — the job simply runs at its next scheduled time
 - Pausing/resuming an already-paused/active entry is a no-op (returns nil)
 - `WithPaused()` option lets you add entries in paused state from the start
-- All methods return `ErrEntryNotFound` for invalid entries
+- The pause/resume methods return `ErrEntryNotFound` for invalid entries, while query methods return `false`
 
 ---
 
