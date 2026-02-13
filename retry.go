@@ -621,16 +621,14 @@ func notifyFailureTransition(cb func(CircuitBreakerEvent), wasHalfOpen bool, new
 	}
 }
 
-// notifyRecovery emits a state-change callback when the circuit closes after recovery.
-func notifyRecovery(cb func(CircuitBreakerEvent), wasHalfOpen bool) {
+// notifyRecovery emits a state-change callback when the circuit closes after
+// a successful probe. This is only called from resetOnSuccess which requires
+// failures >= threshold, so the prior state is always HalfOpen.
+func notifyRecovery(cb func(CircuitBreakerEvent)) {
 	if cb == nil {
 		return
 	}
-	fromState := CircuitHalfOpen
-	if !wasHalfOpen {
-		fromState = CircuitClosed
-	}
-	cb(CircuitBreakerEvent{OldState: fromState, NewState: CircuitClosed, Failures: 0})
+	cb(CircuitBreakerEvent{OldState: CircuitHalfOpen, NewState: CircuitClosed, Failures: 0})
 }
 
 func circuitBreakerImpl(logger Logger, threshold int, cooldown time.Duration, opts []CircuitBreakerOption) (JobWrapper, *CircuitBreakerHandle) {
@@ -674,7 +672,7 @@ func circuitBreakerImpl(logger Logger, threshold int, cooldown time.Duration, op
 
 			if state.resetOnSuccess(threshold) {
 				logger.Info("circuit breaker closed", "recovered", true)
-				notifyRecovery(cfg.callback, wasHalfOpen)
+				notifyRecovery(cfg.callback)
 			}
 		})
 	}
