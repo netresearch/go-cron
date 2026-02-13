@@ -1185,6 +1185,104 @@ c.Start()
 
 ---
 
+## 12. Resilience Monitoring
+
+Monitor retry behavior and circuit breaker state for production alerting.
+
+### Retry Metrics
+
+```go
+package main
+
+import (
+	"fmt"
+	"log"
+	"sync/atomic"
+	"time"
+
+	cron "github.com/netresearch/go-cron"
+)
+
+func main() {
+	var totalRetries, exhausted int64
+
+	c := cron.New(cron.WithChain(
+		cron.Recover(cron.DefaultLogger),
+		cron.RetryWithBackoff(cron.DefaultLogger, 3, time.Second, time.Minute, 2.0,
+			cron.WithRetryCallback(func(a cron.RetryAttempt) {
+				if a.Attempt > 1 {
+					atomic.AddInt64(&totalRetries, 1)
+				}
+				if !a.WillRetry && a.Err != nil {
+					atomic.AddInt64(&exhausted, 1)
+				}
+			}),
+		),
+	))
+
+	c.AddFunc("@every 1m", func() { /* job */ }, cron.WithName("api-sync"))
+	c.Start()
+	defer c.Stop()
+
+	// Periodically log metrics
+	for range time.Tick(30 * time.Second) {
+		fmt.Printf("retries=%d exhausted=%d\n",
+			atomic.LoadInt64(&totalRetries), atomic.LoadInt64(&exhausted))
+	}
+}
+```
+
+### Circuit Breaker Health Check
+
+```go
+package main
+
+import (
+	"fmt"
+	"log"
+	"net/http"
+	"time"
+
+	cron "github.com/netresearch/go-cron"
+)
+
+func main() {
+	logger := cron.DefaultLogger
+
+	wrapper, handle := cron.CircuitBreakerWithHandle(logger, 5, 5*time.Minute,
+		cron.WithStateChangeCallback(func(e cron.CircuitBreakerEvent) {
+			log.Printf("circuit: %s -> %s (failures=%d)",
+				e.OldState, e.NewState, e.Failures)
+		}),
+	)
+
+	c := cron.New(cron.WithChain(cron.Recover(logger), wrapper))
+	c.AddFunc("@every 1m", func() { /* job */ }, cron.WithName("payment-sync"))
+	c.Start()
+	defer c.Stop()
+
+	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		state := handle.State()
+		switch state {
+		case cron.CircuitOpen:
+			w.WriteHeader(http.StatusServiceUnavailable)
+			fmt.Fprintf(w, "circuit open (failures=%d, cooldown_ends=%s)",
+				handle.Failures(), handle.CooldownEnds().Format(time.RFC3339))
+		case cron.CircuitHalfOpen:
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, "circuit half-open (probing recovery)")
+		default:
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, "ok")
+		}
+	})
+
+	log.Fatal(http.ListenAndServe(":8080", nil))
+}
+```
+
+---
+
 ## Summary
 
 | Recipe | When to Use |
@@ -1200,6 +1298,7 @@ c.Start()
 | Production Template | Complete production setup |
 | Pause/Resume | Maintenance windows, feature-flagged jobs |
 | Triggered Jobs | API-triggered jobs, workflow orchestration |
+| Resilience Monitoring | Retry metrics, circuit breaker health checks |
 
 For more details, see:
 - [API Reference](API_REFERENCE.md)

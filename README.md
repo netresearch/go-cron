@@ -340,9 +340,9 @@ Available wrappers:
 | `Timeout` | Abandon after duration (goroutine keeps running) |
 | `TimeoutWithContext` | Cancel context after duration (cooperative cancellation) |
 | `Jitter` / `JitterWithLogger` | Random delay to prevent thundering herd |
-| `RetryWithBackoff` | Retry on panic with exponential backoff |
-| `RetryOnError` | Retry on error return (`ErrorJob` interface) |
-| `CircuitBreaker` | Stop execution after consecutive failures |
+| `RetryWithBackoff` | Retry on panic with exponential backoff; `WithRetryCallback` for metrics |
+| `RetryOnError` | Retry on error return (`ErrorJob` interface); `WithRetryCallback` for metrics |
+| `CircuitBreaker` | Stop execution after consecutive failures; `WithStateChangeCallback` + `CircuitBreakerWithHandle` for monitoring |
 
 Concurrency and resilience wrappers (`Recover`, `SkipIfStillRunning`, `DelayIfStillRunning`, `Timeout`, `TimeoutWithContext`, `Jitter`, `JitterWithLogger`) implement `JobWithContext` and propagate the incoming context to inner jobs. Retry and circuit breaker wrappers (`RetryWithBackoff`, `RetryOnError`, `CircuitBreaker`) do not currently forward context.
 
@@ -381,6 +381,23 @@ c := cron.New(cron.WithObservability(cron.ObservabilityHooks{
         jobDuration.WithLabelValues(name).Observe(dur.Seconds())
     },
 }))
+```
+
+Monitor circuit breaker state and retry attempts:
+
+```go
+wrapper, handle := cron.CircuitBreakerWithHandle(logger, 5, 5*time.Minute,
+    cron.WithStateChangeCallback(func(e cron.CircuitBreakerEvent) {
+        circuitState.WithLabelValues(e.NewState.String()).Set(1)
+    }),
+)
+// handle.State(), handle.Failures(), handle.CooldownEnds() for health checks
+
+cron.RetryWithBackoff(logger, 3, time.Second, time.Minute, 2.0,
+    cron.WithRetryCallback(func(a cron.RetryAttempt) {
+        retryCounter.WithLabelValues(fmt.Sprint(a.Attempt)).Inc()
+    }),
+)
 ```
 
 Query job status at runtime:
