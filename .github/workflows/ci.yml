@@ -383,7 +383,7 @@ jobs:
       - name: Check license compliance
         run: |
           echo "Checking license compliance..."
-          $(go env GOPATH)/bin/go-licenses check ./... 2>&1 | tee license-report.txt || true
+          "$(go env GOPATH)/bin/go-licenses" check ./... 2>&1 | tee license-report.txt || true
 
           # Fail on copyleft licenses that require source disclosure
           if grep -iE "(GPL|AGPL|LGPL|SSPL|CDDL|EPL|MPL)" license-report.txt | grep -v "Apache\|MIT\|BSD\|ISC"; then
@@ -394,7 +394,7 @@ jobs:
 
       - name: Generate license report
         run: |
-          $(go env GOPATH)/bin/go-licenses report ./... 2>/dev/null > license-report-full.txt || true
+          "$(go env GOPATH)/bin/go-licenses" report ./... 2>/dev/null > license-report-full.txt || true
           echo "=== License Summary ==="
           cat license-report-full.txt
 
