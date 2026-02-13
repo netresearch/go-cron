@@ -1,4 +1,4 @@
-<!-- Managed by agent: keep sections and order; edit content, not structure. Last updated: 2026-01-18 -->
+<!-- Managed by agent: keep sections and order; edit content, not structure. Last updated: 2026-02-13 -->
 
 # AGENTS.md
 
@@ -10,7 +10,7 @@ Maintained fork of robfig/cron - a cron spec parser and job scheduler for Go.
 
 | Attribute | Value |
 |-----------|-------|
-| Language | Go 1.25+ |
+| Language | Go 1.25+ (CI tests 1.25.x + 1.26.x) |
 | Module | `github.com/netresearch/go-cron` |
 | Type | Library (zero external dependencies) |
 | API | Drop-in replacement for `robfig/cron/v3` |
@@ -24,6 +24,12 @@ Maintained fork of robfig/cron - a cron spec parser and job scheduler for Go.
 - Heap-based scheduling for O(log n) performance
 - FakeClock for deterministic testing
 - ObservabilityHooks for metrics integration
+- Runtime updates: `UpdateSchedule`, `UpdateJob`, `UpdateEntry`, `UpsertJob`
+- Resilience: `RetryOnError`, `RetryWithBackoff`, `CircuitBreaker`
+- Validation: `ValidateSpecWith`, `Cron.ValidateSpec`
+- Per-entry context with auto-cancellation on Remove/replacement
+- `WaitForJob`/`IsJobRunning` for graceful lifecycle management
+- Context-propagating chain wrappers (concurrency wrappers implement `JobWithContext`)
 
 ## Architecture Decision Records (ADRs)
 
@@ -120,13 +126,16 @@ import (
 | `spec.go` | `SpecSchedule` - cron spec to next-time calculation |
 | `option.go` | Functional options for Cron configuration |
 | `chain.go` | Job wrappers: `Recover`, `SkipIfStillRunning`, `Timeout`, etc. |
-| `retry.go` | `RetryWithBackoff`, `CircuitBreaker` wrappers |
-| `validate.go` | `ValidateSpec`, `AnalyzeSpec` for expression validation |
+| `retry.go` | `RetryWithBackoff`, `RetryOnError`, `CircuitBreaker` wrappers |
+| `validate.go` | `ValidateSpec`, `ValidateSpecWith`, `AnalyzeSpec` for expression validation |
 | `introspect.go` | Schedule introspection: `Bounds()`, `Fields()`, `Matches()` |
 | `observability.go` | `ObservabilityHooks` for metrics integration |
 | `logger.go` | Logger interface compatible with go-logr/logr |
 | `clock.go` | Clock abstraction with `FakeClock` for testing |
 | `heap.go` | Min-heap implementation for entry scheduling |
+| `missed.go` | `WithMissedPolicy` for catch-up of missed jobs |
+| `constantdelay.go` | `ConstantDelaySchedule` for `@every` intervals |
+| `doc.go` | Package documentation and cron expression syntax |
 
 ## Documentation index
 
@@ -152,6 +161,7 @@ import (
 - [ ] Conventional commit message format used
 - [ ] PR template filled out completely
 - [ ] **ADRs reviewed** if touching architectural areas
+- [ ] **No CI annotations** — check job annotations (not just pass/fail), fix all warnings
 
 ## Good vs bad examples
 
