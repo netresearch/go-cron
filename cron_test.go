@@ -4707,3 +4707,446 @@ func TestIsJobRunningNonExistent(t *testing.T) {
 		t.Error("IsJobRunningByName should return false for non-existent entry")
 	}
 }
+
+// --- Pause / Resume tests ---
+
+func TestPauseEntryBeforeRunning(t *testing.T) {
+	start := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
+	clock := NewFakeClock(start)
+	c := New(WithClock(clock), WithParser(secondParser))
+	defer c.Stop()
+
+	var runs int32
+	id, err := c.AddFunc("* * * * * *", func() { atomic.AddInt32(&runs, 1) })
+	if err != nil {
+		t.Fatalf("add failed: %v", err)
+	}
+
+	// Pause before starting the scheduler
+	if err := c.PauseEntry(id); err != nil {
+		t.Fatalf("pause failed: %v", err)
+	}
+
+	c.Start()
+	clock.BlockUntil(1)
+	clock.Advance(time.Second)
+	time.Sleep(10 * time.Millisecond)
+
+	if n := atomic.LoadInt32(&runs); n != 0 {
+		t.Errorf("expected 0 runs while paused, got %d", n)
+	}
+}
+
+func TestPauseEntryWhileRunning(t *testing.T) {
+	start := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
+	clock := NewFakeClock(start)
+	c := New(WithClock(clock), WithParser(secondParser))
+	defer c.Stop()
+
+	var runs int32
+	id, err := c.AddFunc("* * * * * *", func() { atomic.AddInt32(&runs, 1) })
+	if err != nil {
+		t.Fatalf("add failed: %v", err)
+	}
+
+	c.Start()
+	clock.BlockUntil(1)
+	clock.Advance(time.Second)
+	time.Sleep(10 * time.Millisecond)
+
+	if n := atomic.LoadInt32(&runs); n != 1 {
+		t.Fatalf("expected 1 run before pause, got %d", n)
+	}
+
+	// Pause while running
+	if err := c.PauseEntry(id); err != nil {
+		t.Fatalf("pause failed: %v", err)
+	}
+
+	clock.BlockUntil(1)
+	clock.Advance(time.Second)
+	time.Sleep(10 * time.Millisecond)
+
+	if n := atomic.LoadInt32(&runs); n != 1 {
+		t.Errorf("expected still 1 run after pausing, got %d", n)
+	}
+}
+
+func TestResumeEntry(t *testing.T) {
+	start := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
+	clock := NewFakeClock(start)
+	c := New(WithClock(clock), WithParser(secondParser))
+	defer c.Stop()
+
+	var runs int32
+	id, err := c.AddFunc("* * * * * *", func() { atomic.AddInt32(&runs, 1) })
+	if err != nil {
+		t.Fatalf("add failed: %v", err)
+	}
+
+	c.Start()
+	clock.BlockUntil(1)
+
+	// Pause
+	if err := c.PauseEntry(id); err != nil {
+		t.Fatalf("pause failed: %v", err)
+	}
+
+	clock.Advance(time.Second)
+	time.Sleep(10 * time.Millisecond)
+
+	if n := atomic.LoadInt32(&runs); n != 0 {
+		t.Fatalf("expected 0 runs while paused, got %d", n)
+	}
+
+	// Resume
+	if err := c.ResumeEntry(id); err != nil {
+		t.Fatalf("resume failed: %v", err)
+	}
+
+	clock.BlockUntil(1)
+	clock.Advance(time.Second)
+	time.Sleep(10 * time.Millisecond)
+
+	if n := atomic.LoadInt32(&runs); n != 1 {
+		t.Errorf("expected 1 run after resume, got %d", n)
+	}
+}
+
+func TestPauseEntryByName(t *testing.T) {
+	start := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
+	clock := NewFakeClock(start)
+	c := New(WithClock(clock), WithParser(secondParser))
+	defer c.Stop()
+
+	var runs int32
+	_, err := c.AddFunc("* * * * * *", func() { atomic.AddInt32(&runs, 1) }, WithName("my-job"))
+	if err != nil {
+		t.Fatalf("add failed: %v", err)
+	}
+
+	c.Start()
+	clock.BlockUntil(1)
+	clock.Advance(time.Second)
+	time.Sleep(10 * time.Millisecond)
+
+	if n := atomic.LoadInt32(&runs); n != 1 {
+		t.Fatalf("expected 1 run before pause, got %d", n)
+	}
+
+	if err := c.PauseEntryByName("my-job"); err != nil {
+		t.Fatalf("pause by name failed: %v", err)
+	}
+
+	clock.BlockUntil(1)
+	clock.Advance(time.Second)
+	time.Sleep(10 * time.Millisecond)
+
+	if n := atomic.LoadInt32(&runs); n != 1 {
+		t.Errorf("expected still 1 run after pause by name, got %d", n)
+	}
+}
+
+func TestResumeEntryByName(t *testing.T) {
+	start := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
+	clock := NewFakeClock(start)
+	c := New(WithClock(clock), WithParser(secondParser))
+	defer c.Stop()
+
+	var runs int32
+	_, err := c.AddFunc("* * * * * *", func() { atomic.AddInt32(&runs, 1) }, WithName("my-job"))
+	if err != nil {
+		t.Fatalf("add failed: %v", err)
+	}
+
+	c.Start()
+	clock.BlockUntil(1)
+
+	if err := c.PauseEntryByName("my-job"); err != nil {
+		t.Fatalf("pause failed: %v", err)
+	}
+
+	clock.Advance(time.Second)
+	time.Sleep(10 * time.Millisecond)
+
+	if n := atomic.LoadInt32(&runs); n != 0 {
+		t.Fatalf("expected 0 runs while paused, got %d", n)
+	}
+
+	if err := c.ResumeEntryByName("my-job"); err != nil {
+		t.Fatalf("resume by name failed: %v", err)
+	}
+
+	clock.BlockUntil(1)
+	clock.Advance(time.Second)
+	time.Sleep(10 * time.Millisecond)
+
+	if n := atomic.LoadInt32(&runs); n != 1 {
+		t.Errorf("expected 1 run after resume by name, got %d", n)
+	}
+}
+
+func TestIsEntryPaused(t *testing.T) {
+	c := New()
+	defer c.Stop()
+
+	id, _ := c.AddFunc("@every 1h", func() {}, WithName("test-job"))
+
+	if c.IsEntryPaused(id) {
+		t.Error("IsEntryPaused should return false for active entry")
+	}
+	if c.IsEntryPausedByName("test-job") {
+		t.Error("IsEntryPausedByName should return false for active entry")
+	}
+
+	c.PauseEntry(id)
+
+	if !c.IsEntryPaused(id) {
+		t.Error("IsEntryPaused should return true after pause")
+	}
+	if !c.IsEntryPausedByName("test-job") {
+		t.Error("IsEntryPausedByName should return true after pause")
+	}
+
+	c.ResumeEntry(id)
+
+	if c.IsEntryPaused(id) {
+		t.Error("IsEntryPaused should return false after resume")
+	}
+}
+
+func TestIsEntryPausedByNameNonExistent(t *testing.T) {
+	c := New()
+	defer c.Stop()
+
+	if c.IsEntryPaused(EntryID(9999)) {
+		t.Error("IsEntryPaused should return false for non-existent entry")
+	}
+	if c.IsEntryPausedByName("no-such-job") {
+		t.Error("IsEntryPausedByName should return false for non-existent entry")
+	}
+}
+
+func TestPauseNonExistentEntry(t *testing.T) {
+	c := New()
+	defer c.Stop()
+
+	if err := c.PauseEntry(EntryID(9999)); !errors.Is(err, ErrEntryNotFound) {
+		t.Errorf("expected ErrEntryNotFound for PauseEntry, got %v", err)
+	}
+	if err := c.PauseEntryByName("no-such-job"); !errors.Is(err, ErrEntryNotFound) {
+		t.Errorf("expected ErrEntryNotFound for PauseEntryByName, got %v", err)
+	}
+}
+
+func TestResumeNonExistentEntry(t *testing.T) {
+	c := New()
+	defer c.Stop()
+
+	if err := c.ResumeEntry(EntryID(9999)); !errors.Is(err, ErrEntryNotFound) {
+		t.Errorf("expected ErrEntryNotFound for ResumeEntry, got %v", err)
+	}
+	if err := c.ResumeEntryByName("no-such-job"); !errors.Is(err, ErrEntryNotFound) {
+		t.Errorf("expected ErrEntryNotFound for ResumeEntryByName, got %v", err)
+	}
+}
+
+// TestPausedEntryKeepsSchedule verifies that a paused entry's Next time
+// advances while paused (no catch-up flood on resume).
+func TestPausedEntryKeepsSchedule(t *testing.T) {
+	start := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
+	clock := NewFakeClock(start)
+	c := New(WithClock(clock), WithParser(secondParser))
+	defer c.Stop()
+
+	var runs int32
+	id, _ := c.AddFunc("* * * * * *", func() { atomic.AddInt32(&runs, 1) })
+	c.Start()
+	clock.BlockUntil(1)
+
+	c.PauseEntry(id)
+
+	// Advance 5 seconds while paused
+	for i := 0; i < 5; i++ {
+		clock.Advance(time.Second)
+		time.Sleep(5 * time.Millisecond)
+		clock.BlockUntil(1)
+	}
+
+	if n := atomic.LoadInt32(&runs); n != 0 {
+		t.Fatalf("expected 0 runs while paused, got %d", n)
+	}
+
+	c.ResumeEntry(id)
+
+	// Next tick should fire exactly once (no catch-up)
+	clock.Advance(time.Second)
+	time.Sleep(10 * time.Millisecond)
+
+	if n := atomic.LoadInt32(&runs); n != 1 {
+		t.Errorf("expected exactly 1 run after resume (no catch-up), got %d", n)
+	}
+}
+
+func TestWithPausedOption(t *testing.T) {
+	start := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
+	clock := NewFakeClock(start)
+	c := New(WithClock(clock), WithParser(secondParser))
+	defer c.Stop()
+
+	var runs int32
+	id, _ := c.AddFunc("* * * * * *", func() { atomic.AddInt32(&runs, 1) }, WithPaused())
+
+	if !c.IsEntryPaused(id) {
+		t.Fatal("entry should start paused with WithPaused option")
+	}
+
+	c.Start()
+	clock.BlockUntil(1)
+	clock.Advance(time.Second)
+	time.Sleep(10 * time.Millisecond)
+
+	if n := atomic.LoadInt32(&runs); n != 0 {
+		t.Fatalf("expected 0 runs while paused via WithPaused, got %d", n)
+	}
+
+	c.ResumeEntry(id)
+	clock.BlockUntil(1)
+	clock.Advance(time.Second)
+	time.Sleep(10 * time.Millisecond)
+
+	if n := atomic.LoadInt32(&runs); n != 1 {
+		t.Errorf("expected 1 run after resuming WithPaused entry, got %d", n)
+	}
+}
+
+// TestPauseDoesNotAffectRunningJob verifies that pausing while a job is
+// in-flight does not cancel the currently executing job.
+func TestPauseDoesNotAffectRunningJob(t *testing.T) {
+	c := New()
+	c.Start()
+	defer c.Stop()
+
+	jobStarted := make(chan struct{})
+	jobRelease := make(chan struct{})
+	jobDone := make(chan struct{})
+	var startOnce, doneOnce sync.Once
+
+	id, _ := c.AddFunc("@every 1s", func() {
+		startOnce.Do(func() { close(jobStarted) })
+		<-jobRelease
+		doneOnce.Do(func() { close(jobDone) })
+	}, WithName("running-job"), WithRunImmediately())
+
+	// Wait for job to start
+	select {
+	case <-jobStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("job did not start")
+	}
+
+	// Pause while job is in-flight
+	if err := c.PauseEntry(id); err != nil {
+		t.Fatalf("pause failed: %v", err)
+	}
+
+	// The job should still be running (not canceled by pause)
+	if !c.IsJobRunning(id) {
+		t.Error("job should still be running after pause")
+	}
+
+	// Release the job - it should complete normally
+	close(jobRelease)
+
+	select {
+	case <-jobDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("job did not complete after release")
+	}
+}
+
+// TestPausedEntryVisibleInSnapshot verifies that the Paused flag is visible
+// in Entry() and Entries() snapshots.
+func TestPausedEntryVisibleInSnapshot(t *testing.T) {
+	c := New()
+	defer c.Stop()
+
+	id, _ := c.AddFunc("@every 1h", func() {}, WithName("snap-job"))
+
+	// Before pause
+	e := c.Entry(id)
+	if e.Paused {
+		t.Error("entry should not be paused initially")
+	}
+
+	c.PauseEntry(id)
+
+	// After pause - check Entry()
+	e = c.Entry(id)
+	if !e.Paused {
+		t.Error("Entry snapshot should show Paused=true")
+	}
+
+	// Check Entries()
+	entries := c.Entries()
+	found := false
+	for _, entry := range entries {
+		if entry.ID == id {
+			if !entry.Paused {
+				t.Error("Entries() snapshot should show Paused=true")
+			}
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("entry not found in Entries() snapshot")
+	}
+
+	// After resume
+	c.ResumeEntry(id)
+	e = c.Entry(id)
+	if e.Paused {
+		t.Error("Entry snapshot should show Paused=false after resume")
+	}
+}
+
+// TestPauseResumeIdempotent verifies that pausing an already-paused entry
+// and resuming an already-active entry are no-ops (no error).
+func TestPauseResumeIdempotent(t *testing.T) {
+	c := New()
+	defer c.Stop()
+
+	id, _ := c.AddFunc("@every 1h", func() {})
+
+	// Pause twice - no error
+	if err := c.PauseEntry(id); err != nil {
+		t.Fatalf("first pause failed: %v", err)
+	}
+	if err := c.PauseEntry(id); err != nil {
+		t.Fatalf("second pause (idempotent) failed: %v", err)
+	}
+
+	// Resume twice - no error
+	if err := c.ResumeEntry(id); err != nil {
+		t.Fatalf("first resume failed: %v", err)
+	}
+	if err := c.ResumeEntry(id); err != nil {
+		t.Fatalf("second resume (idempotent) failed: %v", err)
+	}
+}
+
+// TestPauseEntryWhileRunningNotFound verifies that pausing a non-existent
+// entry returns ErrEntryNotFound when the scheduler is running.
+func TestPauseEntryWhileRunningNotFound(t *testing.T) {
+	c := New()
+	c.Start()
+	defer c.Stop()
+
+	if err := c.PauseEntry(EntryID(9999)); !errors.Is(err, ErrEntryNotFound) {
+		t.Errorf("expected ErrEntryNotFound, got %v", err)
+	}
+	if err := c.ResumeEntry(EntryID(9999)); !errors.Is(err, ErrEntryNotFound) {
+		t.Errorf("expected ErrEntryNotFound, got %v", err)
+	}
+}
