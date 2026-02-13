@@ -22,7 +22,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        go-version: [1.25.x]
+        go-version: [1.25.x, 1.26.x]
         platform: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - name: Harden Runner
@@ -51,25 +51,25 @@ jobs:
       - name: Unit tests
         shell: bash
         run: |
-          gotestsum --format github-actions -- -race -covermode=atomic -coverprofile=coverage-${{ matrix.platform }}.out ./...
+          gotestsum --format github-actions -- -race -covermode=atomic -coverprofile=coverage-${{ matrix.go-version }}-${{ matrix.platform }}.out ./...
 
       - name: Coverage summary
         shell: bash
-        run: go tool cover -func=coverage-${{ matrix.platform }}.out | tail -n 1 || true
+        run: go tool cover -func=coverage-${{ matrix.go-version }}-${{ matrix.platform }}.out | tail -n 1 || true
 
       - name: Enforce coverage threshold
         shell: bash
         run: |
           THRESHOLD=70.0
-          TOTAL=$(go tool cover -func=coverage-${{ matrix.platform }}.out | awk '/^total:/ {gsub("%","",$3); print $3}')
+          TOTAL=$(go tool cover -func=coverage-${{ matrix.go-version }}-${{ matrix.platform }}.out | awk '/^total:/ {gsub("%","",$3); print $3}')
           echo "Total coverage: ${TOTAL}% (threshold ${THRESHOLD}%)"
           awk -v t="$THRESHOLD" -v a="$TOTAL" 'BEGIN { if (a+0 < t+0) { exit 1 } }'
 
       - name: Upload coverage
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: coverage-${{ matrix.platform }}
-          path: coverage-${{ matrix.platform }}.out
+          name: coverage-${{ matrix.go-version }}-${{ matrix.platform }}
+          path: coverage-${{ matrix.go-version }}-${{ matrix.platform }}.out
 
   codecov:
     name: upload coverage
@@ -96,7 +96,8 @@ jobs:
         uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de # v5.5.2
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: coverage-ubuntu-latest.out,coverage-windows-latest.out,coverage-macos-latest.out
+          directory: .
+          flags: unittests
           fail_ci_if_error: false
           verbose: true
 
