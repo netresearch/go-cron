@@ -13,6 +13,7 @@ Practical recipes for common scheduling patterns. Each recipe is self-contained 
 7. [Dynamic Scheduling](#7-dynamic-scheduling)
 8. [Multi-Timezone](#8-multi-timezone)
 9. [Production-Ready Template](#9-production-ready-template)
+10. [Pause/Resume](#10-pauseresume)
 
 ---
 
@@ -1021,6 +1022,82 @@ func hourlyReport() {
 
 ---
 
+## 10. Pause/Resume
+
+**Problem**: You need to temporarily suspend jobs during maintenance or enable jobs only after feature activation.
+
+**Solution — Maintenance Window**:
+
+```go
+package main
+
+import (
+    "log"
+    "os"
+
+    cron "github.com/netresearch/go-cron"
+)
+
+func main() {
+    logger := cron.VerbosePrintfLogger(log.New(os.Stdout, "cron: ", log.LstdFlags))
+
+    c := cron.New(
+        cron.WithLogger(logger),
+        cron.WithChain(cron.Recover(logger)),
+    )
+
+    c.AddFunc("@every 1m", func() {
+        log.Println("Syncing data...")
+    }, cron.WithName("sync"))
+
+    c.Start()
+
+    // During deployment: pause the job
+    if err := c.PauseEntryByName("sync"); err != nil {
+        log.Printf("pause failed: %v", err)
+    }
+    log.Println("Paused sync during deployment")
+
+    // Check status
+    if c.IsEntryPausedByName("sync") {
+        log.Println("sync is paused")
+    }
+
+    // After deployment: resume
+    if err := c.ResumeEntryByName("sync"); err != nil {
+        log.Printf("resume failed: %v", err)
+    }
+    log.Println("Resumed sync after deployment")
+
+    select {} // Run forever
+}
+```
+
+**Solution — Feature-Flagged Jobs**:
+
+```go
+// Register job in paused state — activate later via feature flag
+c.AddFunc("@every 5m", experimentalSync,
+    cron.WithPaused(),
+    cron.WithName("experimental-sync"),
+)
+
+// When feature flag is enabled:
+c.ResumeEntryByName("experimental-sync")
+
+// When feature flag is disabled:
+c.PauseEntryByName("experimental-sync")
+```
+
+**Key Points**:
+- Paused entries remain registered with their schedule advancing, but execution is skipped
+- No catch-up flood occurs on resume — the job simply runs at its next scheduled time
+- Pausing/resuming an already-paused/active entry is a no-op (returns nil)
+- `WithPaused()` option lets you add entries in paused state from the start
+- All methods return `ErrEntryNotFound` for invalid entries
+
+---
+
 ## Summary
 
 | Recipe | When to Use |
@@ -1034,6 +1111,7 @@ func hourlyReport() {
 | Dynamic Scheduling | Runtime job management via API |
 | Multi-Timezone | Global applications, regional schedules |
 | Production Template | Complete production setup |
+| Pause/Resume | Maintenance windows, feature-flagged jobs |
 
 For more details, see:
 - [API Reference](API_REFERENCE.md)
