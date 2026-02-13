@@ -32,7 +32,12 @@ features, bug fixes, and modernization improvements.
   option invokes a callback after each attempt with `RetryAttempt` metadata (attempt
   number, delay, error/panic value, whether another retry will follow). Enables external
   metrics collection for retry behavior.
+- **Rate limiting middleware** ([#167]): `MaxConcurrent(n)` limits total concurrent
+  job executions across all wrapped entries (wait for slot). `MaxConcurrentSkip(logger, n)`
+  skips execution when full. Both propagate context and share state across all wrapped
+  jobs, unlike per-job `SkipIfStillRunning`/`DelayIfStillRunning`.
 
+[#167]: https://github.com/netresearch/go-cron/issues/167
 [#185]: https://github.com/netresearch/go-cron/issues/185
 [#186]: https://github.com/netresearch/go-cron/issues/186
 [#203]: https://github.com/netresearch/go-cron/issues/203
