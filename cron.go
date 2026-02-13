@@ -21,7 +21,8 @@ var ErrDuplicateName = errors.New("cron: duplicate entry name")
 
 // ErrEntryNotFound is returned by UpdateSchedule, UpdateScheduleByName,
 // UpdateJob, UpdateJobByName, UpdateEntry, UpdateEntryByName,
-// UpdateEntryJob, UpdateEntryJobByName, and UpsertJob when the specified
+// UpdateEntryJob, UpdateEntryJobByName, UpsertJob, PauseEntry,
+// PauseEntryByName, ResumeEntry, and ResumeEntryByName when the specified
 // entry does not exist in this Cron instance.
 var ErrEntryNotFound = errors.New("cron: entry not found")
 
@@ -51,6 +52,7 @@ type Cron struct {
 	add         chan request[*Entry, struct{}]
 	remove      chan request[EntryID, struct{}]
 	update      chan request[updateScheduleRequest, error]
+	pause       chan request[pauseRequest, error]
 	snapshot    chan chan []Entry
 	entryLookup chan entryLookupRequest // O(1) single-entry lookup when running
 	nameLookup  chan nameLookupRequest  // O(1) entry lookup by name when running
@@ -217,6 +219,12 @@ type updateScheduleRequest struct {
 	job      Job      // nil means keep existing job
 }
 
+// pauseRequest is used to pause or resume an entry.
+type pauseRequest struct {
+	id    EntryID
+	pause bool // true=pause, false=resume
+}
+
 // request is a generic way to make a request to the run loop.
 type request[T, C any] struct {
 	value T
@@ -284,6 +292,12 @@ type Entry struct {
 	// should be caught up. If zero, all missed executions (within safety limits)
 	// are eligible for catch-up. Set via WithMissedGracePeriod().
 	MissedGracePeriod time.Duration
+
+	// Paused indicates whether this entry is temporarily suspended.
+	// When true, the scheduler skips this entry during execution but keeps
+	// it registered with its schedule intact. Use PauseEntry/ResumeEntry
+	// to toggle. Visible in Entry snapshots.
+	Paused bool
 
 	// entryCtx is a per-entry context derived from the Cron's baseCtx.
 	// It is canceled when the entry is removed or when its job is replaced
@@ -387,6 +401,7 @@ func New(opts ...Option) *Cron {
 		nameLookup:  make(chan nameLookupRequest),
 		remove:      make(chan request[EntryID, struct{}]),
 		update:      make(chan request[updateScheduleRequest, error]),
+		pause:       make(chan request[pauseRequest, error]),
 		running:     false,
 		runningMu:   sync.Mutex{},
 		logger:      DefaultLogger,
@@ -575,6 +590,26 @@ func WithMissedPolicy(policy MissedPolicy) JobOption {
 func WithMissedGracePeriod(d time.Duration) JobOption {
 	return func(e *Entry) {
 		e.MissedGracePeriod = d
+	}
+}
+
+// WithPaused causes the entry to be added in a paused state.
+// Paused entries remain registered with their schedule intact but are
+// skipped during execution. Use ResumeEntry to activate the entry later.
+//
+// This is useful for:
+//   - Pre-registering jobs that should only run after explicit activation
+//   - Maintenance windows: add jobs paused, resume when ready
+//   - Feature flags: register jobs that are enabled externally
+//
+// Example:
+//
+//	id, _ := c.AddFunc("@every 5m", syncData, cron.WithPaused(), cron.WithName("sync"))
+//	// Later, when ready:
+//	c.ResumeEntry(id)
+func WithPaused() JobOption {
+	return func(e *Entry) {
+		e.Paused = true
 	}
 }
 
@@ -894,6 +929,16 @@ func (c *Cron) processDueEntries(now time.Time) {
 		if e.Next.After(now) || e.Next.IsZero() {
 			break
 		}
+
+		// Skip paused entries: reschedule without executing.
+		if e.Paused {
+			e.Next = e.Schedule.Next(now)
+			c.hooks.callOnSchedule(e.ID, e.Job, e.Next)
+			c.entries.Update(e)
+			c.logger.Info("skipped-paused", "now", now, "entry", e.ID, "next", e.Next)
+			continue
+		}
+
 		scheduledTime := e.Next
 		c.startJob(e.entryCtx, e.running, e.ID, e.Job, e.WrappedJob, scheduledTime)
 		e.Prev = e.Next
@@ -1014,6 +1059,11 @@ func (c *Cron) run() {
 				timer.Stop()
 				now = c.now()
 				c.logger.Info("updated", "entry", req.value.id)
+
+			case req := <-c.pause:
+				req.reply <- c.setPaused(&req.value)
+				c.logger.Info("pause", "entry", req.value.id, "paused", req.value.pause)
+				continue // no timer reset needed
 			}
 
 			break
@@ -1097,6 +1147,21 @@ func (c *Cron) updateSchedule(req *updateScheduleRequest) error {
 		c.entries.Update(entry)
 		c.hooks.callOnSchedule(entry.ID, entry.Job, entry.Next)
 	}
+	return nil
+}
+
+// setPaused sets the Paused flag on an existing entry.
+// No heap fix is needed because pausing doesn't change scheduling times.
+//
+// Concurrency: Must be called only from the scheduler's run loop (when
+// c.running is true) which owns the data exclusively, or from PauseEntry /
+// ResumeEntry when the scheduler is stopped (caller holds runningMu).
+func (c *Cron) setPaused(req *pauseRequest) error {
+	entry, found := c.entryIndex[req.id]
+	if !found {
+		return ErrEntryNotFound
+	}
+	entry.Paused = req.pause
 	return nil
 }
 
@@ -1242,6 +1307,67 @@ func (c *Cron) UpdateEntryJobByName(name, spec string, job Job) error {
 		return err
 	}
 	return c.UpdateEntryByName(name, schedule, job)
+}
+
+// PauseEntry temporarily suspends the entry identified by id.
+// While paused, the entry remains registered and its schedule advances,
+// but execution is skipped. Use ResumeEntry to re-enable execution.
+//
+// Pausing an already-paused entry is a no-op (returns nil).
+//
+// Returns ErrEntryNotFound if no entry with the given id exists.
+func (c *Cron) PauseEntry(id EntryID) error {
+	c.runningMu.Lock()
+	defer c.runningMu.Unlock()
+	request := pauseRequest{id: id, pause: true}
+	if c.running {
+		req := makeReq[pauseRequest, error](request)
+		c.pause <- req
+		return <-req.reply
+	}
+	return c.setPaused(&request)
+}
+
+// PauseEntryByName temporarily suspends the entry identified by its Name.
+// Lookup is O(1) via the internal name index.
+//
+// Returns ErrEntryNotFound if no entry with the given name exists.
+func (c *Cron) PauseEntryByName(name string) error {
+	e := c.EntryByName(name)
+	if !e.Valid() {
+		return ErrEntryNotFound
+	}
+	return c.PauseEntry(e.ID)
+}
+
+// ResumeEntry re-enables execution of a previously paused entry.
+// The entry's schedule is preserved; it will execute at its next scheduled time.
+//
+// Resuming an already-active entry is a no-op (returns nil).
+//
+// Returns ErrEntryNotFound if no entry with the given id exists.
+func (c *Cron) ResumeEntry(id EntryID) error {
+	c.runningMu.Lock()
+	defer c.runningMu.Unlock()
+	request := pauseRequest{id: id, pause: false}
+	if c.running {
+		req := makeReq[pauseRequest, error](request)
+		c.pause <- req
+		return <-req.reply
+	}
+	return c.setPaused(&request)
+}
+
+// ResumeEntryByName re-enables execution of a previously paused entry
+// identified by its Name. Lookup is O(1) via the internal name index.
+//
+// Returns ErrEntryNotFound if no entry with the given name exists.
+func (c *Cron) ResumeEntryByName(name string) error {
+	e := c.EntryByName(name)
+	if !e.Valid() {
+		return ErrEntryNotFound
+	}
+	return c.ResumeEntry(e.ID)
 }
 
 // extractName applies JobOptions to a temporary Entry and returns the Name.
@@ -1625,4 +1751,16 @@ func (c *Cron) IsJobRunningByName(name string) bool {
 		return false
 	}
 	return e.running.isRunning()
+}
+
+// IsEntryPaused reports whether the entry with the given ID is currently paused.
+// Returns false if the entry does not exist.
+func (c *Cron) IsEntryPaused(id EntryID) bool {
+	return c.Entry(id).Paused
+}
+
+// IsEntryPausedByName reports whether the named entry is currently paused.
+// Returns false if no entry has the given name.
+func (c *Cron) IsEntryPausedByName(name string) bool {
+	return c.EntryByName(name).Paused
 }
