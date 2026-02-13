@@ -16,6 +16,9 @@ The following protection rules should be configured in GitHub Settings > Branche
 - `unit / unit tests (1.25.x, ubuntu-latest)`
 - `unit / unit tests (1.25.x, windows-latest)`
 - `unit / unit tests (1.25.x, macos-latest)`
+- `unit / unit tests (1.26.x, ubuntu-latest)`
+- `unit / unit tests (1.26.x, windows-latest)`
+- `unit / unit tests (1.26.x, macos-latest)`
 - `lint / golangci-lint`
 - `vulncheck / govulncheck`
 - `gosec / gosec`
