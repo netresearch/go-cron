@@ -29,6 +29,11 @@ func TestIsTriggered(t *testing.T) {
 	if !IsTriggered(TriggeredSchedule{}) {
 		t.Error("IsTriggered(TriggeredSchedule{}) = false, want true")
 	}
+	// Pointer variant should also be detected
+	ts := &TriggeredSchedule{}
+	if !IsTriggered(ts) {
+		t.Error("IsTriggered(*TriggeredSchedule) = false, want true")
+	}
 	if IsTriggered(Every(time.Minute)) {
 		t.Error("IsTriggered(ConstantDelaySchedule) = true, want false")
 	}
@@ -360,6 +365,41 @@ func TestTriggeredEntry_Snapshot(t *testing.T) {
 				t.Error("sched-job: Triggered = true, want false")
 			}
 		}
+	}
+}
+
+func TestTriggeredEntry_UpdateScheduleRecomputesFlag(t *testing.T) {
+	c := New(WithParser(secondParser))
+
+	// Start as triggered
+	id, err := c.AddFunc("@triggered", func() {}, WithName("update-test"))
+	if err != nil {
+		t.Fatalf("add failed: %v", err)
+	}
+
+	e := c.Entry(id)
+	if !e.Triggered {
+		t.Fatal("initial: Triggered = false, want true")
+	}
+
+	// Update to a regular schedule — Triggered should become false
+	if err := c.UpdateSchedule(id, Every(time.Minute)); err != nil {
+		t.Fatalf("UpdateSchedule failed: %v", err)
+	}
+
+	e = c.Entry(id)
+	if e.Triggered {
+		t.Error("after UpdateSchedule to Every: Triggered = true, want false")
+	}
+
+	// Update back to triggered — Triggered should become true again
+	if err := c.UpdateSchedule(id, TriggeredSchedule{}); err != nil {
+		t.Fatalf("UpdateSchedule back to triggered failed: %v", err)
+	}
+
+	e = c.Entry(id)
+	if !e.Triggered {
+		t.Error("after UpdateSchedule to Triggered: Triggered = false, want true")
 	}
 }
 

@@ -31,6 +31,10 @@ func (TriggeredSchedule) Prev(time.Time) time.Time { return time.Time{} }
 //	    fmt.Println("This entry only runs when triggered manually")
 //	}
 func IsTriggered(s Schedule) bool {
-	_, ok := s.(TriggeredSchedule)
-	return ok
+	switch s.(type) {
+	case TriggeredSchedule, *TriggeredSchedule:
+		return true
+	default:
+		return false
+	}
 }

@@ -1108,34 +1108,48 @@ still benefit from the scheduler's middleware chain.
 ### API-Triggered Pattern
 
 ```go
-c := cron.New()
+package main
 
-// Register a triggered job — never fires on its own
-deployID, _ := c.AddFunc("@triggered", func() {
-    log.Println("Deploying...")
-    runDeployPipeline()
-}, cron.WithName("deploy"))
+import (
+    "errors"
+    "log"
+    "net/http"
 
-c.Start()
-defer c.Stop()
+    cron "github.com/netresearch/go-cron"
+)
 
-// HTTP handler triggers the job on demand
-http.HandleFunc("/api/deploy", func(w http.ResponseWriter, r *http.Request) {
-    if err := c.TriggerEntryByName("deploy"); err != nil {
-        switch {
-        case errors.Is(err, cron.ErrEntryNotFound):
-            http.Error(w, err.Error(), http.StatusNotFound)
-        case errors.Is(err, cron.ErrEntryPaused):
-            http.Error(w, err.Error(), http.StatusConflict)
-        case errors.Is(err, cron.ErrNotRunning):
-            http.Error(w, "Scheduler not running", http.StatusServiceUnavailable)
-        default:
-            http.Error(w, err.Error(), http.StatusInternalServerError)
+func main() {
+    c := cron.New()
+
+    // Register a triggered job — never fires on its own
+    c.AddFunc("@triggered", func() {
+        log.Println("Deploying...")
+        // runDeployPipeline()
+    }, cron.WithName("deploy"))
+
+    c.Start()
+    defer c.Stop()
+
+    // HTTP handler triggers the job on demand
+    http.HandleFunc("/api/deploy", func(w http.ResponseWriter, r *http.Request) {
+        if err := c.TriggerEntryByName("deploy"); err != nil {
+            switch {
+            case errors.Is(err, cron.ErrEntryNotFound):
+                http.Error(w, err.Error(), http.StatusNotFound)
+            case errors.Is(err, cron.ErrEntryPaused):
+                http.Error(w, err.Error(), http.StatusConflict)
+            case errors.Is(err, cron.ErrNotRunning):
+                http.Error(w, "Scheduler not running", http.StatusServiceUnavailable)
+            default:
+                http.Error(w, err.Error(), http.StatusInternalServerError)
+            }
+            return
         }
-        return
-    }
-    w.WriteHeader(http.StatusAccepted)
-})
+        w.WriteHeader(http.StatusAccepted)
+    })
+
+    log.Fatal(http.ListenAndServe(":8080", nil))
+}
 ```
 
 ### Workflow Orchestration

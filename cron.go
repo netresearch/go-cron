@@ -1163,6 +1163,7 @@ func (c *Cron) updateSchedule(req *updateScheduleRequest) error {
 	}
 
 	entry.Schedule = req.schedule
+	entry.Triggered = IsTriggered(req.schedule)
 	if req.job != nil {
 		// Cancel the old entry context so running jobs for the old closure
 		// receive a cancellation signal, then create a fresh context for
