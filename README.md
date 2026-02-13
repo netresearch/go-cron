@@ -27,6 +27,7 @@ The original `robfig/cron` has been unmaintained since 2020, accumulating 50+ op
 | DOM/DOW logic | OR (confusing) | AND (logical, consistent) |
 | Runtime updates | Remove + re-add | `UpdateSchedule`, `UpsertJob` |
 | Pause/Resume | None | `PauseEntry`, `ResumeEntry` |
+| Triggered jobs | None | `@triggered`, `TriggerEntry` |
 | Context support | None | Per-entry context, `FuncJobWithContext` |
 | Resilience | None | Retry, circuit breaker, timeout |
 | Observability | None | Hooks for metrics (Prometheus, etc.) |
@@ -125,6 +126,7 @@ Standard 5-field cron format (minute-first):
 | `@daily` | Once a day, midnight | `0 0 * * *` |
 | `@hourly` | Once an hour, beginning of hour | `0 * * * *` |
 | `@every <duration>` | Every interval | e.g., `@every 1h30m` |
+| `@triggered` | Never auto-runs; manual only | aliases: `@manual`, `@none` |
 
 ### Wraparound Ranges
 
@@ -275,6 +277,24 @@ c.AddFunc("@every 5m", syncData, cron.WithPaused(), cron.WithName("sync"))
 ```
 
 Paused entries remain registered with their schedule advancing, but execution is skipped. No catch-up flood occurs on resume.
+
+## Triggered Jobs
+
+Jobs that never fire automatically — only when you say so:
+
+```go
+// Register a triggered job
+c.AddFunc("@triggered", deploy, cron.WithName("deploy"))
+c.Start()
+
+// Trigger on demand (e.g., from an HTTP handler)
+c.TriggerEntryByName("deploy")
+
+// Works on regular entries too — "run now"
+c.TriggerEntry(scheduledEntryID)
+```
+
+Triggered entries benefit from the full middleware chain (retry, timeout, skip-if-running). Use `@triggered`, `@manual`, or `@none` — all are aliases.
 
 ## Context Support
 

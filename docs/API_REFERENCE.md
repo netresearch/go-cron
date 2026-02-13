@@ -518,6 +518,48 @@ if c.IsEntryPausedByName("sync") {
 }
 ```
 
+#### func (*Cron) TriggerEntry
+
+```go
+func (c *Cron) TriggerEntry(id EntryID) error
+```
+
+TriggerEntry immediately executes the entry with the given ID, regardless
+of its schedule. The entry's middleware chain (Recover, SkipIfStillRunning,
+etc.) is applied as usual. This works on both triggered (`@triggered`) and
+regularly scheduled entries — providing a "run now" capability for any entry.
+
+The scheduler must be running; returns `ErrNotRunning` otherwise.
+Returns `ErrEntryPaused` if the entry is paused.
+Returns `ErrEntryNotFound` if no entry with the given ID exists.
+
+**Example:**
+```go
+id, _ := c.AddFunc("@triggered", deploy, cron.WithName("deploy"))
+c.Start()
+c.TriggerEntry(id) // Run on demand
+```
+
+#### func (*Cron) TriggerEntryByName
+
+```go
+func (c *Cron) TriggerEntryByName(name string) error
+```
+
+TriggerEntryByName immediately executes the entry identified by its Name.
+Lookup is O(1) via the internal name index.
+
+Returns `ErrNotRunning` if the scheduler is not running.
+Returns `ErrEntryPaused` if the entry is paused.
+Returns `ErrEntryNotFound` if no entry with the given name exists.
+
+**Example:**
+```go
+c.AddFunc("@triggered", deploy, cron.WithName("deploy"))
+c.Start()
+c.TriggerEntryByName("deploy")
+```
+
 #### func (*Cron) ScheduleJob
 
 ```go
@@ -744,6 +786,7 @@ type Entry struct {
     MissedPolicy      MissedPolicy  // Policy for handling missed executions
     MissedGracePeriod time.Duration // Maximum age for catch-up runs
     Paused            bool          // Whether this entry is paused
+    Triggered         bool          // Whether this entry uses a triggered schedule
 }
 ```
 
@@ -1224,6 +1267,49 @@ func (s ConstantDelaySchedule) Next(t time.Time) time.Time
 ```
 
 Next returns the next activation time after t.
+
+---
+
+### TriggeredSchedule
+
+```go
+type TriggeredSchedule struct{}
+```
+
+TriggeredSchedule is a schedule that never fires automatically. Entries using
+this schedule remain dormant until explicitly triggered via `TriggerEntry` or
+`TriggerEntryByName`. Created by the `@triggered`, `@manual`, or `@none` descriptors.
+
+#### func (TriggeredSchedule) Next
+
+```go
+func (TriggeredSchedule) Next(time.Time) time.Time
+```
+
+Next always returns the zero time.
+
+#### func (TriggeredSchedule) Prev
+
+```go
+func (TriggeredSchedule) Prev(time.Time) time.Time
+```
+
+Prev always returns the zero time.
+
+#### func IsTriggered
+
+```go
+func IsTriggered(s Schedule) bool
+```
+
+IsTriggered reports whether the given schedule is a TriggeredSchedule.
+
+**Example:**
+```go
+if cron.IsTriggered(entry.Schedule) {
+    fmt.Println("This entry only runs when triggered manually")
+}
+```
 
 ---
 
@@ -2001,8 +2087,9 @@ var ErrEntryNotFound = errors.New("cron: entry not found")
 
 Returned by update methods (`UpdateSchedule`, `UpdateScheduleByName`, `UpdateJob`,
 `UpdateJobByName`, `UpdateEntry`, `UpdateEntryByName`, `UpdateEntryJob`,
-`UpdateEntryJobByName`) and pause/resume methods (`PauseEntry`, `PauseEntryByName`,
-`ResumeEntry`, `ResumeEntryByName`) when the specified entry does not exist.
+`UpdateEntryJobByName`), pause/resume methods (`PauseEntry`, `PauseEntryByName`,
+`ResumeEntry`, `ResumeEntryByName`), and trigger methods (`TriggerEntry`,
+`TriggerEntryByName`) when the specified entry does not exist.
 
 ### ErrNilJob
 
@@ -2029,6 +2116,24 @@ var ErrMaxEntriesReached = errors.New("cron: max entries limit reached")
 
 Returned by `AddFunc`, `AddJob`, and `ScheduleJob` when the `WithMaxEntries` limit
 has been reached.
+
+### ErrEntryPaused
+
+```go
+var ErrEntryPaused = errors.New("cron: entry is paused")
+```
+
+Returned by `TriggerEntry` and `TriggerEntryByName` when attempting to trigger
+a paused entry. Resume the entry first.
+
+### ErrNotRunning
+
+```go
+var ErrNotRunning = errors.New("cron: scheduler is not running")
+```
+
+Returned by `TriggerEntry` and `TriggerEntryByName` when the scheduler is not
+running. Start the scheduler first.
 
 ### ErrDuplicateName
 
