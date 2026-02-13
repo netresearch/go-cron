@@ -475,6 +475,36 @@ c.AddFunc("0 9 * * *", dailyReport,
 > and store it yourself (database, file, etc.). See [docs/PERSISTENCE_GUIDE.md](docs/PERSISTENCE_GUIDE.md)
 > for complete integration patterns.
 
+## Schedule Introspection
+
+Query schedules without running them — useful for calendar previews, audit logs, and debugging:
+
+```go
+schedule, _ := cron.ParseStandard("0 9 * * MON-FRI")
+now := time.Now()
+
+// Upcoming executions
+upcoming := cron.NextN(schedule, now, 5)
+
+// Past executions (requires ScheduleWithPrev)
+recent := cron.PrevN(schedule, now, 5)
+
+// Executions in a time range
+start, end := now, now.AddDate(0, 1, 0)
+times := cron.Between(schedule, start, end)      // all in range
+capped := cron.BetweenWithLimit(schedule, start, end, 100) // at most 100
+
+// Count executions
+total := cron.Count(schedule, start, end)
+
+// Check if a time matches the schedule
+if cron.Matches(schedule, now) {
+    fmt.Println("Now is a scheduled time!")
+}
+```
+
+`PrevN` returns times in reverse chronological order (most recent first). It returns nil when the schedule doesn't implement `ScheduleWithPrev`. All built-in schedules support it.
+
 ## Documentation
 
 - [API Reference](docs/API_REFERENCE.md) — Complete type and method documentation

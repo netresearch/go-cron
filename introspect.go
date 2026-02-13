@@ -147,6 +147,49 @@ func CountWithLimit(schedule Schedule, start, end time.Time, limit int) int {
 	return count
 }
 
+// PrevN returns the previous n execution times for the schedule, before t.
+// Returns nil if schedule is nil, n <= 0, or schedule doesn't implement ScheduleWithPrev.
+//
+// Times are returned in reverse chronological order (most recent first).
+// Stops early if Prev() returns zero time (no earlier execution exists).
+//
+// This is useful for:
+//   - Audit logs showing recent executions
+//   - Debugging missed executions
+//   - Historical schedule analysis
+//
+// Example:
+//
+//	schedule, _ := cron.ParseStandard("0 9 * * MON-FRI")
+//	times := cron.PrevN(schedule, time.Now(), 10)
+//	for _, t := range times {
+//	    fmt.Println("Previous run:", t)
+//	}
+func PrevN(schedule Schedule, t time.Time, n int) []time.Time {
+	if schedule == nil || n <= 0 {
+		return nil
+	}
+
+	sp, ok := schedule.(ScheduleWithPrev)
+	if !ok {
+		return nil
+	}
+
+	times := make([]time.Time, 0, n)
+	current := t
+
+	for range n {
+		prev := sp.Prev(current)
+		if prev.IsZero() {
+			break
+		}
+		times = append(times, prev)
+		current = prev
+	}
+
+	return times
+}
+
 // Matches reports whether the given time matches the schedule.
 // This checks if t would be an execution time for the schedule.
 //
