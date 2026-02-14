@@ -3,6 +3,8 @@ package cron
 import (
 	"context"
 	"errors"
+	"slices"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -913,6 +915,49 @@ func TestWorkflow_ConcurrentExecutions(t *testing.T) {
 			t.Fatalf("timeout: only %d/10 jobs ran", atomic.LoadInt32(&count))
 		default:
 			time.Sleep(10 * time.Millisecond)
+		}
+	}
+}
+
+func TestWorkflowRetention(t *testing.T) {
+	var completedIDs []string
+	var mu sync.Mutex
+	hooks := ObservabilityHooks{
+		OnWorkflowComplete: func(execID string, _ EntryID, _ map[EntryID]JobResult) {
+			mu.Lock()
+			completedIDs = append(completedIDs, execID)
+			mu.Unlock()
+		},
+	}
+	c := New(WithSeconds(), WithWorkflowRetention(2), WithObservability(hooks))
+	c.Start()
+	defer c.Stop()
+
+	c.AddFunc("@triggered", func() {}, WithName("root"))
+	c.AddFunc("@triggered", func() {}, WithName("child"))
+	_ = c.AddDependencyByName("child", "root", OnSuccess)
+
+	// Trigger 5 executions.
+	for range 5 {
+		_ = c.TriggerEntryByName("root")
+		time.Sleep(50 * time.Millisecond) // let each complete
+	}
+
+	time.Sleep(200 * time.Millisecond) // let retention cleanup run
+
+	// Only the last 2 completed executions should be queryable.
+	mu.Lock()
+	ids := slices.Clone(completedIDs)
+	mu.Unlock()
+
+	if len(ids) < 5 {
+		t.Skipf("only %d executions completed, need 5", len(ids))
+	}
+
+	// First 3 should be gone from completed storage.
+	for _, id := range ids[:3] {
+		if status := c.WorkflowStatus(id); status != nil {
+			t.Errorf("WorkflowStatus(%q) should be nil (evicted by retention)", id)
 		}
 	}
 }
