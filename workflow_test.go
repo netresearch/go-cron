@@ -2,6 +2,7 @@ package cron
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
@@ -254,5 +255,145 @@ func TestHasCycle(t *testing.T) {
 				t.Errorf("hasCycle() = %v, want %v", got, tt.wantCycle)
 			}
 		})
+	}
+}
+
+func TestAddDependency_Basic(t *testing.T) {
+	c := New(WithSeconds())
+	c.Start()
+	defer c.Stop()
+
+	a, _ := c.AddFunc("@triggered", func() {}, WithName("a"))
+	b, _ := c.AddFunc("@triggered", func() {}, WithName("b"))
+
+	err := c.AddDependency(b, a, OnSuccess)
+	if err != nil {
+		t.Fatalf("AddDependency() error: %v", err)
+	}
+
+	deps := c.Dependencies(b)
+	if len(deps) != 1 {
+		t.Fatalf("Dependencies() = %d edges, want 1", len(deps))
+	}
+	if deps[0].ParentID != a || deps[0].Condition != OnSuccess {
+		t.Errorf("dep = {%v, %v}, want {%v, OnSuccess}", deps[0].ParentID, deps[0].Condition, a)
+	}
+}
+
+func TestAddDependency_CycleDetected(t *testing.T) {
+	c := New(WithSeconds())
+	c.Start()
+	defer c.Stop()
+
+	a, _ := c.AddFunc("@triggered", func() {}, WithName("a"))
+	b, _ := c.AddFunc("@triggered", func() {}, WithName("b"))
+
+	_ = c.AddDependency(b, a, OnSuccess)
+	err := c.AddDependency(a, b, OnSuccess)
+	if !errors.Is(err, ErrCycleDetected) {
+		t.Errorf("AddDependency() = %v, want ErrCycleDetected", err)
+	}
+}
+
+func TestAddDependency_NotFound(t *testing.T) {
+	c := New(WithSeconds())
+	c.Start()
+	defer c.Stop()
+
+	a, _ := c.AddFunc("@triggered", func() {}, WithName("a"))
+
+	if err := c.AddDependency(a, 9999, OnSuccess); !errors.Is(err, ErrEntryNotFound) {
+		t.Errorf("unknown parent: got %v, want ErrEntryNotFound", err)
+	}
+	if err := c.AddDependency(9999, a, OnSuccess); !errors.Is(err, ErrEntryNotFound) {
+		t.Errorf("unknown child: got %v, want ErrEntryNotFound", err)
+	}
+}
+
+func TestAddDependency_InvalidCondition(t *testing.T) {
+	c := New(WithSeconds())
+	c.Start()
+	defer c.Stop()
+
+	a, _ := c.AddFunc("@triggered", func() {}, WithName("a"))
+	b, _ := c.AddFunc("@triggered", func() {}, WithName("b"))
+
+	err := c.AddDependency(b, a, TriggerCondition(99))
+	if !errors.Is(err, ErrInvalidCondition) {
+		t.Errorf("invalid condition: got %v, want ErrInvalidCondition", err)
+	}
+}
+
+func TestAddDependency_Idempotent(t *testing.T) {
+	c := New(WithSeconds())
+	c.Start()
+	defer c.Stop()
+
+	a, _ := c.AddFunc("@triggered", func() {}, WithName("a"))
+	b, _ := c.AddFunc("@triggered", func() {}, WithName("b"))
+
+	_ = c.AddDependency(b, a, OnSuccess)
+	_ = c.AddDependency(b, a, OnSuccess) // duplicate
+
+	deps := c.Dependencies(b)
+	if len(deps) != 1 {
+		t.Errorf("duplicate edge: got %d deps, want 1", len(deps))
+	}
+}
+
+func TestAddDependencyByName(t *testing.T) {
+	c := New(WithSeconds())
+	c.Start()
+	defer c.Stop()
+
+	c.AddFunc("@triggered", func() {}, WithName("parent"))
+	c.AddFunc("@triggered", func() {}, WithName("child"))
+
+	err := c.AddDependencyByName("child", "parent", OnSuccess)
+	if err != nil {
+		t.Fatalf("AddDependencyByName() error: %v", err)
+	}
+
+	deps := c.DependenciesByName("child")
+	if len(deps) != 1 {
+		t.Fatalf("DependenciesByName() = %d edges, want 1", len(deps))
+	}
+}
+
+func TestRemoveDependency(t *testing.T) {
+	c := New(WithSeconds())
+	c.Start()
+	defer c.Stop()
+
+	a, _ := c.AddFunc("@triggered", func() {}, WithName("a"))
+	b, _ := c.AddFunc("@triggered", func() {}, WithName("b"))
+
+	_ = c.AddDependency(b, a, OnSuccess)
+	if err := c.RemoveDependency(b, a); err != nil {
+		t.Fatalf("RemoveDependency() error: %v", err)
+	}
+
+	if deps := c.Dependencies(b); len(deps) != 0 {
+		t.Errorf("after remove: got %d deps, want 0", len(deps))
+	}
+}
+
+func TestRemoveEntry_CleansDeps(t *testing.T) {
+	c := New(WithSeconds())
+	c.Start()
+	defer c.Stop()
+
+	a, _ := c.AddFunc("@triggered", func() {}, WithName("a"))
+	b, _ := c.AddFunc("@triggered", func() {}, WithName("b"))
+
+	_ = c.AddDependency(b, a, OnSuccess)
+	c.Remove(b)
+
+	// Parent should have no children after child is removed.
+	// Verify indirectly: adding a new dep from a different child should work.
+	c2, _ := c.AddFunc("@triggered", func() {}, WithName("c"))
+	err := c.AddDependency(c2, a, OnSuccess)
+	if err != nil {
+		t.Fatalf("AddDependency after remove: %v", err)
 	}
 }

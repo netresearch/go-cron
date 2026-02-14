@@ -39,6 +39,12 @@ var ErrEntryPaused = errors.New("cron: entry is paused")
 // the scheduler is not running. Start the scheduler first.
 var ErrNotRunning = errors.New("cron: scheduler is not running")
 
+// ErrCycleDetected is returned by AddDependency when the new edge would create a cycle.
+var ErrCycleDetected = errors.New("cron: dependency would create a cycle")
+
+// ErrInvalidCondition is returned by AddDependency when the trigger condition is not valid.
+var ErrInvalidCondition = errors.New("cron: invalid trigger condition")
+
 // maxIdleDuration is the sleep duration when no entries are scheduled.
 // Using a very long duration (~11.4 years) instead of blocking indefinitely
 // allows the scheduler loop to still respond to add, remove, and stop operations.
@@ -283,15 +289,15 @@ func makeReq[T, C any](v T) request[T, C] {
 
 // addDepRequest is used to add a dependency edge via the run loop.
 type addDepRequest struct {
-	childID   EntryID          //nolint:unused // used by Task 4 (AddDependency)
-	parentID  EntryID          //nolint:unused // used by Task 4 (AddDependency)
-	condition TriggerCondition //nolint:unused // used by Task 4 (AddDependency)
+	childID   EntryID
+	parentID  EntryID
+	condition TriggerCondition
 }
 
 // removeDepRequest is used to remove a dependency edge via the run loop.
 type removeDepRequest struct {
-	childID  EntryID //nolint:unused // used by Task 4 (RemoveDependency)
-	parentID EntryID //nolint:unused // used by Task 4 (RemoveDependency)
+	childID  EntryID
+	parentID EntryID
 }
 
 // Entry consists of a schedule and the func to execute on that schedule.
@@ -1157,6 +1163,19 @@ func (c *Cron) run() {
 			case event := <-c.jobDone:
 				c.processWorkflowEvent(event)
 				continue
+
+			case req := <-c.addDep:
+				req.reply <- c.addDependencyDirect(req.value.childID, req.value.parentID, req.value.condition)
+				continue
+
+			case req := <-c.removeDep:
+				c.removeDependencyDirect(req.value.childID, req.value.parentID)
+				req.reply <- nil
+				continue
+
+			case req := <-c.queryDeps:
+				req.reply <- slices.Clone(c.entryDeps[req.value])
+				continue
 			}
 
 			break
@@ -1788,6 +1807,38 @@ func (c *Cron) removeEntry(id EntryID) {
 	}
 	atomic.AddInt64(&c.entryCount, -1)
 
+	// Clean up workflow dependency edges for removed entry.
+	if deps, ok := c.entryDeps[id]; ok {
+		for _, dep := range deps {
+			children := c.parentToChildren[dep.ParentID]
+			for i, cid := range children {
+				if cid == id {
+					c.parentToChildren[dep.ParentID] = slices.Delete(children, i, i+1)
+					break
+				}
+			}
+			if len(c.parentToChildren[dep.ParentID]) == 0 {
+				delete(c.parentToChildren, dep.ParentID)
+			}
+		}
+		delete(c.entryDeps, id)
+	}
+	if children, ok := c.parentToChildren[id]; ok {
+		for _, childID := range children {
+			deps := c.entryDeps[childID]
+			for i, dep := range deps {
+				if dep.ParentID == id {
+					c.entryDeps[childID] = slices.Delete(deps, i, i+1)
+					break
+				}
+			}
+			if len(c.entryDeps[childID]) == 0 {
+				delete(c.entryDeps, childID)
+			}
+		}
+		delete(c.parentToChildren, id)
+	}
+
 	// Track deletions and compact maps when threshold is met.
 	// Go maps don't release memory on delete, so we rebuild periodically.
 	c.indexDeletions++
@@ -1833,6 +1884,129 @@ func (c *Cron) maybeCompactIndexes() {
 	c.nameIndex = newNameIndex
 
 	c.indexDeletions = 0
+}
+
+// addDependencyDirect adds a dependency edge directly.
+// Caller must hold runningMu or be in the run loop.
+func (c *Cron) addDependencyDirect(child, parent EntryID, condition TriggerCondition) error {
+	if !condition.Valid() {
+		return ErrInvalidCondition
+	}
+	if _, ok := c.entryIndex[child]; !ok {
+		return ErrEntryNotFound
+	}
+	if _, ok := c.entryIndex[parent]; !ok {
+		return ErrEntryNotFound
+	}
+	if hasCycle(c.entryDeps, child, parent) {
+		return ErrCycleDetected
+	}
+	// Idempotent: skip if edge already exists.
+	for _, dep := range c.entryDeps[child] {
+		if dep.ParentID == parent && dep.Condition == condition {
+			return nil
+		}
+	}
+	c.entryDeps[child] = append(c.entryDeps[child], Dependency{ParentID: parent, Condition: condition})
+	c.parentToChildren[parent] = append(c.parentToChildren[parent], child)
+	return nil
+}
+
+// removeDependencyDirect removes a dependency edge directly.
+// Caller must hold runningMu or be in the run loop.
+func (c *Cron) removeDependencyDirect(child, parent EntryID) {
+	deps := c.entryDeps[child]
+	for i, dep := range deps {
+		if dep.ParentID == parent {
+			c.entryDeps[child] = slices.Delete(deps, i, i+1)
+			break
+		}
+	}
+	if len(c.entryDeps[child]) == 0 {
+		delete(c.entryDeps, child)
+	}
+	children := c.parentToChildren[parent]
+	for i, cid := range children {
+		if cid == child {
+			c.parentToChildren[parent] = slices.Delete(children, i, i+1)
+			break
+		}
+	}
+	if len(c.parentToChildren[parent]) == 0 {
+		delete(c.parentToChildren, parent)
+	}
+}
+
+// AddDependency adds a dependency edge: child waits for parent with the given condition.
+func (c *Cron) AddDependency(child, parent EntryID, condition TriggerCondition) error {
+	c.runningMu.Lock()
+	defer c.runningMu.Unlock()
+	if !c.running {
+		return c.addDependencyDirect(child, parent, condition)
+	}
+	req := makeReq[addDepRequest, error](addDepRequest{childID: child, parentID: parent, condition: condition})
+	c.addDep <- req
+	return <-req.reply
+}
+
+// AddDependencyByName is the name-based variant of AddDependency.
+func (c *Cron) AddDependencyByName(child, parent string, condition TriggerCondition) error {
+	ce := c.EntryByName(child)
+	if !ce.Valid() {
+		return ErrEntryNotFound
+	}
+	pe := c.EntryByName(parent)
+	if !pe.Valid() {
+		return ErrEntryNotFound
+	}
+	return c.AddDependency(ce.ID, pe.ID, condition)
+}
+
+// RemoveDependency removes a dependency edge between child and parent.
+func (c *Cron) RemoveDependency(child, parent EntryID) error {
+	c.runningMu.Lock()
+	defer c.runningMu.Unlock()
+	if !c.running {
+		c.removeDependencyDirect(child, parent)
+		return nil
+	}
+	req := makeReq[removeDepRequest, error](removeDepRequest{childID: child, parentID: parent})
+	c.removeDep <- req
+	return <-req.reply
+}
+
+// RemoveDependencyByName is the name-based variant of RemoveDependency.
+func (c *Cron) RemoveDependencyByName(child, parent string) error {
+	ce := c.EntryByName(child)
+	if !ce.Valid() {
+		return ErrEntryNotFound
+	}
+	pe := c.EntryByName(parent)
+	if !pe.Valid() {
+		return ErrEntryNotFound
+	}
+	return c.RemoveDependency(ce.ID, pe.ID)
+}
+
+// Dependencies returns the dependency edges for an entry.
+func (c *Cron) Dependencies(id EntryID) []Dependency {
+	c.runningMu.Lock()
+	defer c.runningMu.Unlock()
+	if !c.running {
+		return slices.Clone(c.entryDeps[id])
+	}
+	req := makeReq[EntryID, []Dependency](id)
+	c.queryDeps <- req
+	return <-req.reply
+}
+
+// DependenciesByName is the name-based variant of Dependencies.
+func (c *Cron) DependenciesByName(name string) []Dependency {
+	e := c.EntryByName(name)
+	if !e.Valid() {
+		return nil
+	}
+	return c.Dependencies(e.ID)
 }
 
 // EntryByName returns a snapshot of the entry with the given name,
