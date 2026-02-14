@@ -961,3 +961,80 @@ func TestWorkflowRetention(t *testing.T) {
 		}
 	}
 }
+
+func TestRemoveDependencyByName(t *testing.T) {
+	c := New(WithSeconds())
+	c.Start()
+	defer c.Stop()
+
+	c.AddFunc("@triggered", func() {}, WithName("parent"))
+	c.AddFunc("@triggered", func() {}, WithName("child"))
+	_ = c.AddDependencyByName("child", "parent", OnSuccess)
+
+	if err := c.RemoveDependencyByName("child", "parent"); err != nil {
+		t.Fatalf("RemoveDependencyByName() error: %v", err)
+	}
+	if deps := c.DependenciesByName("child"); len(deps) != 0 {
+		t.Errorf("after remove: got %d deps, want 0", len(deps))
+	}
+
+	// Unknown names return ErrEntryNotFound.
+	if err := c.RemoveDependencyByName("missing", "parent"); !errors.Is(err, ErrEntryNotFound) {
+		t.Errorf("unknown child: got %v, want ErrEntryNotFound", err)
+	}
+	if err := c.RemoveDependencyByName("child", "missing"); !errors.Is(err, ErrEntryNotFound) {
+		t.Errorf("unknown parent: got %v, want ErrEntryNotFound", err)
+	}
+}
+
+func TestWorkflowStatus_BeforeStart(t *testing.T) {
+	c := New(WithSeconds())
+	// Don't start — test pre-start path.
+	if status := c.WorkflowStatus("nonexistent"); status != nil {
+		t.Errorf("WorkflowStatus(not-started) = %v, want nil", status)
+	}
+}
+
+func TestActiveWorkflows_BeforeStart(t *testing.T) {
+	c := New(WithSeconds())
+	// Don't start — test pre-start path.
+	active := c.ActiveWorkflows()
+	if len(active) != 0 {
+		t.Errorf("ActiveWorkflows(not-started) = %d, want 0", len(active))
+	}
+}
+
+func TestDependencies_BeforeStart(t *testing.T) {
+	c := New(WithSeconds())
+	// Don't start — test pre-start path.
+	deps := c.Dependencies(9999)
+	if deps != nil {
+		t.Errorf("Dependencies(not-started) = %v, want nil", deps)
+	}
+}
+
+func TestDependenciesByName_NotFound(t *testing.T) {
+	c := New(WithSeconds())
+	c.Start()
+	defer c.Stop()
+
+	deps := c.DependenciesByName("nonexistent")
+	if deps != nil {
+		t.Errorf("DependenciesByName(unknown) = %v, want nil", deps)
+	}
+}
+
+func TestAddDependencyByName_NotFound(t *testing.T) {
+	c := New(WithSeconds())
+	c.Start()
+	defer c.Stop()
+
+	c.AddFunc("@triggered", func() {}, WithName("a"))
+
+	if err := c.AddDependencyByName("missing", "a", OnSuccess); !errors.Is(err, ErrEntryNotFound) {
+		t.Errorf("unknown child: got %v, want ErrEntryNotFound", err)
+	}
+	if err := c.AddDependencyByName("a", "missing", OnSuccess); !errors.Is(err, ErrEntryNotFound) {
+		t.Errorf("unknown parent: got %v, want ErrEntryNotFound", err)
+	}
+}
