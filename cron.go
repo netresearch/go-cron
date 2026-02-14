@@ -2274,7 +2274,7 @@ func (c *Cron) AddWorkflow(w *Workflow) error {
 // On any failure, already-registered entries are rolled back.
 func (c *Cron) registerWorkflowSteps(w *Workflow) error {
 	registeredIDs := make(map[string]EntryID, len(w.steps))
-	var registeredOrder []string
+	registeredOrder := make([]string, 0, len(w.steps))
 
 	rollback := func() {
 		for _, name := range registeredOrder {
