@@ -39,6 +39,12 @@ var ErrEntryPaused = errors.New("cron: entry is paused")
 // the scheduler is not running. Start the scheduler first.
 var ErrNotRunning = errors.New("cron: scheduler is not running")
 
+// ErrCycleDetected is returned by AddDependency when the new edge would create a cycle.
+var ErrCycleDetected = errors.New("cron: dependency would create a cycle")
+
+// ErrInvalidCondition is returned by AddDependency when the trigger condition is not valid.
+var ErrInvalidCondition = errors.New("cron: invalid trigger condition")
+
 // maxIdleDuration is the sleep duration when no entries are scheduled.
 // Using a very long duration (~11.4 years) instead of blocking indefinitely
 // allows the scheduler loop to still respond to add, remove, and stop operations.
@@ -84,6 +90,40 @@ type Cron struct {
 	// Go maps don't release memory when entries are deleted, so we periodically
 	// rebuild maps to reclaim memory in high-churn scenarios.
 	indexDeletions int
+
+	// jobDone receives completion events from startJob goroutines.
+	// Used by the run loop to drive workflow DAG orchestration.
+	jobDone chan jobDoneEvent
+
+	// parentToChildren maps parent EntryID to child EntryIDs for O(1) lookup.
+	parentToChildren map[EntryID][]EntryID
+
+	// entryDeps maps child EntryID to its dependency edges.
+	entryDeps map[EntryID][]Dependency
+
+	// activeExecutions tracks in-progress workflow executions.
+	activeExecutions map[string]*WorkflowExecution
+
+	// completedExecutions stores completed executions for query (FIFO order).
+	completedExecutions []*WorkflowExecution
+
+	// workflowRetention is the max number of completed executions to retain.
+	workflowRetention int
+
+	// addDep routes AddDependency requests to the run loop.
+	addDep chan request[addDepRequest, error]
+
+	// removeDep routes RemoveDependency requests to the run loop.
+	removeDep chan request[removeDepRequest, error]
+
+	// queryDeps routes Dependencies queries to the run loop.
+	queryDeps chan request[EntryID, []Dependency]
+
+	// queryWorkflow routes WorkflowStatus queries to the run loop.
+	queryWorkflow chan request[string, *WorkflowExecution]
+
+	// queryActiveWorkflows routes ActiveWorkflows queries to the run loop.
+	queryActiveWorkflows chan chan []WorkflowExecution
 }
 
 // ScheduleParser is an interface for schedule spec parsers that return a Schedule.
@@ -247,6 +287,19 @@ func makeReq[T, C any](v T) request[T, C] {
 	return request[T, C]{value: v, reply: make(chan C, 1)}
 }
 
+// addDepRequest is used to add a dependency edge via the run loop.
+type addDepRequest struct {
+	childID   EntryID
+	parentID  EntryID
+	condition TriggerCondition
+}
+
+// removeDepRequest is used to remove a dependency edge via the run loop.
+type removeDepRequest struct {
+	childID  EntryID
+	parentID EntryID
+}
+
 // Entry consists of a schedule and the func to execute on that schedule.
 type Entry struct {
 	// ID is the cron-assigned ID of this entry, which may be used to look up a
@@ -406,26 +459,36 @@ func (e Entry) Run() {
 // See "cron.With*" to modify the default behavior.
 func New(opts ...Option) *Cron {
 	c := &Cron{
-		entries:     nil,
-		entryIndex:  make(map[EntryID]*Entry),
-		nameIndex:   make(map[string]*Entry),
-		chain:       NewChain(),
-		add:         make(chan request[*Entry, struct{}]),
-		stop:        make(chan struct{}),
-		snapshot:    make(chan chan []Entry),
-		entryLookup: make(chan entryLookupRequest),
-		nameLookup:  make(chan nameLookupRequest),
-		remove:      make(chan request[EntryID, struct{}]),
-		update:      make(chan request[updateScheduleRequest, error]),
-		pause:       make(chan request[pauseRequest, error]),
-		trigger:     make(chan request[EntryID, error]),
-		running:     false,
-		runningMu:   sync.Mutex{},
-		logger:      DefaultLogger,
-		location:    time.Local,
-		parser:      standardParser,
-		clock:       RealClock{},
-		baseCtx:     context.Background(), // Default base context
+		entries:              nil,
+		entryIndex:           make(map[EntryID]*Entry),
+		nameIndex:            make(map[string]*Entry),
+		chain:                NewChain(),
+		add:                  make(chan request[*Entry, struct{}]),
+		stop:                 make(chan struct{}),
+		snapshot:             make(chan chan []Entry),
+		entryLookup:          make(chan entryLookupRequest),
+		nameLookup:           make(chan nameLookupRequest),
+		remove:               make(chan request[EntryID, struct{}]),
+		update:               make(chan request[updateScheduleRequest, error]),
+		pause:                make(chan request[pauseRequest, error]),
+		trigger:              make(chan request[EntryID, error]),
+		running:              false,
+		runningMu:            sync.Mutex{},
+		logger:               DefaultLogger,
+		location:             time.Local,
+		parser:               standardParser,
+		clock:                RealClock{},
+		baseCtx:              context.Background(), // Default base context
+		jobDone:              make(chan jobDoneEvent, 64),
+		parentToChildren:     make(map[EntryID][]EntryID),
+		entryDeps:            make(map[EntryID][]Dependency),
+		activeExecutions:     make(map[string]*WorkflowExecution),
+		workflowRetention:    100,
+		addDep:               make(chan request[addDepRequest, error]),
+		removeDep:            make(chan request[removeDepRequest, error]),
+		queryDeps:            make(chan request[EntryID, []Dependency]),
+		queryWorkflow:        make(chan request[string, *WorkflowExecution]),
+		queryActiveWorkflows: make(chan chan []WorkflowExecution),
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -940,6 +1003,39 @@ func (c *Cron) handleTimeBackwards(now time.Time) {
 	}
 }
 
+// postDispatchScheduled handles run-once removal or rescheduling after a
+// scheduled (timer-fired) job is dispatched.
+func (c *Cron) postDispatchScheduled(e *Entry, now time.Time) {
+	if e.runOnce {
+		// Remove run-once entries after dispatching the job.
+		// The job continues running in its own goroutine.
+		// Preserve the entry context so the dispatched job isn't
+		// canceled prematurely — it will be canceled when baseCtx
+		// is canceled (Stop). Explicit Remove() still cancels.
+		e.cancelEntryCtx = nil
+		c.removeEntry(e.ID)
+		c.logger.Info("run-once", "now", now, "entry", e.ID, "removed", true)
+	} else {
+		e.Next = e.Schedule.Next(now)
+		c.hooks.callOnSchedule(e.ID, e.Job, e.Next)
+		c.entries.Update(e)
+		c.logger.Info("run", "now", now, "entry", e.ID, "next", e.Next)
+	}
+}
+
+// postDispatchTriggered handles run-once removal after a manually triggered
+// job is dispatched. Unlike postDispatchScheduled, this does not reschedule
+// the entry since manual triggers don't affect the cron schedule.
+func (c *Cron) postDispatchTriggered(e *Entry, now time.Time) {
+	if e.runOnce {
+		e.cancelEntryCtx = nil
+		c.removeEntry(e.ID)
+		c.logger.Info("triggered-once", "now", now, "entry", e.ID, "removed", true)
+	} else {
+		c.logger.Info("triggered", "now", now, "entry", e.ID)
+	}
+}
+
 // processDueEntries runs all entries whose scheduled time has passed.
 // Entries are processed in order from the heap and rescheduled for their next run.
 // Run-once entries are removed after being dispatched.
@@ -960,24 +1056,15 @@ func (c *Cron) processDueEntries(now time.Time) {
 		}
 
 		scheduledTime := e.Next
-		c.startJob(e.entryCtx, e.running, e.ID, e.Job, e.WrappedJob, scheduledTime)
-		e.Prev = e.Next
 
-		if e.runOnce {
-			// Remove run-once entries after dispatching the job.
-			// The job continues running in its own goroutine.
-			// Preserve the entry context so the dispatched job isn't
-			// canceled prematurely — it will be canceled when baseCtx
-			// is canceled (Stop). Explicit Remove() still cancels.
-			e.cancelEntryCtx = nil
-			c.removeEntry(e.ID)
-			c.logger.Info("run-once", "now", now, "entry", e.ID, "removed", true)
+		// If this entry has dependents, start a workflow execution.
+		if len(c.parentToChildren[e.ID]) > 0 {
+			c.startWorkflowExecution(e, scheduledTime)
 		} else {
-			e.Next = e.Schedule.Next(now)
-			c.hooks.callOnSchedule(e.ID, e.Job, e.Next)
-			c.entries.Update(e) // Re-heapify after updating Next time
-			c.logger.Info("run", "now", now, "entry", e.ID, "next", e.Next)
+			c.startJob(e.entryCtx, e.running, e.ID, e.Job, e.WrappedJob, scheduledTime)
 		}
+		e.Prev = e.Next
+		c.postDispatchScheduled(e, now)
 	}
 }
 
@@ -1096,6 +1183,46 @@ func (c *Cron) run() {
 				err := c.triggerEntry(req.value)
 				req.reply <- err
 				continue // no timer reset needed
+
+			case event := <-c.jobDone:
+				c.processWorkflowEvent(event)
+				continue
+
+			case req := <-c.addDep:
+				req.reply <- c.addDependencyDirect(req.value.childID, req.value.parentID, req.value.condition)
+				continue
+
+			case req := <-c.removeDep:
+				c.removeDependencyDirect(req.value.childID, req.value.parentID)
+				req.reply <- nil
+				continue
+
+			case req := <-c.queryDeps:
+				req.reply <- slices.Clone(c.entryDeps[req.value])
+				continue
+
+			case req := <-c.queryWorkflow:
+				if exec, ok := c.activeExecutions[req.value]; ok {
+					req.reply <- exec
+				} else {
+					var found *WorkflowExecution
+					for _, exec := range c.completedExecutions {
+						if exec.ID == req.value {
+							found = exec
+							break
+						}
+					}
+					req.reply <- found
+				}
+				continue
+
+			case replyChan := <-c.queryActiveWorkflows:
+				result := make([]WorkflowExecution, 0, len(c.activeExecutions))
+				for _, exec := range c.activeExecutions {
+					result = append(result, *exec)
+				}
+				replyChan <- result
+				continue
 			}
 
 			break
@@ -1111,8 +1238,18 @@ func (c *Cron) run() {
 // is removed, its job is replaced, or Stop() is called (which cancels baseCtx,
 // cascading to all entry contexts).
 func (c *Cron) startJob(entryCtx context.Context, entryRunning *jobTracker, entryID EntryID, originalJob, wrappedJob Job, scheduledTime time.Time) {
+	c.startJobWithExecution(entryCtx, entryRunning, entryID, originalJob, wrappedJob, scheduledTime, "")
+}
+
+func (c *Cron) startJobWithExecution(entryCtx context.Context, entryRunning *jobTracker, entryID EntryID, originalJob, wrappedJob Job, scheduledTime time.Time, executionID string) {
 	c.jobWaiter.Add(1)
 	entryRunning.start()
+
+	runCtx := entryCtx
+	if executionID != "" {
+		runCtx = context.WithValue(entryCtx, workflowContextKey{}, executionID)
+	}
+
 	go func() {
 		defer c.jobWaiter.Done()
 		defer entryRunning.finish()
@@ -1127,7 +1264,7 @@ func (c *Cron) startJob(entryCtx context.Context, entryRunning *jobTracker, entr
 			}()
 			// Check if the job supports context and call appropriate method
 			if jc, ok := wrappedJob.(JobWithContext); ok {
-				jc.RunWithContext(entryCtx)
+				jc.RunWithContext(runCtx)
 			} else {
 				wrappedJob.Run()
 			}
@@ -1136,11 +1273,158 @@ func (c *Cron) startJob(entryCtx context.Context, entryRunning *jobTracker, entr
 
 		c.hooks.callOnJobComplete(entryID, originalJob, duration, recovered)
 
+		// Send completion event for workflow orchestration.
+		if executionID != "" {
+			c.jobDone <- jobDoneEvent{
+				EntryID:     entryID,
+				Panicked:    recovered != nil,
+				PanicValue:  recovered,
+				ExecutionID: executionID,
+			}
+			return // Don't re-panic for workflow jobs
+		}
+
 		// Re-panic if the job panicked and wasn't handled by a wrapper
 		if recovered != nil {
 			panic(recovered)
 		}
 	}()
+}
+
+// processWorkflowEvent handles a job completion within a workflow execution.
+func (c *Cron) processWorkflowEvent(event jobDoneEvent) {
+	exec, ok := c.activeExecutions[event.ExecutionID]
+	if !ok {
+		return
+	}
+
+	if event.Panicked {
+		exec.Results[event.EntryID] = ResultFailure
+	} else {
+		exec.Results[event.EntryID] = ResultSuccess
+	}
+
+	c.evaluateChildren(exec, event.EntryID)
+
+	if exec.IsComplete() {
+		c.completeWorkflowExecution(exec)
+	}
+}
+
+// evaluateChildren checks each child of parentID and either triggers or skips it.
+func (c *Cron) evaluateChildren(exec *WorkflowExecution, parentID EntryID) {
+	children := c.parentToChildren[parentID]
+	for _, childID := range children {
+		result, ok := exec.Results[childID]
+		if !ok || result != ResultPending {
+			continue
+		}
+
+		if c.shouldTriggerChild(exec, childID) {
+			c.triggerWorkflowChild(exec, childID)
+		} else if c.allParentsResolved(exec, childID) {
+			exec.Results[childID] = ResultSkipped
+			c.evaluateChildren(exec, childID)
+		}
+	}
+}
+
+// shouldTriggerChild checks if all parents of childID are resolved and conditions met.
+func (c *Cron) shouldTriggerChild(exec *WorkflowExecution, childID EntryID) bool {
+	deps := c.entryDeps[childID]
+	for _, dep := range deps {
+		result, ok := exec.Results[dep.ParentID]
+		if !ok || !result.IsTerminal() {
+			return false
+		}
+		if !dep.Condition.Matches(result) {
+			return false
+		}
+	}
+	return len(deps) > 0
+}
+
+// allParentsResolved checks if all parents of childID have terminal results.
+func (c *Cron) allParentsResolved(exec *WorkflowExecution, childID EntryID) bool {
+	deps := c.entryDeps[childID]
+	for _, dep := range deps {
+		result, ok := exec.Results[dep.ParentID]
+		if !ok || !result.IsTerminal() {
+			return false
+		}
+	}
+	return true
+}
+
+// triggerWorkflowChild triggers a child entry within a workflow execution.
+func (c *Cron) triggerWorkflowChild(exec *WorkflowExecution, childID EntryID) {
+	entry, ok := c.entryIndex[childID]
+	if !ok {
+		exec.Results[childID] = ResultSkipped
+		return
+	}
+	if entry.Paused {
+		exec.Results[childID] = ResultSkipped
+		c.evaluateChildren(exec, childID)
+		return
+	}
+
+	now := c.now()
+	c.startJobWithExecution(entry.entryCtx, entry.running, entry.ID, entry.Job, entry.WrappedJob, now, exec.ID)
+	entry.Prev = now
+}
+
+// completeWorkflowExecution moves an execution from active to completed.
+func (c *Cron) completeWorkflowExecution(exec *WorkflowExecution) {
+	delete(c.activeExecutions, exec.ID)
+	c.completedExecutions = append(c.completedExecutions, exec)
+
+	if c.workflowRetention > 0 && len(c.completedExecutions) > c.workflowRetention {
+		excess := len(c.completedExecutions) - c.workflowRetention
+		c.completedExecutions = c.completedExecutions[excess:]
+	}
+
+	c.hooks.callOnWorkflowComplete(exec.ID, exec.RootID, exec.Results)
+}
+
+// startWorkflowExecution creates a new WorkflowExecution for a root entry.
+func (c *Cron) startWorkflowExecution(entry *Entry, scheduledTime time.Time) {
+	execID := generateExecutionID()
+	participants := c.collectWorkflowParticipants(entry.ID)
+
+	exec := &WorkflowExecution{
+		ID:        execID,
+		RootID:    entry.ID,
+		StartTime: scheduledTime,
+		Results:   make(map[EntryID]JobResult, len(participants)),
+	}
+	for _, id := range participants {
+		exec.Results[id] = ResultPending
+	}
+
+	c.activeExecutions[execID] = exec
+	c.startJobWithExecution(entry.entryCtx, entry.running, entry.ID, entry.Job, entry.WrappedJob, scheduledTime, execID)
+}
+
+// collectWorkflowParticipants returns all entry IDs reachable from rootID via parentToChildren (BFS).
+func (c *Cron) collectWorkflowParticipants(rootID EntryID) []EntryID {
+	var result []EntryID
+	visited := map[EntryID]bool{rootID: true}
+	queue := []EntryID{rootID}
+
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		result = append(result, current)
+
+		for _, childID := range c.parentToChildren[current] {
+			if !visited[childID] {
+				visited[childID] = true
+				queue = append(queue, childID)
+			}
+		}
+	}
+	return result
 }
 
 // updateSchedule updates the schedule (and optionally the job) of an existing
@@ -1414,16 +1698,15 @@ func (c *Cron) triggerEntry(id EntryID) error {
 	}
 
 	now := c.now()
-	c.startJob(entry.entryCtx, entry.running, entry.ID, entry.Job, entry.WrappedJob, now)
-	entry.Prev = now
 
-	if entry.runOnce {
-		entry.cancelEntryCtx = nil
-		c.removeEntry(entry.ID)
-		c.logger.Info("triggered-run-once", "now", now, "entry", id, "removed", true)
+	// If this entry has dependents, start a workflow execution.
+	if len(c.parentToChildren[entry.ID]) > 0 {
+		c.startWorkflowExecution(entry, now)
 	} else {
-		c.logger.Info("triggered", "now", now, "entry", id)
+		c.startJob(entry.entryCtx, entry.running, entry.ID, entry.Job, entry.WrappedJob, now)
 	}
+	entry.Prev = now
+	c.postDispatchTriggered(entry, now)
 	return nil
 }
 
@@ -1701,6 +1984,38 @@ func (c *Cron) removeEntry(id EntryID) {
 	}
 	atomic.AddInt64(&c.entryCount, -1)
 
+	// Clean up workflow dependency edges for removed entry.
+	if deps, ok := c.entryDeps[id]; ok {
+		for _, dep := range deps {
+			children := c.parentToChildren[dep.ParentID]
+			for i, cid := range children {
+				if cid == id {
+					c.parentToChildren[dep.ParentID] = slices.Delete(children, i, i+1)
+					break
+				}
+			}
+			if len(c.parentToChildren[dep.ParentID]) == 0 {
+				delete(c.parentToChildren, dep.ParentID)
+			}
+		}
+		delete(c.entryDeps, id)
+	}
+	if children, ok := c.parentToChildren[id]; ok {
+		for _, childID := range children {
+			deps := c.entryDeps[childID]
+			for i, dep := range deps {
+				if dep.ParentID == id {
+					c.entryDeps[childID] = slices.Delete(deps, i, i+1)
+					break
+				}
+			}
+			if len(c.entryDeps[childID]) == 0 {
+				delete(c.entryDeps, childID)
+			}
+		}
+		delete(c.parentToChildren, id)
+	}
+
 	// Track deletions and compact maps when threshold is met.
 	// Go maps don't release memory on delete, so we rebuild periodically.
 	c.indexDeletions++
@@ -1746,6 +2061,241 @@ func (c *Cron) maybeCompactIndexes() {
 	c.nameIndex = newNameIndex
 
 	c.indexDeletions = 0
+}
+
+// addDependencyDirect adds a dependency edge directly.
+// Caller must hold runningMu or be in the run loop.
+func (c *Cron) addDependencyDirect(child, parent EntryID, condition TriggerCondition) error {
+	if !condition.Valid() {
+		return ErrInvalidCondition
+	}
+	if _, ok := c.entryIndex[child]; !ok {
+		return ErrEntryNotFound
+	}
+	if _, ok := c.entryIndex[parent]; !ok {
+		return ErrEntryNotFound
+	}
+	if hasCycle(c.entryDeps, child, parent) {
+		return ErrCycleDetected
+	}
+	// Idempotent: skip if edge already exists.
+	for _, dep := range c.entryDeps[child] {
+		if dep.ParentID == parent && dep.Condition == condition {
+			return nil
+		}
+	}
+	c.entryDeps[child] = append(c.entryDeps[child], Dependency{ParentID: parent, Condition: condition})
+	// Ensure each child appears at most once per parent in parentToChildren.
+	children := c.parentToChildren[parent]
+	if !slices.Contains(children, child) {
+		c.parentToChildren[parent] = append(children, child)
+	}
+	return nil
+}
+
+// removeDependencyDirect removes a dependency edge directly.
+// Caller must hold runningMu or be in the run loop.
+func (c *Cron) removeDependencyDirect(child, parent EntryID) {
+	deps := c.entryDeps[child]
+	for i, dep := range deps {
+		if dep.ParentID == parent {
+			c.entryDeps[child] = slices.Delete(deps, i, i+1)
+			break
+		}
+	}
+	if len(c.entryDeps[child]) == 0 {
+		delete(c.entryDeps, child)
+	}
+	children := c.parentToChildren[parent]
+	for i, cid := range children {
+		if cid == child {
+			c.parentToChildren[parent] = slices.Delete(children, i, i+1)
+			break
+		}
+	}
+	if len(c.parentToChildren[parent]) == 0 {
+		delete(c.parentToChildren, parent)
+	}
+}
+
+// AddDependency adds a dependency edge: child waits for parent with the given condition.
+func (c *Cron) AddDependency(child, parent EntryID, condition TriggerCondition) error {
+	c.runningMu.Lock()
+	defer c.runningMu.Unlock()
+	if !c.running {
+		return c.addDependencyDirect(child, parent, condition)
+	}
+	req := makeReq[addDepRequest, error](addDepRequest{childID: child, parentID: parent, condition: condition})
+	c.addDep <- req
+	return <-req.reply
+}
+
+// AddDependencyByName is the name-based variant of AddDependency.
+func (c *Cron) AddDependencyByName(child, parent string, condition TriggerCondition) error {
+	ce := c.EntryByName(child)
+	if !ce.Valid() {
+		return ErrEntryNotFound
+	}
+	pe := c.EntryByName(parent)
+	if !pe.Valid() {
+		return ErrEntryNotFound
+	}
+	return c.AddDependency(ce.ID, pe.ID, condition)
+}
+
+// RemoveDependency removes a dependency edge between child and parent.
+func (c *Cron) RemoveDependency(child, parent EntryID) error {
+	c.runningMu.Lock()
+	defer c.runningMu.Unlock()
+	if !c.running {
+		c.removeDependencyDirect(child, parent)
+		return nil
+	}
+	req := makeReq[removeDepRequest, error](removeDepRequest{childID: child, parentID: parent})
+	c.removeDep <- req
+	return <-req.reply
+}
+
+// RemoveDependencyByName is the name-based variant of RemoveDependency.
+func (c *Cron) RemoveDependencyByName(child, parent string) error {
+	ce := c.EntryByName(child)
+	if !ce.Valid() {
+		return ErrEntryNotFound
+	}
+	pe := c.EntryByName(parent)
+	if !pe.Valid() {
+		return ErrEntryNotFound
+	}
+	return c.RemoveDependency(ce.ID, pe.ID)
+}
+
+// Dependencies returns the dependency edges for an entry.
+func (c *Cron) Dependencies(id EntryID) []Dependency {
+	c.runningMu.Lock()
+	defer c.runningMu.Unlock()
+	if !c.running {
+		return slices.Clone(c.entryDeps[id])
+	}
+	req := makeReq[EntryID, []Dependency](id)
+	c.queryDeps <- req
+	return <-req.reply
+}
+
+// DependenciesByName is the name-based variant of Dependencies.
+func (c *Cron) DependenciesByName(name string) []Dependency {
+	e := c.EntryByName(name)
+	if !e.Valid() {
+		return []Dependency{}
+	}
+	return c.Dependencies(e.ID)
+}
+
+// WorkflowStatus returns the execution state for the given workflow execution ID.
+// It searches active executions first, then completed executions.
+// Returns nil if no execution with the given ID exists.
+func (c *Cron) WorkflowStatus(executionID string) *WorkflowExecution {
+	c.runningMu.Lock()
+	defer c.runningMu.Unlock()
+	if !c.running {
+		if exec, ok := c.activeExecutions[executionID]; ok {
+			return exec
+		}
+		for _, exec := range c.completedExecutions {
+			if exec.ID == executionID {
+				return exec
+			}
+		}
+		return nil
+	}
+	req := makeReq[string, *WorkflowExecution](executionID)
+	c.queryWorkflow <- req
+	return <-req.reply
+}
+
+// ActiveWorkflows returns copies of all in-progress workflow executions.
+// Returns an empty slice if no workflows are currently executing.
+func (c *Cron) ActiveWorkflows() []WorkflowExecution {
+	c.runningMu.Lock()
+	defer c.runningMu.Unlock()
+	if !c.running {
+		result := make([]WorkflowExecution, 0, len(c.activeExecutions))
+		for _, exec := range c.activeExecutions {
+			result = append(result, *exec)
+		}
+		return result
+	}
+	replyChan := make(chan []WorkflowExecution, 1)
+	c.queryActiveWorkflows <- replyChan
+	return <-replyChan
+}
+
+// AddWorkflow validates and registers all steps of a Workflow atomically.
+// It parses all specs, checks for duplicate names, validates the DAG structure
+// (no cycles, at most one final step, all After references exist), and then
+// registers all entries via AddJob and wires dependency edges via AddDependency.
+// On any failure, already-registered entries are rolled back.
+//
+// Returns:
+//   - ErrEmptyWorkflow if the workflow has no steps
+//   - ErrMultipleFinalSteps if more than one step is marked Final
+//   - ErrUnknownStep if a step references an unknown parent via After
+//   - ErrCycleDetected if the step dependencies form a cycle
+//   - ErrDuplicateName if a step name conflicts with an existing entry
+//   - Parse errors if any spec is invalid for the configured parser
+func (c *Cron) AddWorkflow(w *Workflow) error {
+	if err := w.validate(); err != nil {
+		return err
+	}
+
+	// Validate all specs parse with this Cron's parser.
+	for _, s := range w.steps {
+		if _, err := c.parser.Parse(s.spec); err != nil {
+			return err
+		}
+	}
+
+	// Check for duplicate names against existing entries.
+	for _, s := range w.steps {
+		if e := c.EntryByName(s.name); e.Valid() {
+			return ErrDuplicateName
+		}
+	}
+
+	return c.registerWorkflowSteps(w)
+}
+
+// registerWorkflowSteps registers all workflow entries and wires dependency edges.
+// On any failure, already-registered entries are rolled back.
+func (c *Cron) registerWorkflowSteps(w *Workflow) error {
+	registeredIDs := make(map[string]EntryID, len(w.steps))
+	registeredOrder := make([]string, 0, len(w.steps))
+
+	rollback := func() {
+		for _, name := range registeredOrder {
+			c.Remove(registeredIDs[name])
+		}
+	}
+
+	for _, s := range w.steps {
+		id, err := c.AddJob(s.spec, s.job, WithName(s.name))
+		if err != nil {
+			rollback()
+			return err
+		}
+		registeredIDs[s.name] = id
+		registeredOrder = append(registeredOrder, s.name)
+	}
+
+	for _, s := range w.steps {
+		for _, dep := range s.deps {
+			if err := c.AddDependency(registeredIDs[s.name], registeredIDs[dep.parentName], dep.condition); err != nil {
+				rollback()
+				return err
+			}
+		}
+	}
+
+	return nil
 }
 
 // EntryByName returns a snapshot of the entry with the given name,

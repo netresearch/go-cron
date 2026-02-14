@@ -27,6 +27,11 @@
   - [FuncErrorJob](#funcerrorjob)
   - [NamedJob](#namedjob)
   - [MissedPolicy](#missedpolicy)
+  - [TriggerCondition](#triggercondition)
+  - [JobResult](#jobresult)
+  - [Dependency](#dependency)
+  - [WorkflowExecution](#workflowexecution)
+  - [Workflow](#workflow)
   - [ObservabilityHooks](#observabilityhooks)
   - [SpecAnalysis](#specanalysis)
   - [ValidationError](#validationerror)
@@ -515,6 +520,149 @@ Returns false if no entry has the given name.
 ```go
 if c.IsEntryPausedByName("sync") {
     fmt.Println("sync job is paused")
+}
+```
+
+#### func (*Cron) AddDependency
+
+```go
+func (c *Cron) AddDependency(child, parent EntryID, condition TriggerCondition) error
+```
+
+AddDependency adds a dependency edge: child waits for parent with the given
+condition. When the parent job completes, the child is triggered if the condition
+matches the parent's `JobResult`.
+
+The operation is idempotent: adding an identical edge is a no-op.
+Returns `ErrEntryNotFound` if either entry does not exist.
+Returns `ErrInvalidCondition` if the condition is not valid.
+Returns `ErrCycleDetected` if the edge would create a cycle.
+
+**Example:**
+```go
+a, _ := c.AddFunc("0 2 * * *", extract, cron.WithName("extract"))
+b, _ := c.AddFunc("@triggered", transform, cron.WithName("transform"))
+if err := c.AddDependency(b, a, cron.OnSuccess); err != nil {
+    log.Fatal(err)
+}
+```
+
+#### func (*Cron) AddDependencyByName
+
+```go
+func (c *Cron) AddDependencyByName(child, parent string, condition TriggerCondition) error
+```
+
+AddDependencyByName is the name-based variant of `AddDependency`.
+Returns `ErrEntryNotFound` if either name does not exist.
+
+**Example:**
+```go
+c.AddDependencyByName("transform", "extract", cron.OnSuccess)
+```
+
+#### func (*Cron) RemoveDependency
+
+```go
+func (c *Cron) RemoveDependency(child, parent EntryID) error
+```
+
+RemoveDependency removes a dependency edge between child and parent.
+
+#### func (*Cron) RemoveDependencyByName
+
+```go
+func (c *Cron) RemoveDependencyByName(child, parent string) error
+```
+
+RemoveDependencyByName is the name-based variant of `RemoveDependency`.
+Returns `ErrEntryNotFound` if either name does not exist.
+
+#### func (*Cron) Dependencies
+
+```go
+func (c *Cron) Dependencies(id EntryID) []Dependency
+```
+
+Dependencies returns a copy of the dependency edges for an entry.
+Returns nil if the entry has no dependencies.
+
+#### func (*Cron) DependenciesByName
+
+```go
+func (c *Cron) DependenciesByName(name string) []Dependency
+```
+
+DependenciesByName is the name-based variant of `Dependencies`.
+Returns nil if no entry has the given name or the entry has no dependencies.
+
+#### func (*Cron) AddWorkflow
+
+```go
+func (c *Cron) AddWorkflow(w *Workflow) error
+```
+
+AddWorkflow validates and registers all steps of a Workflow atomically.
+It parses all specs, checks for duplicate names, validates the DAG structure
+(no cycles, at most one final step, all After references exist), and then
+registers all entries and wires dependency edges. On any failure,
+already-registered entries are rolled back.
+
+Returns:
+- `ErrEmptyWorkflow` if the workflow has no steps
+- `ErrMultipleFinalSteps` if more than one step is marked Final
+- `ErrUnknownStep` if a step references an unknown parent via After
+- `ErrCycleDetected` if the step dependencies form a cycle
+- `ErrDuplicateName` if a step name conflicts with an existing entry
+- Parse errors if any spec is invalid for the configured parser
+
+**Example:**
+```go
+wf := cron.NewWorkflow("etl-pipeline")
+wf.StepFunc("extract", "0 2 * * *", extractData)
+wf.StepFunc("transform", "@triggered", transformData).
+    After("extract", cron.OnSuccess)
+wf.StepFunc("load", "@triggered", loadData).
+    After("transform", cron.OnSuccess)
+wf.StepFunc("cleanup", "@triggered", cleanup).Final()
+
+if err := c.AddWorkflow(wf); err != nil {
+    log.Fatal(err)
+}
+```
+
+#### func (*Cron) WorkflowStatus
+
+```go
+func (c *Cron) WorkflowStatus(executionID string) *WorkflowExecution
+```
+
+WorkflowStatus returns the execution state for the given workflow execution ID.
+It searches active executions first, then completed executions (retained up to
+the `WithWorkflowRetention` limit). Returns nil if no execution with the given
+ID exists.
+
+**Example:**
+```go
+status := c.WorkflowStatus(execID)
+if status != nil && status.IsComplete() {
+    fmt.Println("Workflow finished at", status.StartTime)
+}
+```
+
+#### func (*Cron) ActiveWorkflows
+
+```go
+func (c *Cron) ActiveWorkflows() []WorkflowExecution
+```
+
+ActiveWorkflows returns copies of all in-progress workflow executions.
+Returns an empty slice if no workflows are currently executing.
+
+**Example:**
+```go
+for _, wf := range c.ActiveWorkflows() {
+    fmt.Printf("Workflow %s started at %v\n", wf.ID, wf.StartTime)
 }
 ```
 
@@ -1156,6 +1304,214 @@ for _, job := range jobs {
     c.AddFunc(job.Schedule, job.Func)
 }
 ```
+
+#### func WithWorkflowRetention
+
+```go
+func WithWorkflowRetention(n int) Option
+```
+
+WithWorkflowRetention sets the maximum number of completed workflow executions
+to retain for query via `WorkflowStatus`. Default is 100. Set to 0 for unlimited
+retention (not recommended for long-running services).
+
+**Example:**
+```go
+c := cron.New(cron.WithWorkflowRetention(50))
+```
+
+---
+
+### TriggerCondition
+
+```go
+type TriggerCondition int
+
+const (
+    OnSuccess  TriggerCondition = iota // Parent completed without error
+    OnFailure                          // Parent failed (error or panic)
+    OnSkipped                          // Parent was skipped (condition not met)
+    OnComplete                         // Parent resolved to any terminal state
+)
+```
+
+TriggerCondition defines when a dependent job should be triggered relative to
+its parent's outcome. Used with `AddDependency` and the `Workflow` builder's
+`After` method.
+
+#### func (TriggerCondition) String
+
+```go
+func (c TriggerCondition) String() string
+```
+
+String returns the human-readable name (`"OnSuccess"`, `"OnFailure"`, `"OnSkipped"`, `"OnComplete"`).
+
+#### func (TriggerCondition) Valid
+
+```go
+func (c TriggerCondition) Valid() bool
+```
+
+Valid reports whether c is a known trigger condition.
+
+#### func (TriggerCondition) Matches
+
+```go
+func (c TriggerCondition) Matches(result JobResult) bool
+```
+
+Matches reports whether the given parent result satisfies this condition.
+`OnComplete` matches any terminal result; the others match their specific `JobResult`.
+
+---
+
+### JobResult
+
+```go
+type JobResult int
+
+const (
+    ResultPending JobResult = iota // Job has not yet completed
+    ResultSuccess                   // Job completed without error
+    ResultFailure                   // Job failed (error or panic)
+    ResultSkipped                   // Job was skipped (condition not met)
+)
+```
+
+JobResult represents the outcome of a job within a workflow execution.
+
+#### func (JobResult) String
+
+```go
+func (r JobResult) String() string
+```
+
+String returns the human-readable name (`"Pending"`, `"Success"`, `"Failure"`, `"Skipped"`).
+
+#### func (JobResult) IsTerminal
+
+```go
+func (r JobResult) IsTerminal() bool
+```
+
+IsTerminal reports whether the result represents a final state. Returns true for
+`ResultSuccess`, `ResultFailure`, and `ResultSkipped`; false for `ResultPending`.
+
+---
+
+### Dependency
+
+```go
+type Dependency struct {
+    ParentID  EntryID
+    Condition TriggerCondition
+}
+```
+
+Dependency represents a directed edge in the workflow DAG. The child entry
+waits for `ParentID` to resolve, then fires if `Condition` matches the parent's
+`JobResult`. Returned by `Dependencies` and `DependenciesByName`.
+
+---
+
+### WorkflowExecution
+
+```go
+type WorkflowExecution struct {
+    ID        string
+    RootID    EntryID
+    StartTime time.Time
+    Results   map[EntryID]JobResult
+}
+```
+
+WorkflowExecution tracks the state of a single workflow run. `RootID` is the
+entry whose completion triggered the execution. `Results` maps each participating
+entry to its current `JobResult`.
+
+#### func (*WorkflowExecution) IsComplete
+
+```go
+func (we *WorkflowExecution) IsComplete() bool
+```
+
+IsComplete reports whether every job in the execution has reached a terminal state.
+
+---
+
+### Workflow
+
+```go
+type Workflow struct {
+    Name  string
+    // contains filtered or unexported fields
+}
+```
+
+Workflow defines a multi-step DAG of named jobs with dependency edges. Use
+`NewWorkflow` to create a workflow, then `Step`/`StepFunc` to add steps, and
+`AddWorkflow` on a Cron instance to register it atomically.
+
+#### func NewWorkflow
+
+```go
+func NewWorkflow(name string) *Workflow
+```
+
+NewWorkflow creates a new Workflow with the given name.
+
+**Example:**
+```go
+wf := cron.NewWorkflow("etl-pipeline")
+wf.StepFunc("extract", "0 2 * * *", extractData)
+wf.StepFunc("transform", "@triggered", transformData).
+    After("extract", cron.OnSuccess)
+err := c.AddWorkflow(wf)
+```
+
+#### func (*Workflow) Step
+
+```go
+func (w *Workflow) Step(name, spec string, job Job) *WorkflowStep
+```
+
+Step adds a named step to the workflow with the given schedule spec and Job.
+
+#### func (*Workflow) StepFunc
+
+```go
+func (w *Workflow) StepFunc(name, spec string, fn func()) *WorkflowStep
+```
+
+StepFunc adds a named step with a plain function as its job.
+
+#### func (*WorkflowStep) After
+
+```go
+func (s *WorkflowStep) After(parentName string, condition TriggerCondition) *WorkflowStep
+```
+
+After declares that this step depends on the named parent step with the given
+condition. Multiple `After` calls can be chained to create fan-in dependencies.
+
+**Example:**
+```go
+wf.StepFunc("load", "@triggered", loadData).
+    After("transform", cron.OnSuccess).
+    After("validate", cron.OnSuccess) // fan-in: both must succeed
+```
+
+#### func (*WorkflowStep) Final
+
+```go
+func (s *WorkflowStep) Final() *WorkflowStep
+```
+
+Final marks this step as a finalization step. A final step receives an
+`OnComplete` edge from every non-final step, ensuring it runs after all other
+steps have resolved regardless of their outcome. At most one step per workflow
+may be marked Final.
 
 ---
 
@@ -1907,15 +2263,20 @@ If implemented, the name is passed to `ObservabilityHooks` callbacks.
 
 ```go
 type ObservabilityHooks struct {
-    OnJobStart    func(entryID EntryID, name string, scheduledTime time.Time)
-    OnJobComplete func(entryID EntryID, name string, duration time.Duration, recovered any)
-    OnSchedule    func(entryID EntryID, name string, nextRun time.Time)
+    OnJobStart         func(entryID EntryID, name string, scheduledTime time.Time)
+    OnJobComplete      func(entryID EntryID, name string, duration time.Duration, recovered any)
+    OnSchedule         func(entryID EntryID, name string, nextRun time.Time)
+    OnWorkflowComplete func(executionID string, rootID EntryID, results map[EntryID]JobResult)
 }
 ```
 
 ObservabilityHooks provides callbacks for monitoring cron operations.
 All callbacks are optional. Hooks are called asynchronously in separate goroutines
 to prevent slow callbacks from blocking the scheduler.
+
+`OnWorkflowComplete` is called when all jobs in a workflow execution have resolved
+(success, failure, or skipped). The `results` map is a snapshot copy, safe to read
+without synchronization.
 
 **Example with Prometheus:**
 ```go
@@ -2251,6 +2612,25 @@ func AnalyzeSpecWithHash(spec string, options ParseOption, hashSeed string) Spec
 AnalyzeSpecWithHash analyzes a cron expression containing H hash expressions.
 The seed (e.g., job name) produces deterministic, distributed scheduling times.
 
+### WorkflowExecutionID
+
+```go
+func WorkflowExecutionID(ctx context.Context) string
+```
+
+WorkflowExecutionID returns the workflow execution ID from the context, or an
+empty string if the job is not part of a workflow execution. Use this inside a
+`JobWithContext` to correlate log entries or metrics with a specific workflow run.
+
+**Example:**
+```go
+c.AddJob("@triggered", cron.FuncJobWithContext(func(ctx context.Context) {
+    if execID := cron.WorkflowExecutionID(ctx); execID != "" {
+        log.Printf("Running as part of workflow %s", execID)
+    }
+}), cron.WithName("transform"))
+```
+
 ### Schedule Introspection
 
 #### NextN
@@ -2424,6 +2804,49 @@ var ErrEmptySpec = &ValidationError{Message: "empty spec string"}
 Set as the `Error` field on the `SpecAnalysis` result returned by `AnalyzeSpec`
 and `AnalyzeSpecWithHash` when an empty spec string is provided.
 
+### ErrCycleDetected
+
+```go
+var ErrCycleDetected = errors.New("cron: dependency would create a cycle")
+```
+
+Returned by `AddDependency`, `AddDependencyByName`, and `AddWorkflow` when the
+new dependency edge would create a cycle in the DAG.
+
+### ErrInvalidCondition
+
+```go
+var ErrInvalidCondition = errors.New("cron: invalid trigger condition")
+```
+
+Returned by `AddDependency` and `AddDependencyByName` when the provided
+`TriggerCondition` is not a valid known value.
+
+### ErrMultipleFinalSteps
+
+```go
+var ErrMultipleFinalSteps = errors.New("cron: workflow has multiple final steps")
+```
+
+Returned by `AddWorkflow` when more than one step in the workflow is marked `Final`.
+
+### ErrUnknownStep
+
+```go
+var ErrUnknownStep = errors.New("cron: workflow step references unknown parent")
+```
+
+Returned by `AddWorkflow` when a step's `After` references a parent name that
+does not exist in the workflow.
+
+### ErrEmptyWorkflow
+
+```go
+var ErrEmptyWorkflow = errors.New("cron: workflow has no steps")
+```
+
+Returned by `AddWorkflow` when the workflow has no steps.
+
 ---
 
-*Generated: 2026-02-12*
+*Generated: 2026-02-14*
