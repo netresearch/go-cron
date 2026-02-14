@@ -105,7 +105,7 @@ type Cron struct {
 	activeExecutions map[string]*WorkflowExecution
 
 	// completedExecutions stores completed executions for query (FIFO order).
-	completedExecutions []*WorkflowExecution //nolint:unused // used by Task 6 (processWorkflowEvent)
+	completedExecutions []*WorkflowExecution
 
 	// workflowRetention is the max number of completed executions to retain.
 	workflowRetention int
@@ -1194,6 +1194,29 @@ func (c *Cron) run() {
 			case req := <-c.queryDeps:
 				req.reply <- slices.Clone(c.entryDeps[req.value])
 				continue
+
+			case req := <-c.queryWorkflow:
+				if exec, ok := c.activeExecutions[req.value]; ok {
+					req.reply <- exec
+				} else {
+					var found *WorkflowExecution
+					for _, exec := range c.completedExecutions {
+						if exec.ID == req.value {
+							found = exec
+							break
+						}
+					}
+					req.reply <- found
+				}
+				continue
+
+			case replyChan := <-c.queryActiveWorkflows:
+				result := make([]WorkflowExecution, 0, len(c.activeExecutions))
+				for _, exec := range c.activeExecutions {
+					result = append(result, *exec)
+				}
+				replyChan <- result
+				continue
 			}
 
 			break
@@ -2171,6 +2194,45 @@ func (c *Cron) DependenciesByName(name string) []Dependency {
 		return nil
 	}
 	return c.Dependencies(e.ID)
+}
+
+// WorkflowStatus returns the execution state for the given workflow execution ID.
+// It searches active executions first, then completed executions.
+// Returns nil if no execution with the given ID exists.
+func (c *Cron) WorkflowStatus(executionID string) *WorkflowExecution {
+	c.runningMu.Lock()
+	defer c.runningMu.Unlock()
+	if !c.running {
+		if exec, ok := c.activeExecutions[executionID]; ok {
+			return exec
+		}
+		for _, exec := range c.completedExecutions {
+			if exec.ID == executionID {
+				return exec
+			}
+		}
+		return nil
+	}
+	req := makeReq[string, *WorkflowExecution](executionID)
+	c.queryWorkflow <- req
+	return <-req.reply
+}
+
+// ActiveWorkflows returns copies of all in-progress workflow executions.
+// Returns an empty slice if no workflows are currently executing.
+func (c *Cron) ActiveWorkflows() []WorkflowExecution {
+	c.runningMu.Lock()
+	defer c.runningMu.Unlock()
+	if !c.running {
+		result := make([]WorkflowExecution, 0, len(c.activeExecutions))
+		for _, exec := range c.activeExecutions {
+			result = append(result, *exec)
+		}
+		return result
+	}
+	replyChan := make(chan []WorkflowExecution, 1)
+	c.queryActiveWorkflows <- replyChan
+	return <-replyChan
 }
 
 // AddWorkflow validates and registers all steps of a Workflow atomically.

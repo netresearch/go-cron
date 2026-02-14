@@ -678,3 +678,25 @@ func TestHasCycleByName(t *testing.T) {
 		})
 	}
 }
+
+func TestWorkflowStatus(t *testing.T) {
+	c := New(WithSeconds())
+	c.Start()
+	defer c.Stop()
+
+	// WorkflowStatus returns nil for unknown IDs.
+	if status := c.WorkflowStatus("nonexistent"); status != nil {
+		t.Errorf("WorkflowStatus(unknown) = %v, want nil", status)
+	}
+}
+
+func TestActiveWorkflows(t *testing.T) {
+	c := New(WithSeconds())
+	c.Start()
+	defer c.Stop()
+
+	active := c.ActiveWorkflows()
+	if len(active) != 0 {
+		t.Errorf("ActiveWorkflows() = %d, want 0", len(active))
+	}
+}
