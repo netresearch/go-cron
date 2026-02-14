@@ -1003,6 +1003,39 @@ func (c *Cron) handleTimeBackwards(now time.Time) {
 	}
 }
 
+// postDispatchScheduled handles run-once removal or rescheduling after a
+// scheduled (timer-fired) job is dispatched.
+func (c *Cron) postDispatchScheduled(e *Entry, now time.Time) {
+	if e.runOnce {
+		// Remove run-once entries after dispatching the job.
+		// The job continues running in its own goroutine.
+		// Preserve the entry context so the dispatched job isn't
+		// canceled prematurely — it will be canceled when baseCtx
+		// is canceled (Stop). Explicit Remove() still cancels.
+		e.cancelEntryCtx = nil
+		c.removeEntry(e.ID)
+		c.logger.Info("run-once", "now", now, "entry", e.ID, "removed", true)
+	} else {
+		e.Next = e.Schedule.Next(now)
+		c.hooks.callOnSchedule(e.ID, e.Job, e.Next)
+		c.entries.Update(e)
+		c.logger.Info("run", "now", now, "entry", e.ID, "next", e.Next)
+	}
+}
+
+// postDispatchTriggered handles run-once removal after a manually triggered
+// job is dispatched. Unlike postDispatchScheduled, this does not reschedule
+// the entry since manual triggers don't affect the cron schedule.
+func (c *Cron) postDispatchTriggered(e *Entry, now time.Time) {
+	if e.runOnce {
+		e.cancelEntryCtx = nil
+		c.removeEntry(e.ID)
+		c.logger.Info("triggered-once", "now", now, "entry", e.ID, "removed", true)
+	} else {
+		c.logger.Info("triggered", "now", now, "entry", e.ID)
+	}
+}
+
 // processDueEntries runs all entries whose scheduled time has passed.
 // Entries are processed in order from the heap and rescheduled for their next run.
 // Run-once entries are removed after being dispatched.
@@ -1027,38 +1060,11 @@ func (c *Cron) processDueEntries(now time.Time) {
 		// If this entry has dependents, start a workflow execution.
 		if len(c.parentToChildren[e.ID]) > 0 {
 			c.startWorkflowExecution(e, scheduledTime)
-			e.Prev = e.Next
-			if e.runOnce {
-				e.cancelEntryCtx = nil
-				c.removeEntry(e.ID)
-				c.logger.Info("run-once-workflow", "now", now, "entry", e.ID, "removed", true)
-			} else {
-				e.Next = e.Schedule.Next(now)
-				c.hooks.callOnSchedule(e.ID, e.Job, e.Next)
-				c.entries.Update(e)
-				c.logger.Info("run-workflow", "now", now, "entry", e.ID, "next", e.Next)
-			}
-			continue
-		}
-
-		c.startJob(e.entryCtx, e.running, e.ID, e.Job, e.WrappedJob, scheduledTime)
-		e.Prev = e.Next
-
-		if e.runOnce {
-			// Remove run-once entries after dispatching the job.
-			// The job continues running in its own goroutine.
-			// Preserve the entry context so the dispatched job isn't
-			// canceled prematurely — it will be canceled when baseCtx
-			// is canceled (Stop). Explicit Remove() still cancels.
-			e.cancelEntryCtx = nil
-			c.removeEntry(e.ID)
-			c.logger.Info("run-once", "now", now, "entry", e.ID, "removed", true)
 		} else {
-			e.Next = e.Schedule.Next(now)
-			c.hooks.callOnSchedule(e.ID, e.Job, e.Next)
-			c.entries.Update(e) // Re-heapify after updating Next time
-			c.logger.Info("run", "now", now, "entry", e.ID, "next", e.Next)
+			c.startJob(e.entryCtx, e.running, e.ID, e.Job, e.WrappedJob, scheduledTime)
 		}
+		e.Prev = e.Next
+		c.postDispatchScheduled(e, now)
 	}
 }
 
@@ -1696,27 +1702,11 @@ func (c *Cron) triggerEntry(id EntryID) error {
 	// If this entry has dependents, start a workflow execution.
 	if len(c.parentToChildren[entry.ID]) > 0 {
 		c.startWorkflowExecution(entry, now)
-		entry.Prev = now
-		if entry.runOnce {
-			entry.cancelEntryCtx = nil
-			c.removeEntry(entry.ID)
-			c.logger.Info("triggered-workflow-run-once", "now", now, "entry", id, "removed", true)
-		} else {
-			c.logger.Info("triggered-workflow", "now", now, "entry", id)
-		}
-		return nil
-	}
-
-	c.startJob(entry.entryCtx, entry.running, entry.ID, entry.Job, entry.WrappedJob, now)
-	entry.Prev = now
-
-	if entry.runOnce {
-		entry.cancelEntryCtx = nil
-		c.removeEntry(entry.ID)
-		c.logger.Info("triggered-run-once", "now", now, "entry", id, "removed", true)
 	} else {
-		c.logger.Info("triggered", "now", now, "entry", id)
+		c.startJob(entry.entryCtx, entry.running, entry.ID, entry.Job, entry.WrappedJob, now)
 	}
+	entry.Prev = now
+	c.postDispatchTriggered(entry, now)
 	return nil
 }
 
@@ -2095,7 +2085,11 @@ func (c *Cron) addDependencyDirect(child, parent EntryID, condition TriggerCondi
 		}
 	}
 	c.entryDeps[child] = append(c.entryDeps[child], Dependency{ParentID: parent, Condition: condition})
-	c.parentToChildren[parent] = append(c.parentToChildren[parent], child)
+	// Ensure each child appears at most once per parent in parentToChildren.
+	children := c.parentToChildren[parent]
+	if !slices.Contains(children, child) {
+		c.parentToChildren[parent] = append(children, child)
+	}
 	return nil
 }
 
@@ -2191,7 +2185,7 @@ func (c *Cron) Dependencies(id EntryID) []Dependency {
 func (c *Cron) DependenciesByName(name string) []Dependency {
 	e := c.EntryByName(name)
 	if !e.Valid() {
-		return nil
+		return []Dependency{}
 	}
 	return c.Dependencies(e.ID)
 }

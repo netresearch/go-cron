@@ -1019,8 +1019,27 @@ func TestDependenciesByName_NotFound(t *testing.T) {
 	defer c.Stop()
 
 	deps := c.DependenciesByName("nonexistent")
-	if deps != nil {
-		t.Errorf("DependenciesByName(unknown) = %v, want nil", deps)
+	if len(deps) != 0 {
+		t.Errorf("DependenciesByName(unknown) = %v, want empty", deps)
+	}
+}
+
+func TestAddDependency_MultiCondition(t *testing.T) {
+	// Adding multiple conditions between the same parent-child pair should
+	// create multiple entryDeps edges but only one parentToChildren entry.
+	c := New(WithSeconds())
+	c.Start()
+	defer c.Stop()
+
+	a, _ := c.AddFunc("@triggered", func() {}, WithName("a"))
+	b, _ := c.AddFunc("@triggered", func() {}, WithName("b"))
+
+	_ = c.AddDependency(b, a, OnSuccess)
+	_ = c.AddDependency(b, a, OnFailure)
+
+	deps := c.Dependencies(b)
+	if len(deps) != 2 {
+		t.Errorf("multi-condition: got %d deps, want 2", len(deps))
 	}
 }
 
