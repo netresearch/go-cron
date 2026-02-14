@@ -3,9 +3,19 @@ package cron
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"time"
 )
+
+// ErrEmptyWorkflow is returned by AddWorkflow when the workflow has no steps.
+var ErrEmptyWorkflow = errors.New("cron: workflow has no steps")
+
+// ErrMultipleFinalSteps is returned by AddWorkflow when more than one step is marked Final.
+var ErrMultipleFinalSteps = errors.New("cron: workflow has multiple final steps")
+
+// ErrUnknownStep is returned by AddWorkflow when a step references an unknown parent via After.
+var ErrUnknownStep = errors.New("cron: workflow step references unknown parent")
 
 // TriggerCondition defines when a dependent job should be triggered
 // relative to its parent's outcome.
@@ -191,4 +201,183 @@ func generateExecutionID() string {
 	uuid[8] = (uuid[8] & 0x3f) | 0x80 // variant 2
 	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
 		uuid[0:4], uuid[4:6], uuid[6:8], uuid[8:10], uuid[10:16])
+}
+
+// Workflow defines a multi-step DAG of named jobs with dependency edges.
+// Use NewWorkflow to create a workflow, then Step/StepFunc to add steps,
+// and AddWorkflow on a Cron instance to register it atomically.
+type Workflow struct {
+	Name  string
+	steps []*WorkflowStep
+}
+
+// WorkflowStep is a single step within a Workflow.
+type WorkflowStep struct {
+	name    string
+	spec    string
+	job     Job
+	deps    []stepDep
+	isFinal bool
+}
+
+// stepDep represents a dependency edge within a workflow, using step names
+// (since EntryIDs are not yet assigned at build time).
+type stepDep struct {
+	parentName string
+	condition  TriggerCondition
+}
+
+// NewWorkflow creates a new Workflow with the given name.
+func NewWorkflow(name string) *Workflow {
+	return &Workflow{Name: name}
+}
+
+// Step adds a named step to the workflow with the given schedule spec and Job.
+func (w *Workflow) Step(name, spec string, job Job) *WorkflowStep {
+	s := &WorkflowStep{name: name, spec: spec, job: job}
+	w.steps = append(w.steps, s)
+	return s
+}
+
+// StepFunc adds a named step with a plain function as its job.
+func (w *Workflow) StepFunc(name, spec string, fn func()) *WorkflowStep {
+	return w.Step(name, spec, FuncJob(fn))
+}
+
+// After declares that this step depends on the named parent step with the given condition.
+// Multiple After calls can be chained to create fan-in dependencies.
+func (s *WorkflowStep) After(parentName string, condition TriggerCondition) *WorkflowStep {
+	s.deps = append(s.deps, stepDep{parentName: parentName, condition: condition})
+	return s
+}
+
+// Final marks this step as a finalization step. A final step receives an
+// OnComplete edge from every non-final step, ensuring it runs after all
+// other steps have resolved regardless of their outcome.
+// At most one step per workflow may be marked Final.
+func (s *WorkflowStep) Final() *WorkflowStep {
+	s.isFinal = true
+	return s
+}
+
+// validate checks the workflow's structural integrity: non-empty, at most one
+// final step, no duplicate step names, all After references exist, and no cycles.
+// It also expands the Final step by adding OnComplete edges from every non-final step.
+func (w *Workflow) validate() error {
+	if len(w.steps) == 0 {
+		return ErrEmptyWorkflow
+	}
+
+	if err := w.validateFinalStep(); err != nil {
+		return err
+	}
+
+	stepIndex, err := w.buildStepIndex()
+	if err != nil {
+		return err
+	}
+
+	return w.validateDeps(stepIndex)
+}
+
+// validateFinalStep checks for at most one final step and expands it
+// by adding OnComplete edges from every non-final step.
+func (w *Workflow) validateFinalStep() error {
+	var finalStep *WorkflowStep
+	for _, s := range w.steps {
+		if s.isFinal {
+			if finalStep != nil {
+				return ErrMultipleFinalSteps
+			}
+			finalStep = s
+		}
+	}
+
+	if finalStep != nil {
+		for _, s := range w.steps {
+			if s != finalStep {
+				finalStep.deps = append(finalStep.deps, stepDep{
+					parentName: s.name,
+					condition:  OnComplete,
+				})
+			}
+		}
+	}
+	return nil
+}
+
+// buildStepIndex builds a name index and checks for duplicate step names.
+func (w *Workflow) buildStepIndex() (map[string]struct{}, error) {
+	stepIndex := make(map[string]struct{}, len(w.steps))
+	for _, s := range w.steps {
+		if _, exists := stepIndex[s.name]; exists {
+			return nil, ErrDuplicateName
+		}
+		stepIndex[s.name] = struct{}{}
+	}
+	return stepIndex, nil
+}
+
+// validateDeps checks that all After references exist and that there are no cycles.
+func (w *Workflow) validateDeps(stepIndex map[string]struct{}) error {
+	for _, s := range w.steps {
+		for _, dep := range s.deps {
+			if _, ok := stepIndex[dep.parentName]; !ok {
+				return ErrUnknownStep
+			}
+		}
+	}
+
+	nameDeps := make(map[string][]string, len(w.steps))
+	for _, s := range w.steps {
+		for _, dep := range s.deps {
+			nameDeps[s.name] = append(nameDeps[s.name], dep.parentName)
+		}
+		if _, ok := nameDeps[s.name]; !ok {
+			nameDeps[s.name] = nil
+		}
+	}
+	if hasCycleByName(nameDeps) {
+		return ErrCycleDetected
+	}
+
+	return nil
+}
+
+// hasCycleByName checks whether a name-based adjacency list contains a cycle.
+// Used during AddWorkflow validation before EntryIDs are assigned.
+// deps maps step name -> list of parent names.
+func hasCycleByName(deps map[string][]string) bool {
+	const (
+		white = 0 // unvisited
+		gray  = 1 // in progress
+		black = 2 // done
+	)
+	color := make(map[string]int)
+
+	var dfs func(node string) bool
+	dfs = func(node string) bool {
+		color[node] = gray
+		for _, parent := range deps[node] {
+			switch color[parent] {
+			case gray:
+				return true // back edge = cycle
+			case white:
+				if dfs(parent) {
+					return true
+				}
+			}
+		}
+		color[node] = black
+		return false
+	}
+
+	for node := range deps {
+		if color[node] == white {
+			if dfs(node) {
+				return true
+			}
+		}
+	}
+	return false
 }

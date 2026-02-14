@@ -512,3 +512,169 @@ func TestWorkflow_ThreeStepChain(t *testing.T) {
 		}
 	}
 }
+
+func TestNewWorkflow_Builder(t *testing.T) {
+	wf := NewWorkflow("etl")
+
+	extract := wf.StepFunc("extract", "@triggered", func() {})
+	transform := wf.StepFunc("transform", "@triggered", func() {}).
+		After("extract", OnSuccess)
+	cleanup := wf.StepFunc("cleanup", "@triggered", func() {}).
+		Final()
+
+	if wf.Name != "etl" {
+		t.Errorf("Name = %q, want 'etl'", wf.Name)
+	}
+	if len(wf.steps) != 3 {
+		t.Fatalf("steps = %d, want 3", len(wf.steps))
+	}
+	_ = extract
+	if len(transform.deps) != 1 {
+		t.Errorf("transform deps = %d, want 1", len(transform.deps))
+	}
+	if !cleanup.isFinal {
+		t.Error("cleanup.isFinal = false, want true")
+	}
+}
+
+func TestAddWorkflow_EndToEnd(t *testing.T) {
+	start := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	clock := NewFakeClock(start)
+	c := New(WithClock(clock), WithSeconds())
+	c.Start()
+	defer c.Stop()
+
+	order := make(chan string, 10)
+
+	wf := NewWorkflow("pipeline")
+	wf.StepFunc("step1", "@triggered", func() { order <- "step1" })
+	wf.StepFunc("step2", "@triggered", func() { order <- "step2" }).
+		After("step1", OnSuccess)
+	wf.StepFunc("final", "@triggered", func() { order <- "final" }).
+		Final()
+
+	err := c.AddWorkflow(wf)
+	if err != nil {
+		t.Fatalf("AddWorkflow() error: %v", err)
+	}
+
+	_ = c.TriggerEntryByName("step1")
+
+	// Expect: step1, step2, final (in order)
+	expected := []string{"step1", "step2", "final"}
+	for _, want := range expected {
+		select {
+		case got := <-order:
+			if got != want {
+				t.Errorf("got %q, want %q", got, want)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timeout waiting for %q", want)
+		}
+	}
+}
+
+func TestAddWorkflow_CycleRejected(t *testing.T) {
+	c := New(WithSeconds())
+	c.Start()
+	defer c.Stop()
+
+	wf := NewWorkflow("cycle")
+	wf.StepFunc("a", "@triggered", func() {}).After("b", OnSuccess)
+	wf.StepFunc("b", "@triggered", func() {}).After("a", OnSuccess)
+
+	err := c.AddWorkflow(wf)
+	if !errors.Is(err, ErrCycleDetected) {
+		t.Errorf("AddWorkflow(cycle) = %v, want ErrCycleDetected", err)
+	}
+}
+
+func TestAddWorkflow_DuplicateStepName(t *testing.T) {
+	c := New(WithSeconds())
+	c.Start()
+	defer c.Stop()
+
+	c.AddFunc("@triggered", func() {}, WithName("existing"))
+
+	wf := NewWorkflow("dup")
+	wf.StepFunc("existing", "@triggered", func() {})
+
+	err := c.AddWorkflow(wf)
+	if !errors.Is(err, ErrDuplicateName) {
+		t.Errorf("AddWorkflow(dup name) = %v, want ErrDuplicateName", err)
+	}
+}
+
+func TestAddWorkflow_MultipleFinalSteps(t *testing.T) {
+	c := New(WithSeconds())
+
+	wf := NewWorkflow("multi-final")
+	wf.StepFunc("a", "@triggered", func() {})
+	wf.StepFunc("b", "@triggered", func() {}).Final()
+	wf.StepFunc("c", "@triggered", func() {}).Final()
+
+	err := c.AddWorkflow(wf)
+	if err == nil {
+		t.Error("AddWorkflow(multiple finals) = nil, want error")
+	}
+}
+
+func TestAddWorkflow_EmptyWorkflow(t *testing.T) {
+	c := New(WithSeconds())
+
+	wf := NewWorkflow("empty")
+
+	err := c.AddWorkflow(wf)
+	if !errors.Is(err, ErrEmptyWorkflow) {
+		t.Errorf("AddWorkflow(empty) = %v, want ErrEmptyWorkflow", err)
+	}
+}
+
+func TestAddWorkflow_UnknownParent(t *testing.T) {
+	c := New(WithSeconds())
+
+	wf := NewWorkflow("bad-ref")
+	wf.StepFunc("a", "@triggered", func() {}).After("nonexistent", OnSuccess)
+
+	err := c.AddWorkflow(wf)
+	if !errors.Is(err, ErrUnknownStep) {
+		t.Errorf("AddWorkflow(unknown parent) = %v, want ErrUnknownStep", err)
+	}
+}
+
+func TestHasCycleByName(t *testing.T) {
+	tests := []struct {
+		name      string
+		deps      map[string][]string
+		wantCycle bool
+	}{
+		{
+			name:      "no cycle",
+			deps:      map[string][]string{"a": nil, "b": {"a"}, "c": {"b"}},
+			wantCycle: false,
+		},
+		{
+			name:      "direct cycle",
+			deps:      map[string][]string{"a": {"b"}, "b": {"a"}},
+			wantCycle: true,
+		},
+		{
+			name:      "indirect cycle",
+			deps:      map[string][]string{"a": {"c"}, "b": {"a"}, "c": {"b"}},
+			wantCycle: true,
+		},
+		{
+			name:      "diamond no cycle",
+			deps:      map[string][]string{"a": nil, "b": {"a"}, "c": {"a"}, "d": {"b", "c"}},
+			wantCycle: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := hasCycleByName(tt.deps)
+			if got != tt.wantCycle {
+				t.Errorf("hasCycleByName() = %v, want %v", got, tt.wantCycle)
+			}
+		})
+	}
+}

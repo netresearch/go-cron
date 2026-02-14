@@ -2173,6 +2173,75 @@ func (c *Cron) DependenciesByName(name string) []Dependency {
 	return c.Dependencies(e.ID)
 }
 
+// AddWorkflow validates and registers all steps of a Workflow atomically.
+// It parses all specs, checks for duplicate names, validates the DAG structure
+// (no cycles, at most one final step, all After references exist), and then
+// registers all entries via AddJob and wires dependency edges via AddDependency.
+// On any failure, already-registered entries are rolled back.
+//
+// Returns:
+//   - ErrEmptyWorkflow if the workflow has no steps
+//   - ErrMultipleFinalSteps if more than one step is marked Final
+//   - ErrUnknownStep if a step references an unknown parent via After
+//   - ErrCycleDetected if the step dependencies form a cycle
+//   - ErrDuplicateName if a step name conflicts with an existing entry
+//   - Parse errors if any spec is invalid for the configured parser
+func (c *Cron) AddWorkflow(w *Workflow) error {
+	if err := w.validate(); err != nil {
+		return err
+	}
+
+	// Validate all specs parse with this Cron's parser.
+	for _, s := range w.steps {
+		if _, err := c.parser.Parse(s.spec); err != nil {
+			return err
+		}
+	}
+
+	// Check for duplicate names against existing entries.
+	for _, s := range w.steps {
+		if e := c.EntryByName(s.name); e.Valid() {
+			return ErrDuplicateName
+		}
+	}
+
+	return c.registerWorkflowSteps(w)
+}
+
+// registerWorkflowSteps registers all workflow entries and wires dependency edges.
+// On any failure, already-registered entries are rolled back.
+func (c *Cron) registerWorkflowSteps(w *Workflow) error {
+	registeredIDs := make(map[string]EntryID, len(w.steps))
+	var registeredOrder []string
+
+	rollback := func() {
+		for _, name := range registeredOrder {
+			c.Remove(registeredIDs[name])
+		}
+	}
+
+	for _, s := range w.steps {
+		id, err := c.AddJob(s.spec, s.job, WithName(s.name))
+		if err != nil {
+			rollback()
+			return err
+		}
+		registeredIDs[s.name] = id
+		registeredOrder = append(registeredOrder, s.name)
+	}
+
+	for _, s := range w.steps {
+		for _, dep := range s.deps {
+			if err := c.AddDependency(registeredIDs[s.name], registeredIDs[dep.parentName], dep.condition); err != nil {
+				rollback()
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
 // EntryByName returns a snapshot of the entry with the given name,
 // or an invalid Entry (Entry.Valid() == false) if not found.
 //
