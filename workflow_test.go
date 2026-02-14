@@ -700,3 +700,52 @@ func TestActiveWorkflows(t *testing.T) {
 		t.Errorf("ActiveWorkflows() = %d, want 0", len(active))
 	}
 }
+
+func TestWorkflowExecutionID_InContext(t *testing.T) {
+	c := New(WithSeconds())
+	c.Start()
+	defer c.Stop()
+
+	execIDs := make(chan string, 10)
+
+	// Use a JobWithContext to capture the context.
+	rootJob := &contextCapturingJob{ch: execIDs}
+	childJob := &contextCapturingJob{ch: execIDs}
+
+	c.AddJob("@triggered", rootJob, WithName("root"))
+	c.AddJob("@triggered", childJob, WithName("child"))
+	_ = c.AddDependencyByName("child", "root", OnSuccess)
+
+	_ = c.TriggerEntryByName("root")
+
+	// Both jobs should receive the same execution ID.
+	var ids []string
+	for i := 0; i < 2; i++ {
+		select {
+		case id := <-execIDs:
+			ids = append(ids, id)
+		case <-time.After(2 * time.Second):
+			t.Fatal("timeout waiting for execution ID")
+		}
+	}
+
+	if ids[0] == "" {
+		t.Error("root execution ID is empty")
+	}
+	if ids[0] != ids[1] {
+		t.Errorf("execution IDs differ: root=%q, child=%q", ids[0], ids[1])
+	}
+}
+
+// contextCapturingJob captures the workflow execution ID from context.
+type contextCapturingJob struct {
+	ch chan string
+}
+
+func (j *contextCapturingJob) Run() {
+	j.ch <- "" // no context available
+}
+
+func (j *contextCapturingJob) RunWithContext(ctx context.Context) {
+	j.ch <- WorkflowExecutionID(ctx)
+}
