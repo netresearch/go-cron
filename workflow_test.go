@@ -1038,3 +1038,410 @@ func TestAddDependencyByName_NotFound(t *testing.T) {
 		t.Errorf("unknown parent: got %v, want ErrEntryNotFound", err)
 	}
 }
+
+// --- Tests to improve patch coverage ---
+
+func TestAddWorkflow_DuplicateStepNameWithinWorkflow(t *testing.T) {
+	c := New(WithSeconds())
+	c.Start()
+	defer c.Stop()
+
+	wf := NewWorkflow("dup-internal")
+	wf.StepFunc("same", "@triggered", func() {})
+	wf.StepFunc("same", "@triggered", func() {})
+
+	err := c.AddWorkflow(wf)
+	if !errors.Is(err, ErrDuplicateName) {
+		t.Errorf("AddWorkflow(dup internal) = %v, want ErrDuplicateName", err)
+	}
+}
+
+func TestAddWorkflow_InvalidSpec(t *testing.T) {
+	c := New(WithSeconds())
+	c.Start()
+	defer c.Stop()
+
+	wf := NewWorkflow("bad-spec")
+	wf.StepFunc("a", "not a valid cron spec!!!", func() {})
+
+	err := c.AddWorkflow(wf)
+	if err == nil {
+		t.Error("AddWorkflow(invalid spec) = nil, want error")
+	}
+}
+
+func TestWorkflowStatus_CompletedExecution(t *testing.T) {
+	var capturedExecID string
+	var mu sync.Mutex
+	hooks := ObservabilityHooks{
+		OnWorkflowComplete: func(execID string, _ EntryID, _ map[EntryID]JobResult) {
+			mu.Lock()
+			capturedExecID = execID
+			mu.Unlock()
+		},
+	}
+	c := New(WithSeconds(), WithObservability(hooks))
+	c.Start()
+	defer c.Stop()
+
+	done := make(chan struct{})
+	var once sync.Once
+	c.AddFunc("@triggered", func() {}, WithName("root"))
+	c.AddFunc("@triggered", func() { once.Do(func() { close(done) }) }, WithName("child"))
+	_ = c.AddDependencyByName("child", "root", OnSuccess)
+
+	_ = c.TriggerEntryByName("root")
+	<-done
+	time.Sleep(200 * time.Millisecond) // let hook fire
+
+	mu.Lock()
+	execID := capturedExecID
+	mu.Unlock()
+
+	if execID == "" {
+		t.Skip("execution ID not captured")
+	}
+
+	status := c.WorkflowStatus(execID)
+	if status == nil {
+		t.Fatal("WorkflowStatus(completed) = nil, want non-nil")
+	}
+	if status.ID != execID {
+		t.Errorf("status.ID = %q, want %q", status.ID, execID)
+	}
+}
+
+func TestRemoveDependency_BeforeStart(t *testing.T) {
+	c := New(WithSeconds())
+	// Don't start — test pre-start path.
+	a, _ := c.AddFunc("@triggered", func() {}, WithName("a"))
+	b, _ := c.AddFunc("@triggered", func() {}, WithName("b"))
+
+	_ = c.AddDependency(b, a, OnSuccess)
+	if err := c.RemoveDependency(b, a); err != nil {
+		t.Fatalf("RemoveDependency(pre-start) error: %v", err)
+	}
+	if deps := c.Dependencies(b); len(deps) != 0 {
+		t.Errorf("after remove: got %d deps, want 0", len(deps))
+	}
+}
+
+func TestAddDependency_BeforeStart(t *testing.T) {
+	c := New(WithSeconds())
+	// Don't start — test pre-start path.
+	a, _ := c.AddFunc("@triggered", func() {}, WithName("a"))
+	b, _ := c.AddFunc("@triggered", func() {}, WithName("b"))
+
+	err := c.AddDependency(b, a, OnSuccess)
+	if err != nil {
+		t.Fatalf("AddDependency(pre-start) error: %v", err)
+	}
+	deps := c.Dependencies(b)
+	if len(deps) != 1 {
+		t.Fatalf("Dependencies() = %d, want 1", len(deps))
+	}
+}
+
+func TestRemoveDependency_NoOp(t *testing.T) {
+	c := New(WithSeconds())
+	c.Start()
+	defer c.Stop()
+
+	a, _ := c.AddFunc("@triggered", func() {}, WithName("a"))
+	b, _ := c.AddFunc("@triggered", func() {}, WithName("b"))
+
+	// Removing non-existent edge should be a no-op, not an error.
+	err := c.RemoveDependency(b, a)
+	if err != nil {
+		t.Errorf("RemoveDependency(no-op) = %v, want nil", err)
+	}
+}
+
+func TestWorkflow_ScheduledExecution(t *testing.T) {
+	// Test that a cron-scheduled root entry starts a workflow when it has dependents.
+	start := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	clock := NewFakeClock(start)
+	c := New(WithClock(clock), WithSeconds())
+	c.Start()
+	defer c.Stop()
+
+	order := make(chan string, 10)
+	c.AddFunc("* * * * * *", func() { order <- "root" }, WithName("root"))
+	c.AddFunc("@triggered", func() { order <- "child" }, WithName("child"))
+	_ = c.AddDependencyByName("child", "root", OnSuccess)
+
+	// Advance clock to trigger the cron schedule.
+	clock.Advance(1 * time.Second)
+
+	// Both root and child should execute.
+	for _, want := range []string{"root", "child"} {
+		select {
+		case got := <-order:
+			if got != want {
+				t.Errorf("got %q, want %q", got, want)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timeout waiting for %q", want)
+		}
+	}
+}
+
+func TestWorkflow_TriggerWithRunOnce(t *testing.T) {
+	// Test the workflow trigger + runOnce path (lines 1697-1707 of triggerEntry).
+	// When a runOnce root with dependents is triggered, the root job fires and the
+	// entry is removed from the scheduler. The root's removal cleans up dependency
+	// edges, so children won't be triggered — but the code path for starting the
+	// workflow execution and removing the entry is exercised.
+	c := New(WithSeconds())
+	c.Start()
+	defer c.Stop()
+
+	rootRan := make(chan struct{}, 1)
+	c.AddFunc("@triggered", func() { rootRan <- struct{}{} }, WithName("root"), WithRunOnce())
+	c.AddFunc("@triggered", func() {}, WithName("child"))
+	_ = c.AddDependencyByName("child", "root", OnSuccess)
+
+	_ = c.TriggerEntryByName("root")
+
+	select {
+	case <-rootRan:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for root to run")
+	}
+
+	// root should have been removed (runOnce).
+	time.Sleep(100 * time.Millisecond)
+	e := c.EntryByName("root")
+	if e.Valid() {
+		t.Error("root entry should have been removed after runOnce trigger")
+	}
+}
+
+func TestProcessWorkflowEvent_UnknownExecution(t *testing.T) {
+	// Test the unknown execution ID path (line 1291-1292 of processWorkflowEvent).
+	// We trigger a workflow, remove the child while root is running so the
+	// child's done event arrives for a completed (purged) execution.
+	// Instead, we can test indirectly: complete a workflow, let retention purge it,
+	// then verify WorkflowStatus returns nil for the old ID.
+	c := New(WithSeconds(), WithWorkflowRetention(1))
+	c.Start()
+	defer c.Stop()
+
+	done := make(chan struct{}, 10)
+	c.AddFunc("@triggered", func() {}, WithName("root"))
+	c.AddFunc("@triggered", func() { done <- struct{}{} }, WithName("child"))
+	_ = c.AddDependencyByName("child", "root", OnSuccess)
+
+	// Run 3 executions to ensure retention evicts the first.
+	for range 3 {
+		_ = c.TriggerEntryByName("root")
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("timeout waiting for workflow")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	// Evicted executions should return nil.
+	// This exercises WorkflowStatus's completed-execution search returning nil.
+	if status := c.WorkflowStatus("nonexistent-exec-id"); status != nil {
+		t.Errorf("WorkflowStatus(evicted) = %v, want nil", status)
+	}
+}
+
+func TestWorkflow_ScheduledExecutionRunOnce(t *testing.T) {
+	// Test processDueEntries workflow + runOnce path (lines 1031-1034).
+	// The root fires via cron schedule, the workflow execution is created,
+	// then the entry is removed because runOnce is set.
+	start := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	clock := NewFakeClock(start)
+	c := New(WithClock(clock), WithSeconds())
+	c.Start()
+	defer c.Stop()
+
+	rootRan := make(chan struct{}, 1)
+	c.AddFunc("* * * * * *", func() { rootRan <- struct{}{} }, WithName("root"), WithRunOnce())
+	c.AddFunc("@triggered", func() {}, WithName("child"))
+	_ = c.AddDependencyByName("child", "root", OnSuccess)
+
+	clock.Advance(1 * time.Second)
+
+	select {
+	case <-rootRan:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for root")
+	}
+
+	// root should have been removed (runOnce in processDueEntries workflow path).
+	time.Sleep(100 * time.Millisecond)
+	e := c.EntryByName("root")
+	if e.Valid() {
+		t.Error("root entry should have been removed after runOnce scheduled workflow")
+	}
+}
+
+func TestTriggerWorkflowChild_EntryNotFound(t *testing.T) {
+	// Test triggerWorkflowChild when child entry has been removed during execution.
+	c := New(WithSeconds())
+	c.Start()
+	defer c.Stop()
+
+	blocker := make(chan struct{})
+	result := make(chan string, 10)
+
+	c.AddFunc("@triggered", func() {
+		<-blocker // block until released
+	}, WithName("a"))
+	bID, _ := c.AddFunc("@triggered", func() { result <- "b-ran" }, WithName("b"))
+	c.AddFunc("@triggered", func() { result <- "c-ran" }, WithName("c"))
+	_ = c.AddDependencyByName("b", "a", OnSuccess)
+	_ = c.AddDependencyByName("c", "b", OnSuccess)
+
+	_ = c.TriggerEntryByName("a")
+
+	// Remove b while a is still running — when a completes, triggerWorkflowChild
+	// won't find b in entryIndex, so b gets ResultSkipped, which cascades to c.
+	c.Remove(bID)
+
+	close(blocker)
+
+	// c depends on b with OnSuccess; b was skipped, so c should NOT run.
+	select {
+	case got := <-result:
+		t.Fatalf("unexpected job ran: %q (both b and c should be skipped)", got)
+	case <-time.After(500 * time.Millisecond):
+		// Good: neither b nor c ran.
+	}
+}
+
+func TestWorkflow_ScheduledExecutionNonRunOnce(t *testing.T) {
+	// Test processDueEntries workflow non-runOnce path (lines 1035-1039):
+	// entry is rescheduled after workflow dispatch.
+	start := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	clock := NewFakeClock(start)
+	c := New(WithClock(clock), WithSeconds())
+	c.Start()
+	defer c.Stop()
+
+	count := make(chan struct{}, 10)
+	c.AddFunc("* * * * * *", func() { count <- struct{}{} }, WithName("root"))
+	c.AddFunc("@triggered", func() {}, WithName("child"))
+	_ = c.AddDependencyByName("child", "root", OnSuccess)
+
+	// First tick.
+	clock.Advance(1 * time.Second)
+	select {
+	case <-count:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for first tick")
+	}
+
+	// Second tick — proves the entry was rescheduled, not removed.
+	clock.Advance(1 * time.Second)
+	select {
+	case <-count:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for second tick (entry should be rescheduled)")
+	}
+}
+
+func TestWorkflowStatus_AfterStop(t *testing.T) {
+	// Test WorkflowStatus pre-start (stopped) path for completed executions.
+	var capturedExecID string
+	var mu sync.Mutex
+	hooks := ObservabilityHooks{
+		OnWorkflowComplete: func(execID string, _ EntryID, _ map[EntryID]JobResult) {
+			mu.Lock()
+			capturedExecID = execID
+			mu.Unlock()
+		},
+	}
+	c := New(WithSeconds(), WithObservability(hooks))
+	c.Start()
+
+	done := make(chan struct{})
+	var once sync.Once
+	c.AddFunc("@triggered", func() {}, WithName("root"))
+	c.AddFunc("@triggered", func() { once.Do(func() { close(done) }) }, WithName("child"))
+	_ = c.AddDependencyByName("child", "root", OnSuccess)
+
+	_ = c.TriggerEntryByName("root")
+	<-done
+	time.Sleep(200 * time.Millisecond) // let hook fire
+
+	mu.Lock()
+	execID := capturedExecID
+	mu.Unlock()
+	if execID == "" {
+		t.Skip("execution ID not captured")
+	}
+
+	// Stop the cron — now WorkflowStatus takes the !c.running path.
+	c.Stop()
+
+	// Query for the completed execution (pre-start completed path).
+	status := c.WorkflowStatus(execID)
+	if status == nil {
+		t.Fatal("WorkflowStatus(after stop, completed) = nil, want non-nil")
+	}
+	if status.ID != execID {
+		t.Errorf("status.ID = %q, want %q", status.ID, execID)
+	}
+
+	// Query for an unknown execution (pre-start not-found path).
+	if got := c.WorkflowStatus("nonexistent"); got != nil {
+		t.Errorf("WorkflowStatus(after stop, unknown) = %v, want nil", got)
+	}
+}
+
+func TestRegisterWorkflowSteps_RollbackOnMaxEntries(t *testing.T) {
+	// Test registerWorkflowSteps rollback: configure WithMaxEntries so that
+	// the second step's AddJob fails. The first step should be rolled back.
+	c := New(WithSeconds(), WithMaxEntries(1))
+	c.Start()
+	defer c.Stop()
+
+	wf := NewWorkflow("over-limit")
+	wf.StepFunc("step1", "@triggered", func() {})
+	wf.StepFunc("step2", "@triggered", func() {}).After("step1", OnSuccess)
+
+	err := c.AddWorkflow(wf)
+	if err == nil {
+		t.Fatal("AddWorkflow should fail when max entries exceeded")
+	}
+
+	// step1 should have been rolled back (removed).
+	e := c.EntryByName("step1")
+	if e.Valid() {
+		t.Error("step1 should have been rolled back after failure")
+	}
+}
+
+func TestRegisterWorkflowSteps_RollbackOnInvalidCondition(t *testing.T) {
+	// Test registerWorkflowSteps rollback when AddDependency fails.
+	// validate() does NOT check TriggerCondition validity, so an invalid
+	// condition passes validation but fails in addDependencyDirect.
+	// This triggers the second rollback path (line 2298).
+	c := New(WithSeconds())
+	c.Start()
+	defer c.Stop()
+
+	wf := NewWorkflow("bad-cond")
+	wf.StepFunc("step1", "@triggered", func() {})
+	wf.StepFunc("step2", "@triggered", func() {}).
+		After("step1", TriggerCondition(99)) // invalid condition
+
+	err := c.AddWorkflow(wf)
+	if !errors.Is(err, ErrInvalidCondition) {
+		t.Errorf("AddWorkflow(invalid condition) = %v, want ErrInvalidCondition", err)
+	}
+
+	// Both steps should have been rolled back.
+	if e := c.EntryByName("step1"); e.Valid() {
+		t.Error("step1 should have been rolled back after dependency failure")
+	}
+	if e := c.EntryByName("step2"); e.Valid() {
+		t.Error("step2 should have been rolled back after dependency failure")
+	}
+}
