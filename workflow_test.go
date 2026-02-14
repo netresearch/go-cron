@@ -1337,6 +1337,9 @@ func TestWorkflow_ScheduledExecutionNonRunOnce(t *testing.T) {
 		t.Fatal("timeout waiting for first tick")
 	}
 
+	// Let the workflow execution fully complete before advancing again.
+	time.Sleep(100 * time.Millisecond)
+
 	// Second tick — proves the entry was rescheduled, not removed.
 	clock.Advance(1 * time.Second)
 	select {
