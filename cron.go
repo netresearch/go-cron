@@ -84,6 +84,40 @@ type Cron struct {
 	// Go maps don't release memory when entries are deleted, so we periodically
 	// rebuild maps to reclaim memory in high-churn scenarios.
 	indexDeletions int
+
+	// jobDone receives completion events from startJob goroutines.
+	// Used by the run loop to drive workflow DAG orchestration.
+	jobDone chan jobDoneEvent
+
+	// parentToChildren maps parent EntryID to child EntryIDs for O(1) lookup.
+	parentToChildren map[EntryID][]EntryID
+
+	// entryDeps maps child EntryID to its dependency edges.
+	entryDeps map[EntryID][]Dependency
+
+	// activeExecutions tracks in-progress workflow executions.
+	activeExecutions map[string]*WorkflowExecution
+
+	// completedExecutions stores completed executions for query (FIFO order).
+	completedExecutions []*WorkflowExecution //nolint:unused // used by Task 6 (processWorkflowEvent)
+
+	// workflowRetention is the max number of completed executions to retain.
+	workflowRetention int
+
+	// addDep routes AddDependency requests to the run loop.
+	addDep chan request[addDepRequest, error]
+
+	// removeDep routes RemoveDependency requests to the run loop.
+	removeDep chan request[removeDepRequest, error]
+
+	// queryDeps routes Dependencies queries to the run loop.
+	queryDeps chan request[EntryID, []Dependency]
+
+	// queryWorkflow routes WorkflowStatus queries to the run loop.
+	queryWorkflow chan request[string, *WorkflowExecution]
+
+	// queryActiveWorkflows routes ActiveWorkflows queries to the run loop.
+	queryActiveWorkflows chan chan []WorkflowExecution
 }
 
 // ScheduleParser is an interface for schedule spec parsers that return a Schedule.
@@ -247,6 +281,19 @@ func makeReq[T, C any](v T) request[T, C] {
 	return request[T, C]{value: v, reply: make(chan C, 1)}
 }
 
+// addDepRequest is used to add a dependency edge via the run loop.
+type addDepRequest struct {
+	childID   EntryID          //nolint:unused // used by Task 4 (AddDependency)
+	parentID  EntryID          //nolint:unused // used by Task 4 (AddDependency)
+	condition TriggerCondition //nolint:unused // used by Task 4 (AddDependency)
+}
+
+// removeDepRequest is used to remove a dependency edge via the run loop.
+type removeDepRequest struct {
+	childID  EntryID //nolint:unused // used by Task 4 (RemoveDependency)
+	parentID EntryID //nolint:unused // used by Task 4 (RemoveDependency)
+}
+
 // Entry consists of a schedule and the func to execute on that schedule.
 type Entry struct {
 	// ID is the cron-assigned ID of this entry, which may be used to look up a
@@ -406,26 +453,36 @@ func (e Entry) Run() {
 // See "cron.With*" to modify the default behavior.
 func New(opts ...Option) *Cron {
 	c := &Cron{
-		entries:     nil,
-		entryIndex:  make(map[EntryID]*Entry),
-		nameIndex:   make(map[string]*Entry),
-		chain:       NewChain(),
-		add:         make(chan request[*Entry, struct{}]),
-		stop:        make(chan struct{}),
-		snapshot:    make(chan chan []Entry),
-		entryLookup: make(chan entryLookupRequest),
-		nameLookup:  make(chan nameLookupRequest),
-		remove:      make(chan request[EntryID, struct{}]),
-		update:      make(chan request[updateScheduleRequest, error]),
-		pause:       make(chan request[pauseRequest, error]),
-		trigger:     make(chan request[EntryID, error]),
-		running:     false,
-		runningMu:   sync.Mutex{},
-		logger:      DefaultLogger,
-		location:    time.Local,
-		parser:      standardParser,
-		clock:       RealClock{},
-		baseCtx:     context.Background(), // Default base context
+		entries:              nil,
+		entryIndex:           make(map[EntryID]*Entry),
+		nameIndex:            make(map[string]*Entry),
+		chain:                NewChain(),
+		add:                  make(chan request[*Entry, struct{}]),
+		stop:                 make(chan struct{}),
+		snapshot:             make(chan chan []Entry),
+		entryLookup:          make(chan entryLookupRequest),
+		nameLookup:           make(chan nameLookupRequest),
+		remove:               make(chan request[EntryID, struct{}]),
+		update:               make(chan request[updateScheduleRequest, error]),
+		pause:                make(chan request[pauseRequest, error]),
+		trigger:              make(chan request[EntryID, error]),
+		running:              false,
+		runningMu:            sync.Mutex{},
+		logger:               DefaultLogger,
+		location:             time.Local,
+		parser:               standardParser,
+		clock:                RealClock{},
+		baseCtx:              context.Background(), // Default base context
+		jobDone:              make(chan jobDoneEvent, 64),
+		parentToChildren:     make(map[EntryID][]EntryID),
+		entryDeps:            make(map[EntryID][]Dependency),
+		activeExecutions:     make(map[string]*WorkflowExecution),
+		workflowRetention:    100,
+		addDep:               make(chan request[addDepRequest, error]),
+		removeDep:            make(chan request[removeDepRequest, error]),
+		queryDeps:            make(chan request[EntryID, []Dependency]),
+		queryWorkflow:        make(chan request[string, *WorkflowExecution]),
+		queryActiveWorkflows: make(chan chan []WorkflowExecution),
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -1096,6 +1153,10 @@ func (c *Cron) run() {
 				err := c.triggerEntry(req.value)
 				req.reply <- err
 				continue // no timer reset needed
+
+			case event := <-c.jobDone:
+				c.processWorkflowEvent(event)
+				continue
 			}
 
 			break
@@ -1111,8 +1172,18 @@ func (c *Cron) run() {
 // is removed, its job is replaced, or Stop() is called (which cancels baseCtx,
 // cascading to all entry contexts).
 func (c *Cron) startJob(entryCtx context.Context, entryRunning *jobTracker, entryID EntryID, originalJob, wrappedJob Job, scheduledTime time.Time) {
+	c.startJobWithExecution(entryCtx, entryRunning, entryID, originalJob, wrappedJob, scheduledTime, "")
+}
+
+func (c *Cron) startJobWithExecution(entryCtx context.Context, entryRunning *jobTracker, entryID EntryID, originalJob, wrappedJob Job, scheduledTime time.Time, executionID string) {
 	c.jobWaiter.Add(1)
 	entryRunning.start()
+
+	runCtx := entryCtx
+	if executionID != "" {
+		runCtx = context.WithValue(entryCtx, workflowContextKey{}, executionID)
+	}
+
 	go func() {
 		defer c.jobWaiter.Done()
 		defer entryRunning.finish()
@@ -1127,7 +1198,7 @@ func (c *Cron) startJob(entryCtx context.Context, entryRunning *jobTracker, entr
 			}()
 			// Check if the job supports context and call appropriate method
 			if jc, ok := wrappedJob.(JobWithContext); ok {
-				jc.RunWithContext(entryCtx)
+				jc.RunWithContext(runCtx)
 			} else {
 				wrappedJob.Run()
 			}
@@ -1136,11 +1207,27 @@ func (c *Cron) startJob(entryCtx context.Context, entryRunning *jobTracker, entr
 
 		c.hooks.callOnJobComplete(entryID, originalJob, duration, recovered)
 
+		// Send completion event for workflow orchestration.
+		if executionID != "" {
+			c.jobDone <- jobDoneEvent{
+				EntryID:     entryID,
+				Panicked:    recovered != nil,
+				PanicValue:  recovered,
+				ExecutionID: executionID,
+			}
+			return // Don't re-panic for workflow jobs
+		}
+
 		// Re-panic if the job panicked and wasn't handled by a wrapper
 		if recovered != nil {
 			panic(recovered)
 		}
 	}()
+}
+
+// processWorkflowEvent handles a job completion within a workflow execution.
+func (c *Cron) processWorkflowEvent(_ jobDoneEvent) {
+	// Implemented in Task 6.
 }
 
 // updateSchedule updates the schedule (and optionally the job) of an existing

@@ -141,6 +141,15 @@ func WorkflowExecutionID(ctx context.Context) string {
 	return ""
 }
 
+// jobDoneEvent is sent from startJob goroutines to the run loop
+// to report job completion for workflow orchestration.
+type jobDoneEvent struct {
+	EntryID     EntryID
+	Panicked    bool
+	PanicValue  any
+	ExecutionID string // workflow execution ID, empty if standalone
+}
+
 // hasCycle checks whether adding an edge from newChild to newParent
 // would create a cycle in the dependency graph. Uses DFS from newParent
 // upward through the parent edges to see if newChild is reachable.
