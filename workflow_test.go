@@ -3,6 +3,7 @@ package cron
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -720,7 +721,7 @@ func TestWorkflowExecutionID_InContext(t *testing.T) {
 
 	// Both jobs should receive the same execution ID.
 	var ids []string
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		select {
 		case id := <-execIDs:
 			ids = append(ids, id)
@@ -748,4 +749,170 @@ func (j *contextCapturingJob) Run() {
 
 func (j *contextCapturingJob) RunWithContext(ctx context.Context) {
 	j.ch <- WorkflowExecutionID(ctx)
+}
+
+func TestWorkflow_DiamondDependency(t *testing.T) {
+	// A -> B, A -> C, B+C -> D
+	c := New(WithSeconds())
+	c.Start()
+	defer c.Stop()
+
+	order := make(chan string, 10)
+
+	c.AddFunc("@triggered", func() { order <- "a" }, WithName("a"))
+	c.AddFunc("@triggered", func() { order <- "b" }, WithName("b"))
+	c.AddFunc("@triggered", func() { order <- "c" }, WithName("c"))
+	c.AddFunc("@triggered", func() { order <- "d" }, WithName("d"))
+
+	_ = c.AddDependencyByName("b", "a", OnSuccess)
+	_ = c.AddDependencyByName("c", "a", OnSuccess)
+	_ = c.AddDependencyByName("d", "b", OnSuccess)
+	_ = c.AddDependencyByName("d", "c", OnSuccess)
+
+	_ = c.TriggerEntryByName("a")
+
+	got := make([]string, 4)
+	for i := range 4 {
+		select {
+		case g := <-order:
+			got[i] = g
+		case <-time.After(3 * time.Second):
+			t.Fatalf("timeout after %d jobs", i)
+		}
+	}
+
+	// a must be first, d must be last
+	if got[0] != "a" {
+		t.Errorf("first = %q, want 'a'", got[0])
+	}
+	if got[3] != "d" {
+		t.Errorf("last = %q, want 'd'", got[3])
+	}
+}
+
+func TestWorkflow_PausedChildSkipped(t *testing.T) {
+	c := New(WithSeconds())
+	c.Start()
+	defer c.Stop()
+
+	results := make(chan string, 10)
+
+	c.AddFunc("@triggered", func() { results <- "a" }, WithName("a"))
+	c.AddFunc("@triggered", func() { results <- "b" }, WithName("b"))
+
+	_ = c.AddDependencyByName("b", "a", OnSuccess)
+	_ = c.PauseEntryByName("b")
+
+	_ = c.TriggerEntryByName("a")
+
+	// a runs
+	select {
+	case <-results:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for a")
+	}
+
+	// b should NOT run (paused = skipped)
+	select {
+	case got := <-results:
+		t.Fatalf("paused job ran: %q", got)
+	case <-time.After(200 * time.Millisecond):
+		// good
+	}
+}
+
+func TestWorkflow_RemoveEntryDuringExecution(t *testing.T) {
+	c := New(WithSeconds())
+	c.Start()
+	defer c.Stop()
+
+	blocker := make(chan struct{})
+	result := make(chan string, 10)
+
+	c.AddFunc("@triggered", func() {
+		<-blocker // block until released
+	}, WithName("a"))
+	c.AddFunc("@triggered", func() { result <- "b" }, WithName("b"))
+	_ = c.AddDependencyByName("b", "a", OnSuccess)
+
+	_ = c.TriggerEntryByName("a")
+
+	// Remove b while a is still running
+	c.Remove(c.EntryByName("b").ID)
+
+	// Release a
+	close(blocker)
+
+	// b should NOT run (removed)
+	select {
+	case got := <-result:
+		t.Fatalf("removed job ran: %q", got)
+	case <-time.After(500 * time.Millisecond):
+		// good
+	}
+}
+
+func TestWorkflow_OnSkippedTrigger(t *testing.T) {
+	c := New(WithSeconds())
+	c.Start()
+	defer c.Stop()
+
+	results := make(chan string, 10)
+
+	c.AddFunc("@triggered", func() {
+		panic("fail")
+	}, WithName("a"))
+	c.AddFunc("@triggered", func() {
+		results <- "b"
+	}, WithName("b"))
+	c.AddFunc("@triggered", func() {
+		results <- "c"
+	}, WithName("c"))
+
+	// b depends on a succeeding -> will be skipped (a fails)
+	_ = c.AddDependencyByName("b", "a", OnSuccess)
+	// c depends on b being skipped -> should fire
+	_ = c.AddDependencyByName("c", "b", OnSkipped)
+
+	_ = c.TriggerEntryByName("a")
+
+	select {
+	case got := <-results:
+		if got != "c" {
+			t.Errorf("got %q, want 'c'", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout — OnSkipped chain did not fire")
+	}
+}
+
+func TestWorkflow_ConcurrentExecutions(t *testing.T) {
+	c := New(WithSeconds())
+	c.Start()
+	defer c.Stop()
+
+	var count int32
+	c.AddFunc("@triggered", func() {
+		atomic.AddInt32(&count, 1)
+	}, WithName("a"))
+	c.AddFunc("@triggered", func() {
+		atomic.AddInt32(&count, 1)
+	}, WithName("b"))
+	_ = c.AddDependencyByName("b", "a", OnSuccess)
+
+	// Trigger 5 concurrent workflow executions.
+	for range 5 {
+		_ = c.TriggerEntryByName("a")
+	}
+
+	// Wait for all jobs (5 * 2 = 10 jobs).
+	deadline := time.After(5 * time.Second)
+	for atomic.LoadInt32(&count) < 10 {
+		select {
+		case <-deadline:
+			t.Fatalf("timeout: only %d/10 jobs ran", atomic.LoadInt32(&count))
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
 }
