@@ -40,6 +40,16 @@ features, bug fixes, and modernization improvements.
   for any schedule implementing `ScheduleWithPrev`. Returns times in reverse
   chronological order. Complements the existing `NextN`, `Between`, `Count`, and
   `Matches` introspection functions.
+- **Workflow/DAG dependencies** ([#312]):
+  - `AddDependency`/`AddDependencyByName` — wire dependency edges between entries
+  - `RemoveDependency`/`RemoveDependencyByName` — remove dependency edges
+  - `Dependencies`/`DependenciesByName` — query dependency edges for an entry
+  - `NewWorkflow`/`AddWorkflow` — declarative workflow builder with `Step`, `After`, `Final`
+  - `WorkflowStatus`/`ActiveWorkflows` — query workflow execution state
+  - `WorkflowExecutionID` — extract execution ID from job context
+  - `WithWorkflowRetention` — configure completed execution retention count
+  - 4 trigger conditions: `OnSuccess`, `OnFailure`, `OnSkipped`, `OnComplete`
+  - `OnWorkflowComplete` observability hook
 
 [#167]: https://github.com/netresearch/go-cron/issues/167
 [#185]: https://github.com/netresearch/go-cron/issues/185
@@ -47,6 +57,7 @@ features, bug fixes, and modernization improvements.
 [#203]: https://github.com/netresearch/go-cron/issues/203
 [#297]: https://github.com/netresearch/go-cron/issues/297
 [#311]: https://github.com/netresearch/go-cron/issues/311
+[#312]: https://github.com/netresearch/go-cron/issues/312
 [PR#323]: https://github.com/netresearch/go-cron/pull/323
 
 ### Planned for v2

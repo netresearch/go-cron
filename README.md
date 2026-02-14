@@ -296,6 +296,48 @@ c.TriggerEntry(scheduledEntryID)
 
 Triggered entries benefit from the full middleware chain (retry, timeout, skip-if-running). Use `@triggered`, `@manual`, or `@none` — all are aliases.
 
+## Workflow Dependencies
+
+Define job dependency graphs where downstream jobs trigger based on parent outcomes:
+
+```go
+wf := cron.NewWorkflow("etl-pipeline")
+
+wf.StepFunc("extract", "0 2 * * *", extractData)
+wf.StepFunc("transform", "@triggered", transformData).
+    After("extract", cron.OnSuccess)
+wf.StepFunc("load", "@triggered", loadData).
+    After("transform", cron.OnSuccess)
+wf.StepFunc("cleanup", "@triggered", cleanup).
+    Final() // runs after all other steps complete
+
+err := c.AddWorkflow(wf)
+```
+
+Four trigger conditions control when dependent jobs fire:
+
+| Condition | Fires when parent... |
+|-----------|---------------------|
+| `OnSuccess` | completes without error |
+| `OnFailure` | panics or returns error |
+| `OnSkipped` | was skipped (condition not met) |
+| `OnComplete` | resolves to any terminal state |
+
+For imperative wiring without the builder:
+
+```go
+a, _ := c.AddFunc("@triggered", jobA, cron.WithName("a"))
+b, _ := c.AddFunc("@triggered", jobB, cron.WithName("b"))
+c.AddDependency(b, a, cron.OnSuccess) // b runs after a succeeds
+```
+
+Query workflow execution state:
+
+```go
+status := c.WorkflowStatus(executionID) // by execution ID
+active := c.ActiveWorkflows()           // all in-progress executions
+```
+
 ## Context Support
 
 Jobs implementing `JobWithContext` receive a per-entry context that is automatically canceled on removal or job replacement:
