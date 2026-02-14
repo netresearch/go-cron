@@ -411,3 +411,104 @@ func TestWithWorkflowRetention_Default(t *testing.T) {
 		t.Errorf("default workflowRetention = %d, want 100", c.workflowRetention)
 	}
 }
+
+func TestWorkflow_SimpleChain(t *testing.T) {
+	c := New(WithSeconds())
+	c.Start()
+	defer c.Stop()
+
+	order := make(chan string, 10)
+
+	c.AddFunc("@triggered", func() { order <- "a" }, WithName("a"))
+	c.AddFunc("@triggered", func() { order <- "b" }, WithName("b"))
+	_ = c.AddDependencyByName("b", "a", OnSuccess)
+
+	_ = c.TriggerEntryByName("a")
+
+	for _, want := range []string{"a", "b"} {
+		select {
+		case got := <-order:
+			if got != want {
+				t.Errorf("got %q, want %q", got, want)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timeout waiting for %q", want)
+		}
+	}
+}
+
+func TestWorkflow_FailureSkipsOnSuccess(t *testing.T) {
+	c := New(WithSeconds())
+	c.Start()
+	defer c.Stop()
+
+	results := make(chan string, 10)
+
+	c.AddFunc("@triggered", func() {
+		results <- "a"
+		panic("fail")
+	}, WithName("a"))
+	c.AddFunc("@triggered", func() { results <- "b-ran" }, WithName("b"))
+	c.AddFunc("@triggered", func() { results <- "c-ran" }, WithName("c"))
+
+	_ = c.AddDependencyByName("b", "a", OnSuccess)  // b skipped (a fails)
+	_ = c.AddDependencyByName("c", "a", OnComplete) // c runs regardless
+
+	_ = c.TriggerEntryByName("a")
+
+	// a runs first
+	select {
+	case got := <-results:
+		if got != "a" {
+			t.Fatalf("first = %q, want 'a'", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for a")
+	}
+
+	// c should run (OnComplete)
+	select {
+	case got := <-results:
+		if got != "c-ran" {
+			t.Fatalf("got %q, want 'c-ran'", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for c")
+	}
+
+	// b should NOT run (OnSuccess, but a failed)
+	select {
+	case got := <-results:
+		t.Fatalf("unexpected job: %q (b should be skipped)", got)
+	case <-time.After(200 * time.Millisecond):
+		// Good
+	}
+}
+
+func TestWorkflow_ThreeStepChain(t *testing.T) {
+	c := New(WithSeconds())
+	c.Start()
+	defer c.Stop()
+
+	order := make(chan string, 10)
+
+	c.AddFunc("@triggered", func() { order <- "a" }, WithName("a"))
+	c.AddFunc("@triggered", func() { order <- "b" }, WithName("b"))
+	c.AddFunc("@triggered", func() { order <- "c" }, WithName("c"))
+
+	_ = c.AddDependencyByName("b", "a", OnSuccess)
+	_ = c.AddDependencyByName("c", "b", OnSuccess)
+
+	_ = c.TriggerEntryByName("a")
+
+	for _, want := range []string{"a", "b", "c"} {
+		select {
+		case got := <-order:
+			if got != want {
+				t.Errorf("got %q, want %q", got, want)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timeout waiting for %q", want)
+		}
+	}
+}

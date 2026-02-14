@@ -1023,6 +1023,24 @@ func (c *Cron) processDueEntries(now time.Time) {
 		}
 
 		scheduledTime := e.Next
+
+		// If this entry has dependents, start a workflow execution.
+		if len(c.parentToChildren[e.ID]) > 0 {
+			c.startWorkflowExecution(e, scheduledTime)
+			e.Prev = e.Next
+			if e.runOnce {
+				e.cancelEntryCtx = nil
+				c.removeEntry(e.ID)
+				c.logger.Info("run-once-workflow", "now", now, "entry", e.ID, "removed", true)
+			} else {
+				e.Next = e.Schedule.Next(now)
+				c.hooks.callOnSchedule(e.ID, e.Job, e.Next)
+				c.entries.Update(e)
+				c.logger.Info("run-workflow", "now", now, "entry", e.ID, "next", e.Next)
+			}
+			continue
+		}
+
 		c.startJob(e.entryCtx, e.running, e.ID, e.Job, e.WrappedJob, scheduledTime)
 		e.Prev = e.Next
 
@@ -1245,8 +1263,139 @@ func (c *Cron) startJobWithExecution(entryCtx context.Context, entryRunning *job
 }
 
 // processWorkflowEvent handles a job completion within a workflow execution.
-func (c *Cron) processWorkflowEvent(_ jobDoneEvent) {
-	// Implemented in Task 6.
+func (c *Cron) processWorkflowEvent(event jobDoneEvent) {
+	exec, ok := c.activeExecutions[event.ExecutionID]
+	if !ok {
+		return
+	}
+
+	if event.Panicked {
+		exec.Results[event.EntryID] = ResultFailure
+	} else {
+		exec.Results[event.EntryID] = ResultSuccess
+	}
+
+	c.evaluateChildren(exec, event.EntryID)
+
+	if exec.IsComplete() {
+		c.completeWorkflowExecution(exec)
+	}
+}
+
+// evaluateChildren checks each child of parentID and either triggers or skips it.
+func (c *Cron) evaluateChildren(exec *WorkflowExecution, parentID EntryID) {
+	children := c.parentToChildren[parentID]
+	for _, childID := range children {
+		result, ok := exec.Results[childID]
+		if !ok || result != ResultPending {
+			continue
+		}
+
+		if c.shouldTriggerChild(exec, childID) {
+			c.triggerWorkflowChild(exec, childID)
+		} else if c.allParentsResolved(exec, childID) {
+			exec.Results[childID] = ResultSkipped
+			c.evaluateChildren(exec, childID)
+		}
+	}
+}
+
+// shouldTriggerChild checks if all parents of childID are resolved and conditions met.
+func (c *Cron) shouldTriggerChild(exec *WorkflowExecution, childID EntryID) bool {
+	deps := c.entryDeps[childID]
+	for _, dep := range deps {
+		result, ok := exec.Results[dep.ParentID]
+		if !ok || !result.IsTerminal() {
+			return false
+		}
+		if !dep.Condition.Matches(result) {
+			return false
+		}
+	}
+	return len(deps) > 0
+}
+
+// allParentsResolved checks if all parents of childID have terminal results.
+func (c *Cron) allParentsResolved(exec *WorkflowExecution, childID EntryID) bool {
+	deps := c.entryDeps[childID]
+	for _, dep := range deps {
+		result, ok := exec.Results[dep.ParentID]
+		if !ok || !result.IsTerminal() {
+			return false
+		}
+	}
+	return true
+}
+
+// triggerWorkflowChild triggers a child entry within a workflow execution.
+func (c *Cron) triggerWorkflowChild(exec *WorkflowExecution, childID EntryID) {
+	entry, ok := c.entryIndex[childID]
+	if !ok {
+		exec.Results[childID] = ResultSkipped
+		return
+	}
+	if entry.Paused {
+		exec.Results[childID] = ResultSkipped
+		c.evaluateChildren(exec, childID)
+		return
+	}
+
+	now := c.now()
+	c.startJobWithExecution(entry.entryCtx, entry.running, entry.ID, entry.Job, entry.WrappedJob, now, exec.ID)
+	entry.Prev = now
+}
+
+// completeWorkflowExecution moves an execution from active to completed.
+func (c *Cron) completeWorkflowExecution(exec *WorkflowExecution) {
+	delete(c.activeExecutions, exec.ID)
+	c.completedExecutions = append(c.completedExecutions, exec)
+
+	if c.workflowRetention > 0 && len(c.completedExecutions) > c.workflowRetention {
+		excess := len(c.completedExecutions) - c.workflowRetention
+		c.completedExecutions = c.completedExecutions[excess:]
+	}
+
+	c.hooks.callOnWorkflowComplete(exec.ID, exec.RootID, exec.Results)
+}
+
+// startWorkflowExecution creates a new WorkflowExecution for a root entry.
+func (c *Cron) startWorkflowExecution(entry *Entry, scheduledTime time.Time) {
+	execID := generateExecutionID()
+	participants := c.collectWorkflowParticipants(entry.ID)
+
+	exec := &WorkflowExecution{
+		ID:        execID,
+		RootID:    entry.ID,
+		StartTime: scheduledTime,
+		Results:   make(map[EntryID]JobResult, len(participants)),
+	}
+	for _, id := range participants {
+		exec.Results[id] = ResultPending
+	}
+
+	c.activeExecutions[execID] = exec
+	c.startJobWithExecution(entry.entryCtx, entry.running, entry.ID, entry.Job, entry.WrappedJob, scheduledTime, execID)
+}
+
+// collectWorkflowParticipants returns all entry IDs reachable from rootID via parentToChildren (BFS).
+func (c *Cron) collectWorkflowParticipants(rootID EntryID) []EntryID {
+	var result []EntryID
+	visited := map[EntryID]bool{rootID: true}
+	queue := []EntryID{rootID}
+
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		result = append(result, current)
+
+		for _, childID := range c.parentToChildren[current] {
+			if !visited[childID] {
+				visited[childID] = true
+				queue = append(queue, childID)
+			}
+		}
+	}
+	return result
 }
 
 // updateSchedule updates the schedule (and optionally the job) of an existing
@@ -1520,6 +1669,21 @@ func (c *Cron) triggerEntry(id EntryID) error {
 	}
 
 	now := c.now()
+
+	// If this entry has dependents, start a workflow execution.
+	if len(c.parentToChildren[entry.ID]) > 0 {
+		c.startWorkflowExecution(entry, now)
+		entry.Prev = now
+		if entry.runOnce {
+			entry.cancelEntryCtx = nil
+			c.removeEntry(entry.ID)
+			c.logger.Info("triggered-workflow-run-once", "now", now, "entry", id, "removed", true)
+		} else {
+			c.logger.Info("triggered-workflow", "now", now, "entry", id)
+		}
+		return nil
+	}
+
 	c.startJob(entry.entryCtx, entry.running, entry.ID, entry.Job, entry.WrappedJob, now)
 	entry.Prev = now
 

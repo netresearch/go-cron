@@ -1,6 +1,9 @@
 package cron
 
-import "time"
+import (
+	"maps"
+	"time"
+)
 
 // ObservabilityHooks provides callbacks for monitoring cron operations.
 // All callbacks are optional; nil callbacks are safely ignored.
@@ -50,6 +53,10 @@ type ObservabilityHooks struct {
 	//   - name: job name (from NamedJob interface, or empty string)
 	//   - nextRun: the next scheduled execution time
 	OnSchedule func(entryID EntryID, name string, nextRun time.Time)
+
+	// OnWorkflowComplete is called when all jobs in a workflow execution
+	// have resolved (success, failure, or skipped).
+	OnWorkflowComplete func(executionID string, rootID EntryID, results map[EntryID]JobResult)
 }
 
 // NamedJob is an optional interface that jobs can implement to provide
@@ -93,5 +100,14 @@ func (h *ObservabilityHooks) callOnSchedule(entryID EntryID, job Job, nextRun ti
 	if h != nil && h.OnSchedule != nil {
 		name := getJobName(job)
 		go h.OnSchedule(entryID, name, nextRun)
+	}
+}
+
+// callOnWorkflowComplete safely calls the OnWorkflowComplete hook if configured.
+// The hook is called asynchronously to prevent blocking the scheduler.
+func (h *ObservabilityHooks) callOnWorkflowComplete(executionID string, rootID EntryID, results map[EntryID]JobResult) {
+	if h != nil && h.OnWorkflowComplete != nil {
+		resultsCopy := maps.Clone(results)
+		go h.OnWorkflowComplete(executionID, rootID, resultsCopy)
 	}
 }
