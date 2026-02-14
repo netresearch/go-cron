@@ -189,3 +189,70 @@ func TestWorkflowExecutionID_WithValue(t *testing.T) {
 		t.Errorf("WorkflowExecutionID() = %q, want %q", id, "wf-abc-123")
 	}
 }
+
+func TestHasCycle(t *testing.T) {
+	tests := []struct {
+		name      string
+		edges     map[EntryID][]EntryID // child -> parents
+		newChild  EntryID
+		newParent EntryID
+		wantCycle bool
+	}{
+		{
+			name:      "no cycle - simple chain",
+			edges:     map[EntryID][]EntryID{2: {1}},
+			newChild:  3,
+			newParent: 2,
+			wantCycle: false,
+		},
+		{
+			name:      "direct cycle",
+			edges:     map[EntryID][]EntryID{2: {1}},
+			newChild:  1,
+			newParent: 2,
+			wantCycle: true,
+		},
+		{
+			name:      "indirect cycle A->B->C->A",
+			edges:     map[EntryID][]EntryID{2: {1}, 3: {2}},
+			newChild:  1,
+			newParent: 3,
+			wantCycle: true,
+		},
+		{
+			name:      "self-cycle",
+			edges:     map[EntryID][]EntryID{},
+			newChild:  1,
+			newParent: 1,
+			wantCycle: true,
+		},
+		{
+			name:      "diamond - no cycle",
+			edges:     map[EntryID][]EntryID{2: {1}, 3: {1}, 4: {2, 3}},
+			newChild:  4,
+			newParent: 3,
+			wantCycle: false,
+		},
+		{
+			name:      "no existing edges",
+			edges:     map[EntryID][]EntryID{},
+			newChild:  2,
+			newParent: 1,
+			wantCycle: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			deps := make(map[EntryID][]Dependency)
+			for child, parents := range tt.edges {
+				for _, p := range parents {
+					deps[child] = append(deps[child], Dependency{ParentID: p, Condition: OnSuccess})
+				}
+			}
+			got := hasCycle(deps, tt.newChild, tt.newParent)
+			if got != tt.wantCycle {
+				t.Errorf("hasCycle() = %v, want %v", got, tt.wantCycle)
+			}
+		})
+	}
+}

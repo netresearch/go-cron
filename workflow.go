@@ -140,3 +140,35 @@ func WorkflowExecutionID(ctx context.Context) string {
 	}
 	return ""
 }
+
+// hasCycle checks whether adding an edge from newChild to newParent
+// would create a cycle in the dependency graph. Uses DFS from newParent
+// upward through the parent edges to see if newChild is reachable.
+func hasCycle(deps map[EntryID][]Dependency, newChild, newParent EntryID) bool {
+	if newChild == newParent {
+		return true
+	}
+
+	visited := make(map[EntryID]bool)
+	stack := []EntryID{newParent}
+
+	for len(stack) > 0 {
+		current := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+
+		if current == newChild {
+			return true
+		}
+		if visited[current] {
+			continue
+		}
+		visited[current] = true
+
+		for _, dep := range deps[current] {
+			if !visited[dep.ParentID] {
+				stack = append(stack, dep.ParentID)
+			}
+		}
+	}
+	return false
+}
