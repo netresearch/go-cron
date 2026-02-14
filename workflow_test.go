@@ -397,3 +397,17 @@ func TestRemoveEntry_CleansDeps(t *testing.T) {
 		t.Fatalf("AddDependency after remove: %v", err)
 	}
 }
+
+func TestWithWorkflowRetention(t *testing.T) {
+	c := New(WithWorkflowRetention(5))
+	if c.workflowRetention != 5 {
+		t.Errorf("workflowRetention = %d, want 5", c.workflowRetention)
+	}
+}
+
+func TestWithWorkflowRetention_Default(t *testing.T) {
+	c := New()
+	if c.workflowRetention != 100 {
+		t.Errorf("default workflowRetention = %d, want 100", c.workflowRetention)
+	}
+}

@@ -233,6 +233,16 @@ func WithContext(ctx context.Context) Option {
 	}
 }
 
+// WithWorkflowRetention sets the maximum number of completed workflow
+// executions to retain for query via WorkflowStatus/ActiveWorkflows.
+// Default is 100. Set to 0 for unlimited retention (not recommended
+// for long-running services).
+func WithWorkflowRetention(n int) Option {
+	return func(c *Cron) {
+		c.workflowRetention = n
+	}
+}
+
 // WithCapacity pre-allocates internal data structures for the expected number
 // of entries. This reduces map rehashing and slice growth during bulk additions,
 // improving performance when adding many jobs at startup.
