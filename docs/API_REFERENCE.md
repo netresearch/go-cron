@@ -608,6 +608,12 @@ It parses all specs, checks for duplicate names, validates the DAG structure
 registers all entries and wires dependency edges. On any failure,
 already-registered entries are rolled back.
 
+**Failure model:** The workflow engine detects job failure via panics. Since
+`Job.Run()` has no return value, steps that need to signal errors should use
+`FuncErrorJob` (which converts errors to panics) or wrappers like `RetryOnError`
+/ `RetryWithBackoff`. The `Recover` wrapper is workflow-aware and re-panics in
+workflow context so failures propagate correctly.
+
 Returns:
 - `ErrEmptyWorkflow` if the workflow has no steps
 - `ErrMultipleFinalSteps` if more than one step is marked Final
@@ -1328,8 +1334,8 @@ c := cron.New(cron.WithWorkflowRetention(50))
 type TriggerCondition int
 
 const (
-    OnSuccess  TriggerCondition = iota // Parent completed without error
-    OnFailure                          // Parent failed (error or panic)
+    OnSuccess  TriggerCondition = iota // Parent completed without panicking
+    OnFailure                          // Parent panicked (use FuncErrorJob to convert errors)
     OnSkipped                          // Parent was skipped (condition not met)
     OnComplete                         // Parent resolved to any terminal state
 )
@@ -1776,6 +1782,10 @@ func Recover(logger Logger, opts ...RecoverOption) JobWrapper
 
 Recover catches panics in jobs, logs them, and continues.
 Propagates context to context-aware inner jobs.
+
+**Workflow-aware:** When running inside a workflow execution, Recover logs the
+panic and then re-panics so the workflow engine correctly detects the failure.
+The scheduler catches the re-panic without crashing.
 
 #### func SkipIfStillRunning
 

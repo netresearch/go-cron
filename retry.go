@@ -581,6 +581,11 @@ func logCircuitFailure(logger Logger, panicValue any, newFailures int64, thresho
 	}
 }
 
+// CircuitBreaker wraps jobs with a circuit breaker that opens after threshold
+// consecutive panics, skipping execution for the cooldown duration. After cooldown,
+// a single probe attempt is allowed (half-open state); if it succeeds the circuit
+// closes, otherwise it re-opens. State is shared across all jobs wrapped by the
+// same wrapper instance. Use CircuitBreakerWithHandle for monitoring access.
 func CircuitBreaker(logger Logger, threshold int, cooldown time.Duration, opts ...CircuitBreakerOption) JobWrapper {
 	wrapper, _ := circuitBreakerImpl(logger, threshold, cooldown, opts)
 	return wrapper

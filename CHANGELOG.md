@@ -60,6 +60,20 @@ features, bug fixes, and modernization improvements.
 [#312]: https://github.com/netresearch/go-cron/issues/312
 [PR#323]: https://github.com/netresearch/go-cron/pull/323
 
+### Fixed
+- **Recover workflow-awareness**: `Recover` wrapper now re-panics in workflow context
+  so the workflow engine correctly detects job failures. Previously, `Recover` would
+  swallow the panic and the workflow would treat the step as `ResultSuccess`.
+- **Workflow shutdown hang**: `Stop()` no longer hangs when workflow jobs are in
+  flight. The `jobDone` send is now non-blocking when the entry context is canceled,
+  preventing goroutines from blocking forever after the run loop exits.
+- **Workflow state isolation**: `WorkflowStatus` and `ActiveWorkflows` now return
+  deep copies of workflow execution state, preventing callers from mutating
+  internal scheduler maps.
+- **Multi-condition dependency removal**: `RemoveDependency` now correctly removes
+  all edges between a parent-child pair (e.g., `OnSuccess` + `OnFailure`), not just
+  the first match. Also fixed in `removeEntry` cleanup.
+
 ### Planned for v2
 - Context-aware Job interface with graceful shutdown support
 

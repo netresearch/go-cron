@@ -488,6 +488,56 @@ func TestWorkflow_FailureSkipsOnSuccess(t *testing.T) {
 	}
 }
 
+func TestWorkflow_RecoverPropagatesFailure(t *testing.T) {
+	// Verify that the Recover wrapper correctly re-panics in workflow context
+	// so the workflow engine detects job failures even when Recover is in the chain.
+	c := New(WithSeconds(), WithChain(Recover(DiscardLogger)))
+	c.Start()
+	defer c.Stop()
+
+	results := make(chan string, 10)
+
+	c.AddFunc("@triggered", func() {
+		results <- "a"
+		panic("job-a-failed")
+	}, WithName("a"))
+	c.AddFunc("@triggered", func() { results <- "b-ran" }, WithName("b"))
+	c.AddFunc("@triggered", func() { results <- "c-ran" }, WithName("c"))
+
+	_ = c.AddDependencyByName("b", "a", OnSuccess) // b skipped (a fails)
+	_ = c.AddDependencyByName("c", "a", OnFailure) // c runs (a fails)
+
+	_ = c.TriggerEntryByName("a")
+
+	// a runs first
+	select {
+	case got := <-results:
+		if got != "a" {
+			t.Fatalf("first = %q, want 'a'", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for a")
+	}
+
+	// c should run (OnFailure, and a panicked)
+	select {
+	case got := <-results:
+		if got != "c-ran" {
+			t.Fatalf("got %q, want 'c-ran'", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for c")
+	}
+
+	// b should NOT run (OnSuccess, but a failed)
+	select {
+	case got := <-results:
+		t.Fatalf("unexpected job: %q (b should be skipped)", got)
+	case <-time.After(200 * time.Millisecond):
+		// Good
+	}
+}
+
 func TestWorkflow_ThreeStepChain(t *testing.T) {
 	c := New(WithSeconds())
 	c.Start()

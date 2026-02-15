@@ -142,6 +142,13 @@ func (r *recoverJob) RunWithContext(ctx context.Context) {
 			} else {
 				r.logger.Error(info.err, "panic", "panic_type", info.panicType, "stack", info.stack)
 			}
+			// Re-panic in workflow context so the workflow engine
+			// correctly detects the failure. The scheduler's
+			// startJobWithExecution catches the panic and routes it
+			// to the workflow state machine without crashing.
+			if WorkflowExecutionID(ctx) != "" {
+				panic(rv)
+			}
 		}
 	}()
 	runJob(ctx, r.inner)
@@ -154,6 +161,10 @@ func (r *recoverJob) RunWithContext(ctx context.Context) {
 //
 // The returned wrapper implements JobWithContext, propagating the incoming
 // context to the inner job if it also implements JobWithContext.
+//
+// Workflow-aware: when running inside a workflow execution, Recover logs
+// the panic and then re-panics so the workflow engine correctly detects
+// the failure. The scheduler catches the re-panic without crashing.
 //
 // Example:
 //
