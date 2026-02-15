@@ -908,3 +908,63 @@ func TestPrevWithLocalTimezone(t *testing.T) {
 		t.Errorf("Prev() with time.Local schedule = %v, want %v", prev, expected)
 	}
 }
+
+func TestWeekdayOccurrence_Boundary(t *testing.T) {
+	// Kills ARITHMETIC_BASE mutation at spec.go:155 where (Day()-1) → (Day()+1)
+	// Day 7: (7-1)/7 + 1 = 0 + 1 = 1 (1st occurrence)
+	// Mutant: (7+1)/7 + 1 = 1 + 1 = 2
+	t7 := time.Date(2024, 1, 7, 12, 0, 0, 0, time.UTC) // Jan 7 = Sunday
+	if got := weekdayOccurrence(t7); got != 1 {
+		t.Errorf("weekdayOccurrence(day 7) = %d, want 1", got)
+	}
+
+	// Day 14: (14-1)/7 + 1 = 1 + 1 = 2
+	// Mutant: (14+1)/7 + 1 = 2 + 1 = 3
+	t14 := time.Date(2024, 1, 14, 12, 0, 0, 0, time.UTC)
+	if got := weekdayOccurrence(t14); got != 2 {
+		t.Errorf("weekdayOccurrence(day 14) = %d, want 2", got)
+	}
+}
+
+func TestNearestWeekday_LastDayCalculation(t *testing.T) {
+	// Kills ARITHMETIC_BASE mutation at spec.go:174 where (month+1) → (month-1)
+	// For February 2024 (leap year, 29 days), targetDay=30 should return -1.
+	// Mutant uses month-1 to calculate lastDay, getting December's 31 days,
+	// which would NOT return -1 for targetDay=30.
+	got := nearestWeekday(2024, time.February, 30, time.UTC)
+	if got != -1 {
+		t.Errorf("nearestWeekday(2024, Feb, 30) = %d, want -1 (day exceeds month)", got)
+	}
+}
+
+func TestLastWeekdayOfMonth_Saturday(t *testing.T) {
+	// Kills ARITHMETIC_BASE mutation at spec.go:212 where (lastDay - 1) → (lastDay + 1)
+	// August 2024 ends on Saturday (Aug 31). Last weekday = Friday Aug 30.
+	// Mutant: lastDay + 1 = 32 (wrong).
+	got := lastWeekdayOfMonth(2024, time.August, time.UTC)
+	if got != 30 {
+		t.Errorf("lastWeekdayOfMonth(2024, August) = %d, want 30 (Friday)", got)
+	}
+}
+
+func TestRetreatMinute_SubtractsNotAdds(t *testing.T) {
+	// Kills ARITHMETIC_BASE mutation at spec.go:532 where (-1*time.Second) → (+1*time.Second)
+	// retreatMinute should go to the END of the previous minute (second=59),
+	// not the START of the next second (second=1).
+	input := time.Date(2024, 1, 1, 12, 31, 0, 0, time.UTC)
+	minuteBits := uint64(1 << 30) // match minute 30
+
+	result, added, _ := retreatMinute(input, minuteBits, false)
+
+	if !added {
+		t.Error("expected added=true after retreating")
+	}
+	// Correct: truncate to 12:31:00, subtract 1s → 12:30:59
+	// Mutation: truncate to 12:31:00, add 1s → 12:31:01, then -1min → 12:30:01
+	if result.Second() != 59 {
+		t.Errorf("retreatMinute should land at second 59, got second %d", result.Second())
+	}
+	if result.Minute() != 30 {
+		t.Errorf("retreatMinute should find minute 30, got minute %d", result.Minute())
+	}
+}

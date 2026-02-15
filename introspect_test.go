@@ -701,6 +701,34 @@ func TestMatches_ScheduleWithoutPrev(t *testing.T) {
 	}
 }
 
+// TestNextN_ZeroReturnsNil kills CONDITIONALS_BOUNDARY at introspect.go:21:26
+// where `n <= 0` could become `n < 0`, making n=0 return empty slice instead of nil.
+func TestNextN_ZeroReturnsNil(t *testing.T) {
+	schedule, err := ParseStandard("0 * * * *")
+	if err != nil {
+		t.Fatalf("ParseStandard failed: %v", err)
+	}
+
+	times := NextN(schedule, time.Now(), 0)
+	if times != nil {
+		t.Errorf("NextN(schedule, t, 0) = %v (len=%d), want nil", times, len(times))
+	}
+}
+
+// TestPrevN_ZeroReturnsNil kills CONDITIONALS_BOUNDARY at introspect.go:169
+// where `n <= 0` could become `n < 0`.
+func TestPrevN_ZeroReturnsNil(t *testing.T) {
+	schedule, err := ParseStandard("0 * * * *")
+	if err != nil {
+		t.Fatalf("ParseStandard failed: %v", err)
+	}
+
+	times := PrevN(schedule, time.Now(), 0)
+	if times != nil {
+		t.Errorf("PrevN(schedule, t, 0) = %v (len=%d), want nil", times, len(times))
+	}
+}
+
 // TestIntrospectionConcurrent tests thread safety of introspection functions.
 func TestIntrospectionConcurrent(t *testing.T) {
 	schedule, err := ParseStandard("0 * * * *")

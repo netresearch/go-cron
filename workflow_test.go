@@ -1698,3 +1698,69 @@ func TestWorkflow_StatusAndActiveNotRunning(t *testing.T) {
 		t.Error("expected nil for nonexistent execution ID")
 	}
 }
+
+func TestShouldTriggerChild_NoDeps(t *testing.T) {
+	// Kills CONDITIONALS_BOUNDARY mutation at cron.go:1354 where (> 0) → (>= 0)
+	// An entry with no dependencies should NOT be triggered.
+	c := New()
+	id, _ := c.AddFunc("@triggered", func() {}, WithName("standalone"))
+
+	exec := &WorkflowExecution{Results: map[EntryID]JobResult{}}
+
+	if c.shouldTriggerChild(exec, id) {
+		t.Error("shouldTriggerChild should return false for entry with no dependencies")
+	}
+}
+
+func TestRemoveEntry_CleansMultipleChildren(t *testing.T) {
+	// Kills negated conditions at cron.go:2007,2017,2019
+	// When a parent is removed, all children should lose their deps on that parent.
+	c := New(WithSeconds())
+
+	parent, _ := c.AddFunc("@triggered", func() {}, WithName("parent"))
+	child1, _ := c.AddFunc("@triggered", func() {}, WithName("child1"))
+	child2, _ := c.AddFunc("@triggered", func() {}, WithName("child2"))
+
+	_ = c.AddDependency(child1, parent, OnSuccess)
+	_ = c.AddDependency(child2, parent, OnSuccess)
+
+	// Verify deps exist
+	if len(c.Dependencies(child1)) != 1 || len(c.Dependencies(child2)) != 1 {
+		t.Fatal("setup: expected 1 dep each")
+	}
+
+	// Remove parent — should clean deps from both children
+	c.Remove(parent)
+
+	if deps := c.Dependencies(child1); len(deps) != 0 {
+		t.Errorf("child1 should have no deps after parent removed, got %d", len(deps))
+	}
+	if deps := c.Dependencies(child2); len(deps) != 0 {
+		t.Errorf("child2 should have no deps after parent removed, got %d", len(deps))
+	}
+}
+
+func TestRemoveDependency_MultiParent(t *testing.T) {
+	// Kills negated conditions at cron.go:2111,2117,2122
+	// When removing one dep, the other parent's dep should remain intact.
+	c := New(WithSeconds())
+
+	parent1, _ := c.AddFunc("@triggered", func() {}, WithName("parent1"))
+	parent2, _ := c.AddFunc("@triggered", func() {}, WithName("parent2"))
+	child, _ := c.AddFunc("@triggered", func() {}, WithName("child"))
+
+	_ = c.AddDependency(child, parent1, OnSuccess)
+	_ = c.AddDependency(child, parent2, OnSuccess)
+
+	// Remove only parent1's dependency
+	c.RemoveDependency(child, parent1)
+
+	// child should still have parent2 dependency
+	deps := c.Dependencies(child)
+	if len(deps) != 1 {
+		t.Fatalf("expected 1 remaining dep, got %d", len(deps))
+	}
+	if deps[0].ParentID != parent2 {
+		t.Errorf("remaining dep should be from parent2 (%d), got parent %d", parent2, deps[0].ParentID)
+	}
+}

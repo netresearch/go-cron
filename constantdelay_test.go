@@ -459,6 +459,34 @@ func TestConstantDelayPrevBoundaries(t *testing.T) {
 	})
 }
 
+// TestConstantDelay_NanosecondRounding kills ARITHMETIC_BASE mutations at
+// constantdelay.go:70:61 and :86:62 where the sign of the nanosecond
+// adjustment could be flipped.
+func TestConstantDelay_NanosecondRounding(t *testing.T) {
+	baseTime := time.Date(2024, 1, 1, 12, 0, 0, 500_000_000, time.UTC)
+	sched := ConstantDelaySchedule{Delay: 10 * time.Second}
+
+	t.Run("Next subtracts nanos to round to second boundary", func(t *testing.T) {
+		got := sched.Next(baseTime)
+		// Correct: 12:00:00.5 + 10s - 0.5s = 12:00:10.000
+		// Mutant:  12:00:00.5 + 10s + 0.5s = 12:00:11.000
+		want := time.Date(2024, 1, 1, 12, 0, 10, 0, time.UTC)
+		if !got.Equal(want) {
+			t.Errorf("Next() = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("Prev adds nanos to round to second boundary", func(t *testing.T) {
+		got := sched.Prev(baseTime)
+		// Correct: 12:00:00.5 + (-10s + 0.5s) = 11:59:51.000
+		// Mutant:  12:00:00.5 + (-10s - 0.5s) = 11:59:50.000
+		want := time.Date(2024, 1, 1, 11, 59, 51, 0, time.UTC)
+		if !got.Equal(want) {
+			t.Errorf("Prev() = %v, want %v", got, want)
+		}
+	})
+}
+
 func TestConstantDelayPrevAndNextSymmetry(t *testing.T) {
 	delays := []time.Duration{
 		time.Second,
