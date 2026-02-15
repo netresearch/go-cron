@@ -1203,12 +1203,12 @@ func (c *Cron) run() {
 
 			case req := <-c.queryWorkflow:
 				if exec, ok := c.activeExecutions[req.value]; ok {
-					req.reply <- exec
+					req.reply <- exec.clone()
 				} else {
 					var found *WorkflowExecution
 					for _, exec := range c.completedExecutions {
 						if exec.ID == req.value {
-							found = exec
+							found = exec.clone()
 							break
 						}
 					}
@@ -1219,7 +1219,9 @@ func (c *Cron) run() {
 			case replyChan := <-c.queryActiveWorkflows:
 				result := make([]WorkflowExecution, 0, len(c.activeExecutions))
 				for _, exec := range c.activeExecutions {
-					result = append(result, *exec)
+					cp := *exec
+					cp.Results = maps.Clone(exec.Results)
+					result = append(result, cp)
 				}
 				replyChan <- result
 				continue
@@ -1274,12 +1276,20 @@ func (c *Cron) startJobWithExecution(entryCtx context.Context, entryRunning *job
 		c.hooks.callOnJobComplete(entryID, originalJob, duration, recovered)
 
 		// Send completion event for workflow orchestration.
+		// Use select with entryCtx to avoid blocking if the run loop
+		// has exited (e.g., after Stop()). Without this, the goroutine
+		// would block on jobDone forever and prevent jobWaiter from
+		// completing, causing Stop()/StopWithTimeout() to hang.
 		if executionID != "" {
-			c.jobDone <- jobDoneEvent{
+			select {
+			case c.jobDone <- jobDoneEvent{
 				EntryID:     entryID,
 				Panicked:    recovered != nil,
 				PanicValue:  recovered,
 				ExecutionID: executionID,
+			}:
+			case <-entryCtx.Done():
+				// Scheduler stopped; don't block on jobDone
 			}
 			return // Don't re-panic for workflow jobs
 		}
@@ -2002,13 +2012,10 @@ func (c *Cron) removeEntry(id EntryID) {
 	}
 	if children, ok := c.parentToChildren[id]; ok {
 		for _, childID := range children {
-			deps := c.entryDeps[childID]
-			for i, dep := range deps {
-				if dep.ParentID == id {
-					c.entryDeps[childID] = slices.Delete(deps, i, i+1)
-					break
-				}
-			}
+			// Remove ALL edges referencing this parent (may have multiple conditions).
+			c.entryDeps[childID] = slices.DeleteFunc(c.entryDeps[childID], func(dep Dependency) bool {
+				return dep.ParentID == id
+			})
 			if len(c.entryDeps[childID]) == 0 {
 				delete(c.entryDeps, childID)
 			}
@@ -2096,16 +2103,15 @@ func (c *Cron) addDependencyDirect(child, parent EntryID, condition TriggerCondi
 // removeDependencyDirect removes a dependency edge directly.
 // Caller must hold runningMu or be in the run loop.
 func (c *Cron) removeDependencyDirect(child, parent EntryID) {
-	deps := c.entryDeps[child]
-	for i, dep := range deps {
-		if dep.ParentID == parent {
-			c.entryDeps[child] = slices.Delete(deps, i, i+1)
-			break
-		}
-	}
+	// Remove ALL dependency edges between child and parent (there may be
+	// multiple conditions, e.g. OnSuccess + OnFailure).
+	c.entryDeps[child] = slices.DeleteFunc(c.entryDeps[child], func(dep Dependency) bool {
+		return dep.ParentID == parent
+	})
 	if len(c.entryDeps[child]) == 0 {
 		delete(c.entryDeps, child)
 	}
+	// Remove child from parentToChildren since all edges are gone.
 	children := c.parentToChildren[parent]
 	for i, cid := range children {
 		if cid == child {
@@ -2198,11 +2204,11 @@ func (c *Cron) WorkflowStatus(executionID string) *WorkflowExecution {
 	defer c.runningMu.Unlock()
 	if !c.running {
 		if exec, ok := c.activeExecutions[executionID]; ok {
-			return exec
+			return exec.clone()
 		}
 		for _, exec := range c.completedExecutions {
 			if exec.ID == executionID {
-				return exec
+				return exec.clone()
 			}
 		}
 		return nil
@@ -2220,7 +2226,9 @@ func (c *Cron) ActiveWorkflows() []WorkflowExecution {
 	if !c.running {
 		result := make([]WorkflowExecution, 0, len(c.activeExecutions))
 		for _, exec := range c.activeExecutions {
-			result = append(result, *exec)
+			cp := *exec
+			cp.Results = maps.Clone(exec.Results)
+			result = append(result, cp)
 		}
 		return result
 	}
@@ -2234,6 +2242,12 @@ func (c *Cron) ActiveWorkflows() []WorkflowExecution {
 // (no cycles, at most one final step, all After references exist), and then
 // registers all entries via AddJob and wires dependency edges via AddDependency.
 // On any failure, already-registered entries are rolled back.
+//
+// Failure model: the workflow engine detects job failure via panics. Since
+// Job.Run() has no return value, steps that need to signal errors should use
+// FuncErrorJob (which converts errors to panics) or wrappers like RetryOnError
+// / RetryWithBackoff. The Recover wrapper is workflow-aware and re-panics in
+// workflow context so failures propagate correctly.
 //
 // Returns:
 //   - ErrEmptyWorkflow if the workflow has no steps

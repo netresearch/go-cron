@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"maps"
 	"time"
 )
 
@@ -129,6 +130,17 @@ type WorkflowExecution struct {
 	RootID    EntryID
 	StartTime time.Time
 	Results   map[EntryID]JobResult
+}
+
+// clone returns a deep copy of the execution, safe to return to callers
+// without leaking internal mutable state.
+func (we *WorkflowExecution) clone() *WorkflowExecution {
+	if we == nil {
+		return nil
+	}
+	cp := *we
+	cp.Results = maps.Clone(we.Results)
+	return &cp
 }
 
 // IsComplete reports whether every job in the execution has reached a terminal state.

@@ -318,10 +318,12 @@ Four trigger conditions control when dependent jobs fire:
 
 | Condition | Fires when parent... |
 |-----------|---------------------|
-| `OnSuccess` | completes without error |
-| `OnFailure` | panics or returns error |
+| `OnSuccess` | completes without panicking |
+| `OnFailure` | panics (use `FuncErrorJob` to convert errors) |
 | `OnSkipped` | was skipped (condition not met) |
 | `OnComplete` | resolves to any terminal state |
+
+Workflow failure detection is panic-based: use `FuncErrorJob` (converts error → panic) or wrappers like `RetryOnError`/`RetryWithBackoff` for steps that return errors. The `Recover` wrapper is workflow-aware and correctly propagates failures.
 
 For imperative wiring without the builder:
 

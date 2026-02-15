@@ -488,6 +488,56 @@ func TestWorkflow_FailureSkipsOnSuccess(t *testing.T) {
 	}
 }
 
+func TestWorkflow_RecoverPropagatesFailure(t *testing.T) {
+	// Verify that the Recover wrapper correctly re-panics in workflow context
+	// so the workflow engine detects job failures even when Recover is in the chain.
+	c := New(WithSeconds(), WithChain(Recover(DiscardLogger)))
+	c.Start()
+	defer c.Stop()
+
+	results := make(chan string, 10)
+
+	c.AddFunc("@triggered", func() {
+		results <- "a"
+		panic("job-a-failed")
+	}, WithName("a"))
+	c.AddFunc("@triggered", func() { results <- "b-ran" }, WithName("b"))
+	c.AddFunc("@triggered", func() { results <- "c-ran" }, WithName("c"))
+
+	_ = c.AddDependencyByName("b", "a", OnSuccess) // b skipped (a fails)
+	_ = c.AddDependencyByName("c", "a", OnFailure) // c runs (a fails)
+
+	_ = c.TriggerEntryByName("a")
+
+	// a runs first
+	select {
+	case got := <-results:
+		if got != "a" {
+			t.Fatalf("first = %q, want 'a'", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for a")
+	}
+
+	// c should run (OnFailure, and a panicked)
+	select {
+	case got := <-results:
+		if got != "c-ran" {
+			t.Fatalf("got %q, want 'c-ran'", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for c")
+	}
+
+	// b should NOT run (OnSuccess, but a failed)
+	select {
+	case got := <-results:
+		t.Fatalf("unexpected job: %q (b should be skipped)", got)
+	case <-time.After(200 * time.Millisecond):
+		// Good
+	}
+}
+
 func TestWorkflow_ThreeStepChain(t *testing.T) {
 	c := New(WithSeconds())
 	c.Start()
@@ -1465,5 +1515,186 @@ func TestRegisterWorkflowSteps_RollbackOnInvalidCondition(t *testing.T) {
 	}
 	if e := c.EntryByName("step2"); e.Valid() {
 		t.Error("step2 should have been rolled back after dependency failure")
+	}
+}
+
+func TestWorkflowExecution_CloneNil(t *testing.T) {
+	var we *WorkflowExecution
+	if got := we.clone(); got != nil {
+		t.Errorf("clone of nil should return nil, got %v", got)
+	}
+}
+
+func TestWorkflowExecution_CloneDeepCopiesResults(t *testing.T) {
+	we := &WorkflowExecution{
+		ID:        "exec-1",
+		RootID:    1,
+		StartTime: time.Now(),
+		Results:   map[EntryID]JobResult{1: ResultSuccess, 2: ResultPending},
+	}
+	cp := we.clone()
+
+	// Mutating the copy must not affect the original.
+	cp.Results[2] = ResultFailure
+	if we.Results[2] != ResultPending {
+		t.Error("clone did not deep-copy Results map")
+	}
+}
+
+func TestWorkflow_StopDoesNotHangWithActiveJobs(t *testing.T) {
+	// Verify that Stop() completes even when workflow jobs are still in flight.
+	// Before the fix, the jobDone send would block after the run loop exited,
+	// causing Stop()/jobWaiter to hang.
+	c := New(WithSeconds())
+	c.Start()
+
+	jobStarted := make(chan struct{})
+	jobRelease := make(chan struct{})
+
+	c.AddFunc("@triggered", func() {
+		close(jobStarted)
+		<-jobRelease // hold the job running
+	}, WithName("root"))
+	c.AddFunc("@triggered", func() {}, WithName("child"))
+	_ = c.AddDependencyByName("child", "root", OnSuccess)
+
+	_ = c.TriggerEntryByName("root")
+
+	// Wait for the job to start.
+	select {
+	case <-jobStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for job to start")
+	}
+
+	// Stop the scheduler while the job is still running.
+	ctx := c.Stop()
+
+	// Release the job so it tries to send on jobDone.
+	close(jobRelease)
+
+	// Stop must complete without hanging.
+	select {
+	case <-ctx.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("Stop() hung with active workflow jobs")
+	}
+}
+
+func TestWorkflow_WorkflowStatusWhileRunning(t *testing.T) {
+	// Covers the run-loop queryWorkflow path that returns exec.clone()
+	// for active executions.
+	c := New(WithSeconds())
+	c.Start()
+	defer c.Stop()
+
+	jobStarted := make(chan struct{})
+	jobRelease := make(chan struct{})
+
+	c.AddFunc("@triggered", func() {
+		close(jobStarted)
+		<-jobRelease
+	}, WithName("root"))
+	c.AddFunc("@triggered", func() {}, WithName("child"))
+	_ = c.AddDependencyByName("child", "root", OnSuccess)
+
+	_ = c.TriggerEntryByName("root")
+
+	select {
+	case <-jobStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for job to start")
+	}
+
+	// There should be at least one active workflow.
+	active := c.ActiveWorkflows()
+	if len(active) == 0 {
+		t.Fatal("expected at least one active workflow")
+	}
+
+	// Query the specific execution.
+	status := c.WorkflowStatus(active[0].ID)
+	if status == nil {
+		t.Fatal("WorkflowStatus returned nil for active execution")
+	}
+
+	// Mutating returned status must not affect internal state.
+	status.Results[EntryID(9999)] = ResultFailure
+	status2 := c.WorkflowStatus(active[0].ID)
+	if _, ok := status2.Results[EntryID(9999)]; ok {
+		t.Error("WorkflowStatus returned shared mutable state")
+	}
+
+	// Mutating ActiveWorkflows result must not affect internals.
+	active[0].Results[EntryID(8888)] = ResultFailure
+	active2 := c.ActiveWorkflows()
+	if _, ok := active2[0].Results[EntryID(8888)]; ok {
+		t.Error("ActiveWorkflows returned shared mutable state")
+	}
+
+	close(jobRelease)
+}
+
+func TestWorkflow_StatusAndActiveNotRunning(t *testing.T) {
+	// Covers the not-running paths for WorkflowStatus and ActiveWorkflows
+	// where deep copies are returned. We stop the scheduler while a
+	// workflow execution is still active (root blocking, child pending).
+	c := New(WithSeconds())
+
+	jobStarted := make(chan struct{})
+	jobRelease := make(chan struct{})
+
+	c.AddFunc("@triggered", func() {
+		close(jobStarted)
+		<-jobRelease
+	}, WithName("root"))
+	c.AddFunc("@triggered", func() {}, WithName("child"))
+	_ = c.AddDependencyByName("child", "root", OnSuccess)
+
+	c.Start()
+	_ = c.TriggerEntryByName("root")
+
+	// Wait for root to start — execution is now active.
+	select {
+	case <-jobStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for job to start")
+	}
+
+	// Stop the scheduler while root is still running.
+	// This leaves the execution in activeExecutions.
+	ctx := c.Stop()
+	close(jobRelease) // unblock root so it finishes
+	<-ctx.Done()
+
+	// Now c.running == false, activeExecutions should have the execution.
+	active := c.ActiveWorkflows()
+	if len(active) == 0 {
+		t.Fatal("expected at least one active workflow after stop")
+	}
+
+	// Verify deep copy — mutating returned slice must not affect internals.
+	active[0].Results[EntryID(9999)] = ResultFailure
+	active2 := c.ActiveWorkflows()
+	if _, ok := active2[0].Results[EntryID(9999)]; ok {
+		t.Error("ActiveWorkflows (not-running) returned shared mutable state")
+	}
+
+	// WorkflowStatus should find the active execution.
+	status := c.WorkflowStatus(active2[0].ID)
+	if status == nil {
+		t.Fatal("WorkflowStatus returned nil for active execution")
+	}
+
+	// Verify deep copy.
+	status.Results[EntryID(8888)] = ResultFailure
+	status2 := c.WorkflowStatus(active2[0].ID)
+	if _, ok := status2.Results[EntryID(8888)]; ok {
+		t.Error("WorkflowStatus (not-running) returned shared mutable state")
+	}
+
+	// Nonexistent ID should return nil.
+	if got := c.WorkflowStatus("nonexistent"); got != nil {
+		t.Error("expected nil for nonexistent execution ID")
 	}
 }
