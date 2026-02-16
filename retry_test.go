@@ -1063,3 +1063,165 @@ func TestFuncErrorJob_ImplementsErrorJob(t *testing.T) {
 	var job ErrorJob = FuncErrorJob(func() error { return nil })
 	_ = job // Compile-time check that FuncErrorJob implements ErrorJob
 }
+
+// capturingLogger captures log messages for testing mutation boundaries.
+type capturingLogger struct {
+	onInfo  func(msg string, keysAndValues ...any)
+	onError func(err error, msg string, keysAndValues ...any)
+}
+
+func (l *capturingLogger) Info(msg string, keysAndValues ...any) {
+	if l.onInfo != nil {
+		l.onInfo(msg, keysAndValues...)
+	}
+}
+
+func (l *capturingLogger) Error(err error, msg string, keysAndValues ...any) {
+	if l.onError != nil {
+		l.onError(err, msg, keysAndValues...)
+	}
+}
+
+func TestCalculateBackoffDelay_Formula(t *testing.T) {
+	// Kills ARITHMETIC_BASE mutation at retry.go:243 where (attempt-2) → (attempt+2)
+	// attempt=2: delay = initialDelay * multiplier^(2-2) = 100ms * 1 = 100ms
+	// Mutant:    delay = initialDelay * multiplier^(2+2) = 100ms * 16 = 1600ms
+	delay := calculateBackoffDelay(2, 100*time.Millisecond, time.Hour, 2.0)
+	if delay < 80*time.Millisecond || delay > 120*time.Millisecond {
+		t.Errorf("calculateBackoffDelay(attempt=2) = %v, want ~100ms (±20%%)", delay)
+	}
+
+	// attempt=3: delay = 100ms * 2^(3-2) = 200ms. Mutant: 100ms * 2^5 = 3200ms
+	delay3 := calculateBackoffDelay(3, 100*time.Millisecond, time.Hour, 2.0)
+	if delay3 < 160*time.Millisecond || delay3 > 240*time.Millisecond {
+		t.Errorf("calculateBackoffDelay(attempt=3) = %v, want ~200ms (±20%%)", delay3)
+	}
+}
+
+func TestExecuteRetryAttempt_FirstAttemptNoDelay(t *testing.T) {
+	// Kills CONDITIONALS_BOUNDARY mutation at retry.go:379 where (attempt > 1) → (attempt >= 1)
+	// The log assertion alone distinguishes the branches — no timing check needed.
+	var logged bool
+	logger := &capturingLogger{onInfo: func(msg string, _ ...any) {
+		if msg == "retry" {
+			logged = true
+		}
+	}}
+
+	executeRetryAttempt(FuncJob(func() {}), logger, 1, 0, nil)
+
+	if logged {
+		t.Error("first attempt should not log 'retry'")
+	}
+}
+
+func TestLogRetrySuccess_FirstAttemptNoLog(t *testing.T) {
+	// Kills CONDITIONALS_BOUNDARY mutation at retry.go:389 where (attempt > 1) → (attempt >= 1)
+	var logged bool
+	logger := &capturingLogger{onInfo: func(msg string, _ ...any) {
+		if msg == "retry succeeded" {
+			logged = true
+		}
+	}}
+
+	logRetrySuccess(logger, 1)
+	if logged {
+		t.Error("logRetrySuccess should not log for attempt 1")
+	}
+
+	logRetrySuccess(logger, 2)
+	if !logged {
+		t.Error("logRetrySuccess should log for attempt 2")
+	}
+}
+
+func TestRetryOnError_FirstAttemptNoDelay(t *testing.T) {
+	// Kills CONDITIONALS_BOUNDARY mutation at retry.go:456 where (attempt > 1) → (attempt >= 1)
+	// The log assertion alone distinguishes the branches — no timing check needed.
+	var logged bool
+	logger := &capturingLogger{onInfo: func(msg string, _ ...any) {
+		if msg == "retry" {
+			logged = true
+		}
+	}}
+
+	wrapped := RetryOnError(logger, 0, 500*time.Millisecond, time.Second, 2.0)(
+		FuncErrorJob(func() error { return nil }),
+	)
+	wrapped.Run()
+
+	if logged {
+		t.Error("first attempt should not log 'retry'")
+	}
+}
+
+func TestCircuitState_IsOpenExactThreshold(t *testing.T) {
+	// Kills CONDITIONALS_BOUNDARY mutation at retry.go:541 where (>= threshold) → (> threshold)
+	state := &circuitState{}
+	threshold := 3
+	cooldown := time.Hour
+
+	for range threshold {
+		state.recordFailure()
+	}
+
+	open, remaining := state.isOpen(threshold, cooldown)
+	if !open {
+		t.Error("circuit should be open at exactly threshold failures")
+	}
+	if remaining <= 0 {
+		t.Errorf("remaining cooldown should be positive, got %v", remaining)
+	}
+}
+
+func TestCircuitState_IsOpenCooldownRemaining(t *testing.T) {
+	// Kills ARITHMETIC_BASE mutation at retry.go:542 where (cooldown - elapsed) → (cooldown + elapsed)
+	// Set lastFailNano directly to avoid real sleeping and flaky timing.
+	state := &circuitState{}
+	cooldown := time.Second
+
+	atomic.StoreInt64(&state.failures, 1)
+	// Set last failure to 200ms ago
+	atomic.StoreInt64(&state.lastFailNano, time.Now().Add(-200*time.Millisecond).UnixNano())
+
+	open, remaining := state.isOpen(1, cooldown)
+	if !open {
+		t.Fatal("circuit should be open")
+	}
+	// Remaining should be ≈ cooldown - 200ms ≈ 800ms
+	// With mutation (+), remaining ≈ cooldown + 200ms ≈ 1200ms > cooldown
+	if remaining > cooldown {
+		t.Errorf("remaining (%v) should be less than cooldown (%v)", remaining, cooldown)
+	}
+}
+
+func TestLogCircuitFailure_LogsOpenedAtExactThreshold(t *testing.T) {
+	// Kills CONDITIONALS_NEGATION mutation at retry.go:575 where (==) → (!=)
+	var messages []string
+	logger := &capturingLogger{
+		onError: func(_ error, msg string, _ ...any) {
+			messages = append(messages, msg)
+		},
+	}
+
+	// At exact threshold: should log "circuit breaker opened"
+	logCircuitFailure(logger, errors.New("fail"), 3, 3, time.Second)
+	found := false
+	for _, msg := range messages {
+		if msg == "circuit breaker opened" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected 'circuit breaker opened' at exact threshold, got: %v", messages)
+	}
+
+	// Below threshold: should NOT log "circuit breaker opened"
+	messages = nil
+	logCircuitFailure(logger, errors.New("fail"), 2, 3, time.Second)
+	for _, msg := range messages {
+		if msg == "circuit breaker opened" {
+			t.Error("should not log 'circuit breaker opened' below threshold")
+		}
+	}
+}

@@ -2301,3 +2301,26 @@ func TestFullParserReturnsConsistentInstance(t *testing.T) {
 		t.Errorf("FullParser instances produce different results: %v vs %v", n1, n2)
 	}
 }
+
+func TestParseSpecLengthLimit_ExactBoundary(t *testing.T) {
+	// Kills CONDITIONALS_BOUNDARY mutation at parser.go:404 where (>) → (>=)
+	// A spec of exactly MaxSpecLength chars should NOT trigger the length error.
+	spec := strings.Repeat("*", MaxSpecLength)
+	_, err := standardParser.Parse(spec)
+	// May fail validation for other reasons, but NOT "spec too long"
+	if err != nil && strings.Contains(err.Error(), "spec too long") {
+		t.Errorf("spec of exactly MaxSpecLength (%d) chars should not trigger length error", MaxSpecLength)
+	}
+}
+
+func TestMustParseInt_Zero(t *testing.T) {
+	// Kills CONDITIONALS_BOUNDARY mutation at parser.go:1396 where (<) → (<=)
+	// mustParseInt("0") should return 0 without error.
+	val, err := mustParseInt("0")
+	if err != nil {
+		t.Errorf("mustParseInt(\"0\") returned error: %v", err)
+	}
+	if val != 0 {
+		t.Errorf("mustParseInt(\"0\") = %d, want 0", val)
+	}
+}

@@ -773,3 +773,57 @@ func TestHandleMissedRunsWithInvalidPolicy(t *testing.T) {
 		t.Errorf("Expected 0 calls for invalid policy, got %d", calls)
 	}
 }
+
+func TestCalculateMissedRuns_GracePeriodBoundary(t *testing.T) {
+	// Kills CONDITIONALS_BOUNDARY mutation at missed.go:133 where (>) → (>=)
+	// A missed run at exactly the grace period boundary should be INCLUDED.
+	c := New()
+
+	now := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	entry := &Entry{
+		MissedPolicy:      MissedRunAll,
+		Schedule:          ConstantDelaySchedule{Delay: time.Minute},
+		MissedGracePeriod: 5 * time.Minute,
+		Prev:              now.Add(-7 * time.Minute),
+	}
+
+	missed := c.calculateMissedRuns(entry, now)
+	// Missed candidates: -6m, -5m, -4m, -3m, -2m, -1m
+	// Grace period = 5m
+	// -6m: now.Sub(t) = 6m > 5m → excluded
+	// -5m: now.Sub(t) = 5m, with >: 5 > 5 is false → INCLUDED
+	// -4m through -1m: included
+	// Total: 5 (with >=: only 4, because 5 >= 5 excludes the boundary)
+	if len(missed) != 5 {
+		t.Errorf("expected 5 missed runs (including exact boundary), got %d", len(missed))
+	}
+}
+
+func TestCalculateMissedRuns_MaxMissedRunsWarning(t *testing.T) {
+	// Kills CONDITIONALS_BOUNDARY mutation at missed.go:141 where (>=) → (>)
+	// Warning should be logged when missed runs reach exactly maxMissedRuns (100).
+	var warned bool
+	logger := &capturingLogger{onInfo: func(msg string, _ ...any) {
+		if msg == "warning: missed runs capped at safety limit" {
+			warned = true
+		}
+	}}
+	c := New(WithLogger(logger))
+
+	now := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	entry := &Entry{
+		ID:           1,
+		Name:         "test",
+		MissedPolicy: MissedRunAll,
+		Schedule:     ConstantDelaySchedule{Delay: time.Second},
+		Prev:         now.Add(-101 * time.Second),
+	}
+
+	missed := c.calculateMissedRuns(entry, now)
+	if len(missed) != 100 {
+		t.Fatalf("expected exactly 100 missed runs, got %d", len(missed))
+	}
+	if !warned {
+		t.Error("expected warning log when missed runs reach maxMissedRuns (100)")
+	}
+}
