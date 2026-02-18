@@ -67,7 +67,7 @@ type Cron struct {
 	nameIndex   map[string]*Entry  // O(1) lookup by Name
 	chain       Chain
 	stop        chan struct{}
-	add         chan request[*Entry, struct{}]
+	add         chan request[scheduleJobRequest, scheduleJobResponse]
 	remove      chan request[EntryID, struct{}]
 	update      chan request[updateScheduleRequest, error]
 	pause       chan request[pauseRequest, error]
@@ -272,6 +272,19 @@ type updateScheduleRequest struct {
 	job      Job      // nil means keep existing job
 }
 
+// scheduleJobRequest is used to schedule a new job
+type scheduleJobRequest struct {
+	schedule Schedule    // schedule
+	job      Job         // job
+	opts     []JobOption // job options
+}
+
+// scheduleJobResponse is used to schedule a new job
+type scheduleJobResponse struct {
+	entryID EntryID
+	err     error
+}
+
 // pauseRequest is used to pause or resume an entry.
 type pauseRequest struct {
 	id    EntryID
@@ -466,7 +479,7 @@ func New(opts ...Option) *Cron {
 		entryIndex:           make(map[EntryID]*Entry),
 		nameIndex:            make(map[string]*Entry),
 		chain:                NewChain(),
-		add:                  make(chan request[*Entry, struct{}]),
+		add:                  make(chan request[scheduleJobRequest, scheduleJobResponse]),
 		stop:                 make(chan struct{}),
 		snapshot:             make(chan chan []Entry),
 		entryLookup:          make(chan entryLookupRequest),
@@ -831,6 +844,22 @@ func (c *Cron) ScheduleJob(schedule Schedule, cmd Job, opts ...JobOption) (Entry
 	c.runningMu.Lock()
 	defer c.runningMu.Unlock()
 
+	if c.running {
+		req := makeReq[scheduleJobRequest, scheduleJobResponse](scheduleJobRequest{
+			schedule: schedule,
+			job:      cmd,
+			opts:     opts,
+		})
+		c.add <- req
+		res := <-req.reply
+		return res.entryID, res.err
+	}
+
+	return c.scheduleJob(schedule, cmd, opts...)
+}
+
+func (c *Cron) scheduleJob(schedule Schedule, cmd Job, opts ...JobOption) (EntryID, error) {
+
 	// Atomically check and increment entry count to prevent race conditions.
 	// Must be done before any other work to ensure we can decrement on error.
 	if !c.tryIncrementEntryCount() {
@@ -890,14 +919,8 @@ func (c *Cron) ScheduleJob(schedule Schedule, cmd Job, opts ...JobOption) (Entry
 		c.nameIndex[entry.Name] = entry
 	}
 
-	if !c.running {
-		heap.Push(&c.entries, entry)
-		c.entryIndex[entry.ID] = entry
-	} else {
-		req := makeReq[*Entry, struct{}](entry)
-		c.add <- req
-		<-req.reply
-	}
+	heap.Push(&c.entries, entry)
+	c.entryIndex[entry.ID] = entry
 	// Success - don't decrement count in deferred function
 	countIncremented = false
 	return entry.ID, nil
@@ -924,8 +947,8 @@ func (c *Cron) Location() *time.Location {
 // This operation is O(1) in all cases using the internal index map.
 func (c *Cron) Entry(id EntryID) Entry {
 	c.runningMu.Lock()
+	defer c.runningMu.Unlock()
 	if c.running {
-		c.runningMu.Unlock()
 		// When running, use dedicated lookup channel for O(1) access
 		replyChan := make(chan Entry, 1)
 		c.entryLookup <- entryLookupRequest{id: id, reply: replyChan}
@@ -933,7 +956,6 @@ func (c *Cron) Entry(id EntryID) Entry {
 	}
 	// When not running, use direct map lookup (O(1))
 	entry, ok := c.entryIndex[id]
-	c.runningMu.Unlock()
 	if ok {
 		return *entry
 	}
@@ -1110,15 +1132,24 @@ func (c *Cron) run() {
 				c.processDueEntries(now)
 
 			case req := <-c.add:
-				newEntry := req.value
+				newEntryID, err := c.scheduleJob(req.value.schedule, req.value.job, req.value.opts...)
+				if err != nil {
+					req.reply <- scheduleJobResponse{err: err}
+					continue
+				}
+
+				newEntry, ok := c.entryIndex[newEntryID]
+				if !ok {
+					req.reply <- scheduleJobResponse{err: ErrEntryNotFound}
+					continue
+				}
 				timer.Stop()
 				now = c.now()
 				// Check for missed executions before scheduling next run
 				c.processMissedRuns(newEntry, now)
 				c.scheduleEntryNext(newEntry, now)
-				heap.Push(&c.entries, newEntry)
-				c.entryIndex[newEntry.ID] = newEntry
-				req.reply <- struct{}{}
+				c.entries.Update(newEntry)
+				req.reply <- scheduleJobResponse{entryID: newEntryID}
 				// Note: nameIndex and entryCount already updated by ScheduleJob
 				// (while holding runningMu) to prevent TOCTOU races
 				c.hooks.callOnSchedule(newEntry.ID, newEntry.Job, newEntry.Next)
@@ -2321,8 +2352,8 @@ func (c *Cron) registerWorkflowSteps(w *Workflow) error {
 // This operation is O(1) in all cases using the internal name index.
 func (c *Cron) EntryByName(name string) Entry {
 	c.runningMu.Lock()
+	defer c.runningMu.Unlock()
 	if c.running {
-		c.runningMu.Unlock()
 		// When running, use dedicated lookup channel for O(1) access
 		replyChan := make(chan Entry, 1)
 		c.nameLookup <- nameLookupRequest{name: name, reply: replyChan}
@@ -2330,7 +2361,6 @@ func (c *Cron) EntryByName(name string) Entry {
 	}
 	// When not running, use direct map lookup (O(1))
 	entry, ok := c.nameIndex[name]
-	c.runningMu.Unlock()
 	if ok {
 		return *entry
 	}
