@@ -1137,11 +1137,7 @@ func (c *Cron) run() {
 					continue
 				}
 
-				newEntry, ok := c.entryIndex[newEntryID]
-				if !ok {
-					req.reply <- scheduleJobResponse{err: ErrEntryNotFound}
-					continue
-				}
+				newEntry := c.entryIndex[newEntryID]
 				timer.Stop()
 				now = c.now()
 				// Check for missed executions before scheduling next run
