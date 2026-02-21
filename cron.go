@@ -1145,8 +1145,7 @@ func (c *Cron) run() {
 				c.scheduleEntryNext(newEntry, now)
 				c.entries.Update(newEntry)
 				req.reply <- scheduleJobResponse{entryID: newEntryID}
-				// Note: nameIndex and entryCount already updated by ScheduleJob
-				// (while holding runningMu) to prevent TOCTOU races
+				// Note: nameIndex and entryCount already updated by scheduleJob
 				c.hooks.callOnSchedule(newEntry.ID, newEntry.Job, newEntry.Next)
 				c.logger.Info("added", "now", now, "entry", newEntry.ID, "next", newEntry.Next)
 
