@@ -272,14 +272,14 @@ type updateScheduleRequest struct {
 	job      Job      // nil means keep existing job
 }
 
-// scheduleJobRequest is used to schedule a new job
+// scheduleJobRequest is used to schedule a new job.
 type scheduleJobRequest struct {
 	schedule Schedule    // schedule
 	job      Job         // job
 	opts     []JobOption // job options
 }
 
-// scheduleJobResponse is used to schedule a new job
+// scheduleJobResponse is used to schedule a new job.
 type scheduleJobResponse struct {
 	entryID EntryID
 	err     error
@@ -859,7 +859,6 @@ func (c *Cron) ScheduleJob(schedule Schedule, cmd Job, opts ...JobOption) (Entry
 }
 
 func (c *Cron) scheduleJob(schedule Schedule, cmd Job, opts ...JobOption) (EntryID, error) {
-
 	// Atomically check and increment entry count to prevent race conditions.
 	// Must be done before any other work to ensure we can decrement on error.
 	if !c.tryIncrementEntryCount() {
