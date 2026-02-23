@@ -201,6 +201,9 @@ if _, err := time.LoadLocation("America/New_York"); err != nil {
 }
 ```
 
+> **Note:** Quoted timezone values are accepted — `TZ="America/New_York"` and `TZ='UTC'` both work. Matching single or double quotes are stripped before validation. Mismatched quotes (e.g., `TZ="UTC'`) are rejected.
+```
+
 ---
 
 ### Symptom: Timezone not recognized in container

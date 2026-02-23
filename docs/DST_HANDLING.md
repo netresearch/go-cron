@@ -107,6 +107,10 @@ c := cron.New(cron.WithLocation(nyc))
 // Option 2: Per-schedule timezone prefix
 c.AddFunc("TZ=America/New_York 0 9 * * *", job)
 c.AddFunc("CRON_TZ=Europe/London 0 9 * * *", job)
+
+// Quoted values also accepted (common shell convention)
+c.AddFunc(`TZ="America/New_York" 0 9 * * *`, job)
+c.AddFunc(`CRON_TZ='Europe/London' 0 9 * * *`, job)
 ```
 
 ### Location Priority

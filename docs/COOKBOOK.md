@@ -851,6 +851,7 @@ c.AddFunc("CRON_TZ=America/New_York 0 4 * * *", job) // 4 AM is safe
 - Set default location to UTC for predictability
 - Use `CRON_TZ=` prefix for per-job timezone
 - Use IANA timezone names (not abbreviations like "EST")
+- Quoted values are accepted: `CRON_TZ="America/New_York"` and `CRON_TZ='UTC'` both work
 - Avoid scheduling during DST transition hours (2-3 AM)
 - Log times in multiple zones for debugging
 

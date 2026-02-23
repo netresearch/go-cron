@@ -191,6 +191,10 @@ c.AddFunc("CRON_TZ=America/New_York 0 6 * * *", myFunc)
 
 // Legacy TZ= prefix also supported
 c.AddFunc("TZ=Europe/Berlin 0 9 * * *", myFunc)
+
+// Quoted values are accepted (common shell habit)
+c.AddFunc(`TZ="America/Chicago" 0 8 * * *`, myFunc)
+c.AddFunc(`CRON_TZ='Asia/Tokyo' 30 4 * * *`, myFunc)
 ```
 
 Or set default timezone for all jobs:
