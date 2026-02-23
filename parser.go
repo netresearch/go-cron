@@ -319,6 +319,8 @@ func (p Parser) WithHashKey(key string) Parser {
 const MaxSpecLength = 1024
 
 // parseTimezone extracts and validates the timezone from a spec string.
+// Matching single or double quotes around the timezone value are stripped
+// (e.g., TZ="America/New_York" is treated as TZ=America/New_York).
 // Returns the location, remaining spec string, and any error.
 func parseTimezone(spec string) (*time.Location, string, error) {
 	if !strings.HasPrefix(spec, "TZ=") && !strings.HasPrefix(spec, "CRON_TZ=") {
@@ -332,6 +334,16 @@ func parseTimezone(spec string) (*time.Location, string, error) {
 
 	eq := strings.Index(spec, "=")
 	tzName := spec[eq+1 : i]
+
+	// Strip matching quotes — shell users habitually write TZ="America/New_York"
+	// or TZ='UTC'. Only matching pairs are stripped; mismatched quotes are left
+	// intact and will fail validation below.
+	if len(tzName) >= 2 {
+		if (tzName[0] == '"' && tzName[len(tzName)-1] == '"') ||
+			(tzName[0] == '\'' && tzName[len(tzName)-1] == '\'') {
+			tzName = tzName[1 : len(tzName)-1]
+		}
+	}
 
 	if err := validateTimezone(tzName); err != nil {
 		return nil, "", fmt.Errorf("invalid timezone %q: %w", tzName, err)

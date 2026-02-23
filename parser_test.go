@@ -1147,6 +1147,73 @@ func TestTimezoneValidation(t *testing.T) {
 	}
 }
 
+// TestTimezoneQuotedValues tests that quoted TZ/CRON_TZ values are accepted (#335).
+// Shell users habitually write TZ="America/New_York" or TZ='UTC'.
+// We strip matching quotes before validation so these specs parse correctly.
+func TestTimezoneQuotedValues(t *testing.T) {
+	tokyo, _ := time.LoadLocation("Asia/Tokyo")
+	nyc, _ := time.LoadLocation("America/New_York")
+
+	tests := []struct {
+		name    string
+		spec    string
+		wantLoc *time.Location
+		wantErr string
+	}{
+		// Double-quoted — should be accepted
+		{"double-quoted UTC", `TZ="UTC" * * * * *`, time.UTC, ""},
+		{"double-quoted city", `TZ="America/New_York" 0 5 * * *`, nyc, ""},
+		{"double-quoted CRON_TZ", `CRON_TZ="Asia/Tokyo" 30 4 * * *`, tokyo, ""},
+
+		// Single-quoted — should be accepted
+		{"single-quoted UTC", `TZ='UTC' * * * * *`, time.UTC, ""},
+		{"single-quoted city", `TZ='America/New_York' 0 5 * * *`, nyc, ""},
+		{"single-quoted CRON_TZ", `CRON_TZ='Asia/Tokyo' 30 4 * * *`, tokyo, ""},
+
+		// Mismatched quotes — should error
+		{"mismatched double-single", `TZ="UTC' * * * * *`, nil, "invalid"},
+		{"mismatched single-double", `TZ='UTC" * * * * *`, nil, "invalid"},
+
+		// Empty after stripping — should error
+		{"double-quoted empty", `TZ="" * * * * *`, nil, "empty timezone"},
+		{"single-quoted empty", `TZ='' * * * * *`, nil, "empty timezone"},
+
+		// Only opening quote (no closing) — quote becomes part of value
+		{"only opening double quote", `TZ="UTC * * * * *`, nil, "invalid"},
+		{"only opening single quote", `TZ='UTC * * * * *`, nil, "invalid"},
+
+		// Only closing quote — quote becomes part of value
+		{"only closing double quote", `TZ=UTC" * * * * *`, nil, "invalid"},
+		{"only closing single quote", `TZ=UTC' * * * * *`, nil, "invalid"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sched, err := ParseStandard(tt.spec)
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("ParseStandard(%q) expected error containing %q, got nil", tt.spec, tt.wantErr)
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Errorf("ParseStandard(%q) error = %v, want error containing %q", tt.spec, err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseStandard(%q) unexpected error: %v", tt.spec, err)
+			}
+			// Verify the parsed schedule uses the correct timezone
+			cronSched, ok := sched.(*SpecSchedule)
+			if !ok {
+				t.Fatalf("ParseStandard(%q) returned %T, want *SpecSchedule", tt.spec, sched)
+			}
+			if cronSched.Location.String() != tt.wantLoc.String() {
+				t.Errorf("ParseStandard(%q) location = %v, want %v", tt.spec, cronSched.Location, tt.wantLoc)
+			}
+		})
+	}
+}
+
 // TestWithMaxSearchYears tests the WithMaxSearchYears parser option
 func TestParserWithMaxSearchYears(t *testing.T) {
 	// Create a schedule for Feb 30 (impossible date - will never match)
