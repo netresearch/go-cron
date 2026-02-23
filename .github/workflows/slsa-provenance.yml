@@ -1,8 +1,9 @@
 name: SLSA Provenance
 
 on:
-  release:
-    types: [published]
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
 
 permissions: read-all
 
@@ -10,17 +11,31 @@ jobs:
   # First job: Prepare subjects for provenance
   prepare:
     name: Prepare Provenance Subjects
+    if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: read
     outputs:
       subjects: ${{ steps.subjects.outputs.subjects }}
       has_subjects: ${{ steps.subjects.outputs.has_subjects }}
+      tag_name: ${{ steps.tag.outputs.tag_name }}
+      tag_sha: ${{ steps.tag.outputs.tag_sha }}
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@0634a2670c59f64b4a01f0f96f84700a4088b9f0 # v2.12.0
         with:
           egress-policy: audit
+
+      - name: Determine release tag
+        id: tag
+        env:
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          # workflow_run.head_branch contains the tag name (e.g., "v0.13.0")
+          echo "tag_name=$HEAD_BRANCH" >> "$GITHUB_OUTPUT"
+          echo "tag_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+          echo "Release tag: $HEAD_BRANCH (sha: $HEAD_SHA)"
 
       - name: Checkout code
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -30,9 +45,10 @@ jobs:
       - name: Download release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ steps.tag.outputs.tag_name }}
         run: |
           mkdir -p release-assets
-          gh release download "${{ github.event.release.tag_name }}" -D release-assets || true
+          gh release download "$TAG_NAME" -D release-assets || true
           ls -la release-assets/
 
       - name: Generate provenance subjects
@@ -76,6 +92,7 @@ jobs:
     name: Generate Source Attestation
     runs-on: ubuntu-latest
     needs: prepare
+    if: needs.prepare.outputs.has_subjects == 'true'
     permissions:
       contents: write
     steps:
@@ -88,9 +105,13 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Generate source provenance attestation
+        env:
+          TAG_NAME: ${{ needs.prepare.outputs.tag_name }}
+          TAG_SHA: ${{ needs.prepare.outputs.tag_sha }}
+          RUN_ID: ${{ github.run_id }}
         run: |
-          # Create source attestation
-          cat > source-provenance.json << 'EOF'
+          # Create source attestation using env vars (not direct expression interpolation)
+          cat > source-provenance.intoto.jsonl << EOF
           {
             "_type": "https://in-toto.io/Statement/v0.1",
             "predicateType": "https://slsa.dev/provenance/v0.2",
@@ -98,26 +119,26 @@ jobs:
               {
                 "name": "github.com/netresearch/go-cron",
                 "digest": {
-                  "sha1": "${{ github.sha }}"
+                  "sha1": "$TAG_SHA"
                 }
               }
             ],
             "predicate": {
               "builder": {
-                "id": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                "id": "https://github.com/netresearch/go-cron/actions/runs/$RUN_ID"
               },
               "buildType": "https://github.com/slsa-framework/slsa-github-generator/go@v1",
               "invocation": {
                 "configSource": {
-                  "uri": "git+https://github.com/${{ github.repository }}@${{ github.ref }}",
+                  "uri": "git+https://github.com/netresearch/go-cron@refs/tags/$TAG_NAME",
                   "digest": {
-                    "sha1": "${{ github.sha }}"
+                    "sha1": "$TAG_SHA"
                   },
                   "entryPoint": ".github/workflows/slsa-provenance.yml"
                 }
               },
               "metadata": {
-                "buildInvocationID": "${{ github.run_id }}",
+                "buildInvocationID": "$RUN_ID",
                 "completeness": {
                   "parameters": true,
                   "environment": true,
@@ -127,19 +148,20 @@ jobs:
               },
               "materials": [
                 {
-                  "uri": "git+https://github.com/${{ github.repository }}@${{ github.ref }}",
+                  "uri": "git+https://github.com/netresearch/go-cron@refs/tags/$TAG_NAME",
                   "digest": {
-                    "sha1": "${{ github.sha }}"
+                    "sha1": "$TAG_SHA"
                   }
                 }
               ]
             }
           }
           EOF
-          cat source-provenance.json
+          cat source-provenance.intoto.jsonl
 
       - name: Upload source provenance
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ needs.prepare.outputs.tag_name }}
         run: |
-          gh release upload "${{ github.event.release.tag_name }}" source-provenance.json --clobber || true
+          gh release upload "$TAG_NAME" source-provenance.intoto.jsonl --clobber || true
