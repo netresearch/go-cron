@@ -56,12 +56,12 @@ jobs:
         run: |
           cd release-assets
           # Generate SHA256 for all release assets
-          if ls * 1> /dev/null 2>&1; then
-            sha256sum * > ../provenance-subjects.txt
+          if ls ./* 1> /dev/null 2>&1; then
+            sha256sum ./* > ../provenance-subjects.txt
             cat ../provenance-subjects.txt
 
             # Create base64 encoded subjects for SLSA
-            SUBJECTS=$(cat ../provenance-subjects.txt | awk '{print "{\"name\":\""$2"\",\"digest\":{\"sha256\":\""$1"\"}}"}' | jq -s -c '.')
+            SUBJECTS=$(awk '{print "{\"name\":\""$2"\",\"digest\":{\"sha256\":\""$1"\"}}"}' ../provenance-subjects.txt | jq -s -c '.')
             # Base64 encode for the reusable workflow
             SUBJECTS_BASE64=$(echo "$SUBJECTS" | base64 -w0)
             echo "subjects=$SUBJECTS_BASE64" >> "$GITHUB_OUTPUT"
