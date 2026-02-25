@@ -51,6 +51,23 @@ pre-push:
     - name: vulncheck
       run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
+prepare-commit-msg:
+  jobs:
+    - name: add-signoff
+      run: |
+        # Auto-add Signed-off-by trailer if not already present.
+        # {1} is the commit message file path provided by git.
+        MSG_FILE="{1}"
+        SIGNOFF="Signed-off-by: $(git config user.name) <$(git config user.email)>"
+        if ! grep -qF "$SIGNOFF" "$MSG_FILE"; then
+          # Add a blank line before the trailer if the file doesn't end with one
+          if [ -n "$(tail -c1 "$MSG_FILE")" ]; then
+            echo "" >> "$MSG_FILE"
+          fi
+          echo "" >> "$MSG_FILE"
+          echo "$SIGNOFF" >> "$MSG_FILE"
+        fi
+
 commit-msg:
   jobs:
     - name: conventional-commit
@@ -60,5 +77,20 @@ commit-msg:
           echo "Error: Commit message must follow Conventional Commits format"
           echo "Format: type(scope): description"
           echo "Types: feat, fix, docs, style, refactor, test, chore, perf, ci, build, revert"
+          exit 1
+        fi
+
+    - name: dco-signoff
+      run: |
+        # Verify that every commit has a Signed-off-by trailer (DCO requirement).
+        MSG=$(cat {1})
+        if ! echo "$MSG" | grep -qE "^Signed-off-by: .+ <.+>"; then
+          echo "Error: Commit message must contain a DCO sign-off."
+          echo "Expected trailer: Signed-off-by: Your Name <your@email>"
+          echo ""
+          echo "Add it with: git commit -s"
+          echo "Or amend:    git commit --amend -s --no-edit"
+          echo ""
+          echo "See https://developercertificate.org/ for details."
           exit 1
         fi
