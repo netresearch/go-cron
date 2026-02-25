@@ -117,6 +117,43 @@ fix(scheduler): handle DST transitions correctly
 docs: update README with new examples
 ```
 
+### Developer Certificate of Origin (DCO)
+
+This project requires all contributions to be signed off under the
+[Developer Certificate of Origin (DCO)](https://developercertificate.org/).
+The DCO is a lightweight agreement that certifies you wrote or have the right
+to submit the code you are contributing.
+
+Every commit must contain a `Signed-off-by` trailer matching the commit author,
+for example:
+
+```
+feat(parser): add timezone alias support
+
+Signed-off-by: Jane Doe <jane@example.com>
+```
+
+Add it automatically by passing `-s` (or `--signoff`) to `git commit`:
+
+```bash
+git commit -s -m "feat(parser): add timezone alias support"
+```
+
+The project's [lefthook](https://github.com/evilmartians/lefthook) git hooks
+will automatically add the `Signed-off-by` trailer via a `prepare-commit-msg`
+hook and verify its presence in the `commit-msg` hook. If you prefer not to use
+lefthook, please remember to sign off manually.
+
+If you have already made commits without the sign-off, you can amend them:
+
+```bash
+# Amend the last commit
+git commit --amend -s --no-edit
+
+# Rebase and sign off all commits on your branch
+git rebase --signoff main
+```
+
 ### Testing
 
 - Write tests for new functionality
