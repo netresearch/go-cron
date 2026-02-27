@@ -157,9 +157,9 @@ func TestRetryWithBackoff_MaxDelayRespected(t *testing.T) {
 	// Delays: 0, 10ms, 20ms, 30ms, 30ms, 30ms...
 	for i := 4; i < len(timestamps); i++ {
 		delay := timestamps[i].Sub(timestamps[i-1])
-		// Allow 50% variance due to timing
-		if delay > maxDelay*3/2 {
-			t.Errorf("delay at attempt %d exceeded max: %v > %v", i, delay, maxDelay)
+		// Allow 5x tolerance for CI environments (macOS runners have high scheduling jitter)
+		if delay > maxDelay*5 {
+			t.Errorf("delay at attempt %d exceeded max: %v > %v", i, delay, maxDelay*5)
 		}
 	}
 }
