@@ -400,6 +400,12 @@ type Entry struct {
 	running *jobTracker
 }
 
+func (e Entry) copy() Entry {
+	entryCopy := e
+	entryCopy.Tags = slices.Clone(entryCopy.Tags)
+	return entryCopy
+}
+
 // jobTracker tracks in-flight executions for a single entry.
 // Safe for concurrent use by startJob (start/finish) and WaitForJob (wait).
 type jobTracker struct {
@@ -956,7 +962,7 @@ func (c *Cron) Entry(id EntryID) Entry {
 	// When not running, use direct map lookup (O(1))
 	entry, ok := c.entryIndex[id]
 	if ok {
-		return *entry
+		return entry.copy()
 	}
 	return Entry{}
 }
@@ -1156,7 +1162,7 @@ func (c *Cron) run() {
 			case req := <-c.entryLookup:
 				// O(1) single-entry lookup using index map
 				if entry, ok := c.entryIndex[req.id]; ok {
-					req.reply <- *entry
+					req.reply <- entry.copy()
 				} else {
 					req.reply <- Entry{}
 				}
@@ -1165,7 +1171,7 @@ func (c *Cron) run() {
 			case req := <-c.nameLookup:
 				// O(1) entry lookup by name using nameIndex
 				if entry, ok := c.nameIndex[req.name]; ok {
-					req.reply <- *entry
+					req.reply <- entry.copy()
 				} else {
 					req.reply <- Entry{}
 				}
@@ -1944,7 +1950,7 @@ func (c *Cron) StopWithTimeout(timeout time.Duration) bool {
 func (c *Cron) entrySnapshot() []Entry {
 	entries := make([]Entry, len(c.entries))
 	for i, e := range c.entries {
-		entries[i] = *e
+		entries[i] = e.copy()
 	}
 	// Sort the snapshot by next execution time (heap internal order is not sorted).
 	sortEntriesByTime(entries)
@@ -2356,7 +2362,7 @@ func (c *Cron) EntryByName(name string) Entry {
 	// When not running, use direct map lookup (O(1))
 	entry, ok := c.nameIndex[name]
 	if ok {
-		return *entry
+		return entry.copy()
 	}
 	return Entry{}
 }
