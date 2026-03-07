@@ -181,10 +181,19 @@ func TestAddWhileRunningWithDelay(t *testing.T) {
 	// Advance exactly 1 second — job should fire exactly once
 	fakeClock.Advance(time.Second)
 
+	// First invocation must occur.
 	select {
 	case <-called:
 	case <-time.After(100 * time.Millisecond):
 		t.Fatal("expected job to fire once")
+	}
+
+	// Without advancing the fake clock further, no additional invocations should occur.
+	select {
+	case <-called:
+		t.Fatal("job fired more than once for the same tick")
+	case <-time.After(100 * time.Millisecond):
+		// Success: no extra invocation observed.
 	}
 }
 
