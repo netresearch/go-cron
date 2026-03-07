@@ -5153,3 +5153,144 @@ func TestPauseEntryWhileRunningNotFound(t *testing.T) {
 		t.Errorf("expected ErrEntryNotFound, got %v", err)
 	}
 }
+
+// TestEntryTagsDeepCopy verifies that Entry() returns a deep copy of Tags,
+// so mutating the returned slice does not affect internal scheduler state.
+func TestEntryTagsDeepCopy(t *testing.T) {
+	c := New()
+	defer c.Stop()
+
+	id, err := c.AddFunc("@every 1s", func() {},
+		WithName("tag-copy-test"),
+		WithTags("alpha", "beta"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Get entry and mutate the returned tags
+	entry := c.Entry(id)
+	entry.Tags[0] = "MUTATED"
+	entry.Tags = append(entry.Tags, "gamma")
+
+	// Fetch again — internal state must be unchanged
+	entry2 := c.Entry(id)
+	if len(entry2.Tags) != 2 {
+		t.Fatalf("expected 2 tags, got %d", len(entry2.Tags))
+	}
+	if entry2.Tags[0] != "alpha" || entry2.Tags[1] != "beta" {
+		t.Errorf("internal tags mutated: %v", entry2.Tags)
+	}
+}
+
+// TestEntryByNameTagsDeepCopy verifies that EntryByName() returns a deep copy of Tags.
+func TestEntryByNameTagsDeepCopy(t *testing.T) {
+	c := New()
+	defer c.Stop()
+
+	_, err := c.AddFunc("@every 1s", func() {},
+		WithName("tag-copy-byname"),
+		WithTags("one", "two"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	entry := c.EntryByName("tag-copy-byname")
+	entry.Tags[0] = "MUTATED"
+
+	entry2 := c.EntryByName("tag-copy-byname")
+	if entry2.Tags[0] != "one" {
+		t.Errorf("internal tags mutated via EntryByName: %v", entry2.Tags)
+	}
+}
+
+// TestEntryTagsDeepCopyWhileRunning verifies Tags deep copy when the
+// scheduler is running (lookup goes through the run loop channel).
+func TestEntryTagsDeepCopyWhileRunning(t *testing.T) {
+	c := New()
+	c.Start()
+	defer c.Stop()
+
+	id, err := c.AddFunc("@every 1s", func() {},
+		WithName("tag-copy-running"),
+		WithTags("x", "y"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	time.Sleep(10 * time.Millisecond) // ensure entry is added
+
+	entry := c.Entry(id)
+	entry.Tags[0] = "MUTATED"
+
+	entry2 := c.Entry(id)
+	if entry2.Tags[0] != "x" {
+		t.Errorf("internal tags mutated while running: %v", entry2.Tags)
+	}
+
+	// Also via EntryByName
+	entry3 := c.EntryByName("tag-copy-running")
+	entry3.Tags[1] = "MUTATED"
+
+	entry4 := c.EntryByName("tag-copy-running")
+	if entry4.Tags[1] != "y" {
+		t.Errorf("internal tags mutated via EntryByName while running: %v", entry4.Tags)
+	}
+}
+
+// TestScheduleJobWhileRunning verifies that ScheduleJob works correctly
+// when the cron is already running (routed through the add channel).
+func TestScheduleJobWhileRunning(t *testing.T) {
+	c := New()
+	c.Start()
+	defer c.Stop()
+
+	executed := make(chan struct{}, 1)
+	schedule := Every(50 * time.Millisecond)
+	id, err := c.ScheduleJob(schedule, FuncJob(func() {
+		select {
+		case executed <- struct{}{}:
+		default:
+		}
+	}), WithName("running-schedule-test"), WithTags("live"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify the entry is accessible
+	time.Sleep(10 * time.Millisecond)
+	entry := c.Entry(id)
+	if !entry.Valid() {
+		t.Fatal("expected valid entry after ScheduleJob while running")
+	}
+	if entry.Name != "running-schedule-test" {
+		t.Errorf("expected name 'running-schedule-test', got %q", entry.Name)
+	}
+	if len(entry.Tags) != 1 || entry.Tags[0] != "live" {
+		t.Errorf("unexpected tags: %v", entry.Tags)
+	}
+
+	// Verify the job actually executes
+	select {
+	case <-executed:
+	case <-time.After(time.Second):
+		t.Fatal("job did not execute within timeout")
+	}
+}
+
+// TestEntrySnapshotTagsDeepCopy verifies that Entries() returns deep copies of Tags.
+func TestEntrySnapshotTagsDeepCopy(t *testing.T) {
+	c := New()
+	defer c.Stop()
+
+	c.AddFunc("@every 1s", func() {}, WithTags("snap-a", "snap-b"))
+
+	entries := c.Entries()
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	entries[0].Tags[0] = "MUTATED"
+
+	entries2 := c.Entries()
+	if entries2[0].Tags[0] != "snap-a" {
+		t.Errorf("snapshot tags mutated: %v", entries2[0].Tags)
+	}
+}

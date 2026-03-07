@@ -59,8 +59,16 @@ features, bug fixes, and modernization improvements.
 [#311]: https://github.com/netresearch/go-cron/issues/311
 [#312]: https://github.com/netresearch/go-cron/issues/312
 [PR#323]: https://github.com/netresearch/go-cron/pull/323
+[PR#336]: https://github.com/netresearch/go-cron/pull/336
 
 ### Fixed
+- **Race condition in `Entry`/`EntryByName` and `ScheduleJob`** ([PR#336]): When the
+  scheduler is running, `Entry`/`EntryByName` now route lookups through the run loop
+  channel while holding `runningMu`, preventing concurrent map access. `ScheduleJob`
+  now routes through the `c.add` channel when running, ensuring all heap/map
+  modifications happen atomically in the run loop. `Entry`, `EntryByName`, and
+  `Entries` now return deep copies of the `Tags` slice, preventing callers from
+  mutating internal scheduler state.
 - **Recover workflow-awareness**: `Recover` wrapper now re-panics in workflow context
   so the workflow engine correctly detects job failures. Previously, `Recover` would
   swallow the panic and the workflow would treat the step as `ResultSuccess`.
