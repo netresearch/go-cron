@@ -67,8 +67,8 @@ features, bug fixes, and modernization improvements.
   channel while holding `runningMu`, preventing concurrent map access. `ScheduleJob`
   now routes through the `c.add` channel when running, ensuring all heap/map
   modifications happen atomically in the run loop. `Entry`, `EntryByName`, and
-  `Entries` now return deep copies of the `Tags` slice, preventing callers from
-  mutating internal scheduler state.
+  `Entries` now return struct copies with cloned `Tags` slices, preventing
+  callers from mutating internal scheduler state.
 - **Recover workflow-awareness**: `Recover` wrapper now re-panics in workflow context
   so the workflow engine correctly detects job failures. Previously, `Recover` would
   swallow the panic and the workflow would treat the step as `ResultSuccess`.

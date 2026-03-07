@@ -517,7 +517,7 @@ func New(opts ...Option) *Cron {
 	}
 	// Create cancellable context derived from baseCtx (which may have been set by WithContext).
 	// cancelCtx is stored and called in Stop().
-	c.baseCtx, c.cancelCtx = context.WithCancel(c.baseCtx) //nolint:gosec // cancelCtx is stored in struct and called in Stop()
+	c.baseCtx, c.cancelCtx = context.WithCancel(c.baseCtx)
 	return c
 }
 
@@ -903,7 +903,7 @@ func (c *Cron) scheduleJob(schedule Schedule, cmd Job, opts ...JobOption) (Entry
 
 	// Create per-entry context derived from the cron's base context.
 	// This allows per-entry cancellation on Remove or job replacement.
-	entry.entryCtx, entry.cancelEntryCtx = context.WithCancel(c.baseCtx) //nolint:gosec // cancelEntryCtx is stored in entry and called on Remove/update
+	entry.entryCtx, entry.cancelEntryCtx = context.WithCancel(c.baseCtx)
 
 	// Log info if both DOM and DOW are restricted (AND logic in effect)
 	if spec, ok := schedule.(*SpecSchedule); ok {
@@ -1500,7 +1500,7 @@ func (c *Cron) updateSchedule(req *updateScheduleRequest) error {
 		if entry.cancelEntryCtx != nil {
 			entry.cancelEntryCtx()
 		}
-		entry.entryCtx, entry.cancelEntryCtx = context.WithCancel(c.baseCtx) //nolint:gosec // cancelEntryCtx is stored in entry and called on Remove/update
+		entry.entryCtx, entry.cancelEntryCtx = context.WithCancel(c.baseCtx)
 		entry.Job = req.job
 		entry.WrappedJob = c.chain.Then(req.job)
 	}
@@ -1883,7 +1883,7 @@ func (c *Cron) Stop() context.Context {
 	if c.cancelCtx != nil {
 		c.cancelCtx()
 	}
-	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // cancel is called in goroutine when jobWaiter completes
+	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		c.jobWaiter.Wait()
 		cancel()

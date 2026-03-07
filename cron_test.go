@@ -165,20 +165,26 @@ func TestAddWhileRunningWithDelay(t *testing.T) {
 
 	// Advance time by 5 seconds (simulating delay before adding job)
 	fakeClock.Advance(5 * time.Second)
-	time.Sleep(10 * time.Millisecond)
 
-	var calls int64
-	cron.AddFunc("* * * * * *", func() { atomic.AddInt64(&calls, 1) })
+	// AddFunc blocks until the run loop has processed the entry (synchronous via channel)
+	called := make(chan struct{}, 2)
+	cron.AddFunc("* * * * * *", func() {
+		select {
+		case called <- struct{}{}:
+		default:
+		}
+	})
 
 	// Wait for the scheduler to register the timer
 	fakeClock.BlockUntil(1)
 
 	// Advance exactly 1 second — job should fire exactly once
 	fakeClock.Advance(time.Second)
-	time.Sleep(10 * time.Millisecond)
 
-	if c := atomic.LoadInt64(&calls); c != 1 {
-		t.Errorf("called %d times, expected 1", c)
+	select {
+	case <-called:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("expected job to fire once")
 	}
 }
 
@@ -5239,8 +5245,8 @@ func TestEntryTagsDeepCopyWhileRunning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	time.Sleep(10 * time.Millisecond) // ensure entry is added
 
+	// No sleep needed: AddFunc blocks until the run loop has processed the entry
 	entry := c.Entry(id)
 	entry.Tags[0] = "MUTATED"
 
@@ -5262,12 +5268,16 @@ func TestEntryTagsDeepCopyWhileRunning(t *testing.T) {
 // TestScheduleJobWhileRunning verifies that ScheduleJob works correctly
 // when the cron is already running (routed through the add channel).
 func TestScheduleJobWhileRunning(t *testing.T) {
-	c := New()
+	startTime := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	fakeClock := NewFakeClock(startTime)
+
+	c := New(WithClock(fakeClock))
 	c.Start()
 	defer c.Stop()
 
 	executed := make(chan struct{}, 1)
-	schedule := Every(50 * time.Millisecond)
+	schedule := Every(time.Second)
+	// ScheduleJob blocks until the run loop has processed the entry
 	id, err := c.ScheduleJob(schedule, FuncJob(func() {
 		select {
 		case executed <- struct{}{}:
@@ -5278,8 +5288,7 @@ func TestScheduleJobWhileRunning(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Verify the entry is accessible
-	time.Sleep(10 * time.Millisecond)
+	// No sleep needed: ScheduleJob blocks until the run loop schedules the entry
 	entry := c.Entry(id)
 	if !entry.Valid() {
 		t.Fatal("expected valid entry after ScheduleJob while running")
@@ -5291,10 +5300,13 @@ func TestScheduleJobWhileRunning(t *testing.T) {
 		t.Errorf("unexpected tags: %v", entry.Tags)
 	}
 
-	// Verify the job actually executes
+	// Advance clock and verify the job executes
+	fakeClock.BlockUntil(1)
+	fakeClock.Advance(time.Second)
+
 	select {
 	case <-executed:
-	case <-time.After(time.Second):
+	case <-time.After(100 * time.Millisecond):
 		t.Fatal("job did not execute within timeout")
 	}
 }
