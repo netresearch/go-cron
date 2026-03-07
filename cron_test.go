@@ -153,18 +153,32 @@ func TestAddWhileRunning(t *testing.T) {
 	}
 }
 
-// Test for #34. Adding a job after calling start results in multiple job invocations
+// Test for #34. Adding a job after calling start results in multiple job invocations.
+// Uses FakeClock for deterministic timing.
 func TestAddWhileRunningWithDelay(t *testing.T) {
-	cron := newWithSeconds()
+	startTime := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	fakeClock := NewFakeClock(startTime)
+
+	cron := New(WithParser(secondParser), WithClock(fakeClock))
 	cron.Start()
 	defer cron.Stop()
-	time.Sleep(5 * time.Second)
+
+	// Advance time by 5 seconds (simulating delay before adding job)
+	fakeClock.Advance(5 * time.Second)
+	time.Sleep(10 * time.Millisecond)
+
 	var calls int64
 	cron.AddFunc("* * * * * *", func() { atomic.AddInt64(&calls, 1) })
 
-	<-time.After(OneSecond)
-	if atomic.LoadInt64(&calls) != 1 {
-		t.Errorf("called %d times, expected 1\n", calls)
+	// Wait for the scheduler to register the timer
+	fakeClock.BlockUntil(1)
+
+	// Advance exactly 1 second — job should fire exactly once
+	fakeClock.Advance(time.Second)
+	time.Sleep(10 * time.Millisecond)
+
+	if c := atomic.LoadInt64(&calls); c != 1 {
+		t.Errorf("called %d times, expected 1", c)
 	}
 }
 
@@ -614,10 +628,13 @@ func TestInvalidJobSpec(t *testing.T) {
 
 // Test blocking run method behaves as Start()
 func TestBlockingRun(t *testing.T) {
+	startTime := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	fakeClock := NewFakeClock(startTime)
+
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
 
-	cron := newWithSeconds()
+	cron := New(WithParser(secondParser), WithClock(fakeClock))
 	cron.AddFunc("* * * * * ?", func() { wg.Done() })
 
 	unblockChan := make(chan struct{})
@@ -628,8 +645,14 @@ func TestBlockingRun(t *testing.T) {
 	}()
 	defer cron.Stop()
 
+	// Wait for the run loop to register its timer
+	fakeClock.BlockUntil(1)
+
+	// Advance 1 second to trigger the job
+	fakeClock.Advance(time.Second)
+
 	select {
-	case <-time.After(OneSecond):
+	case <-time.After(100 * time.Millisecond):
 		t.Error("expected job fires")
 	case <-unblockChan:
 		t.Error("expected that Run() blocks")
