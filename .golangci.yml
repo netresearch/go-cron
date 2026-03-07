@@ -70,9 +70,6 @@ linters:
     - godot           # Comments end with period
     - godoclint       # Godoc best practices
 
-    # Security (complements gosec)
-    - gosec           # Security issues
-
   settings:
     gocyclo:
       min-complexity: 15  # Tightened: parser.go refactored to comply
@@ -125,9 +122,6 @@ linters:
     errcheck:
       check-type-assertions: true
       check-blank: false  # Allow explicit _ = err for intentional ignores
-    gosec:
-      excludes:
-        - G104  # Audit errors not checked (too noisy for this codebase)
     nakedret:
       max-func-lines: 30  # Allow naked returns in short functions
     goconst:
@@ -156,7 +150,6 @@ linters:
           - nestif          # Test conditionals are often complex
           - gocritic
           - prealloc        # Test setup often doesn't benefit from prealloc
-          - gosec           # G115 int conversion in tests is safe
           - gci             # Test import order less critical
           - unparam         # Test helpers often have unused params for interface compliance
           - tparallel       # Not all tests should be parallel

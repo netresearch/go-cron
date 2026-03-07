@@ -515,7 +515,8 @@ func New(opts ...Option) *Cron {
 	for _, opt := range opts {
 		opt(c)
 	}
-	// Create cancellable context derived from baseCtx (which may have been set by WithContext)
+	// Create cancellable context derived from baseCtx (which may have been set by WithContext).
+	// cancelCtx is stored and called in Stop().
 	c.baseCtx, c.cancelCtx = context.WithCancel(c.baseCtx)
 	return c
 }

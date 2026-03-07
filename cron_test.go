@@ -153,18 +153,47 @@ func TestAddWhileRunning(t *testing.T) {
 	}
 }
 
-// Test for #34. Adding a job after calling start results in multiple job invocations
+// Test for #34. Adding a job after calling start results in multiple job invocations.
+// Uses FakeClock for deterministic timing.
 func TestAddWhileRunningWithDelay(t *testing.T) {
-	cron := newWithSeconds()
+	startTime := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	fakeClock := NewFakeClock(startTime)
+
+	cron := New(WithParser(secondParser), WithClock(fakeClock))
 	cron.Start()
 	defer cron.Stop()
-	time.Sleep(5 * time.Second)
-	var calls int64
-	cron.AddFunc("* * * * * *", func() { atomic.AddInt64(&calls, 1) })
 
-	<-time.After(OneSecond)
-	if atomic.LoadInt64(&calls) != 1 {
-		t.Errorf("called %d times, expected 1\n", calls)
+	// Advance time by 5 seconds (simulating delay before adding job)
+	fakeClock.Advance(5 * time.Second)
+
+	// AddFunc blocks until the run loop has processed the entry (synchronous via channel)
+	called := make(chan struct{}, 2)
+	cron.AddFunc("* * * * * *", func() {
+		select {
+		case called <- struct{}{}:
+		default:
+		}
+	})
+
+	// Wait for the scheduler to register the timer
+	fakeClock.BlockUntil(1)
+
+	// Advance exactly 1 second — job should fire exactly once
+	fakeClock.Advance(time.Second)
+
+	// First invocation must occur.
+	select {
+	case <-called:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("expected job to fire once")
+	}
+
+	// Without advancing the fake clock further, no additional invocations should occur.
+	select {
+	case <-called:
+		t.Fatal("job fired more than once for the same tick")
+	case <-time.After(100 * time.Millisecond):
+		// Success: no extra invocation observed.
 	}
 }
 
@@ -614,10 +643,13 @@ func TestInvalidJobSpec(t *testing.T) {
 
 // Test blocking run method behaves as Start()
 func TestBlockingRun(t *testing.T) {
+	startTime := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	fakeClock := NewFakeClock(startTime)
+
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
 
-	cron := newWithSeconds()
+	cron := New(WithParser(secondParser), WithClock(fakeClock))
 	cron.AddFunc("* * * * * ?", func() { wg.Done() })
 
 	unblockChan := make(chan struct{})
@@ -628,8 +660,14 @@ func TestBlockingRun(t *testing.T) {
 	}()
 	defer cron.Stop()
 
+	// Wait for the run loop to register its timer
+	fakeClock.BlockUntil(1)
+
+	// Advance 1 second to trigger the job
+	fakeClock.Advance(time.Second)
+
 	select {
-	case <-time.After(OneSecond):
+	case <-time.After(100 * time.Millisecond):
 		t.Error("expected job fires")
 	case <-unblockChan:
 		t.Error("expected that Run() blocks")
@@ -5151,5 +5189,152 @@ func TestPauseEntryWhileRunningNotFound(t *testing.T) {
 	}
 	if err := c.ResumeEntry(EntryID(9999)); !errors.Is(err, ErrEntryNotFound) {
 		t.Errorf("expected ErrEntryNotFound, got %v", err)
+	}
+}
+
+// TestEntryTagsDeepCopy verifies that Entry() returns a deep copy of Tags,
+// so mutating the returned slice does not affect internal scheduler state.
+func TestEntryTagsDeepCopy(t *testing.T) {
+	c := New()
+	defer c.Stop()
+
+	id, err := c.AddFunc("@every 1s", func() {},
+		WithName("tag-copy-test"),
+		WithTags("alpha", "beta"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Get entry and mutate the returned tags
+	entry := c.Entry(id)
+	entry.Tags[0] = "MUTATED"
+	entry.Tags = append(entry.Tags, "gamma")
+
+	// Fetch again — internal state must be unchanged
+	entry2 := c.Entry(id)
+	if len(entry2.Tags) != 2 {
+		t.Fatalf("expected 2 tags, got %d", len(entry2.Tags))
+	}
+	if entry2.Tags[0] != "alpha" || entry2.Tags[1] != "beta" {
+		t.Errorf("internal tags mutated: %v", entry2.Tags)
+	}
+}
+
+// TestEntryByNameTagsDeepCopy verifies that EntryByName() returns a deep copy of Tags.
+func TestEntryByNameTagsDeepCopy(t *testing.T) {
+	c := New()
+	defer c.Stop()
+
+	_, err := c.AddFunc("@every 1s", func() {},
+		WithName("tag-copy-byname"),
+		WithTags("one", "two"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	entry := c.EntryByName("tag-copy-byname")
+	entry.Tags[0] = "MUTATED"
+
+	entry2 := c.EntryByName("tag-copy-byname")
+	if entry2.Tags[0] != "one" {
+		t.Errorf("internal tags mutated via EntryByName: %v", entry2.Tags)
+	}
+}
+
+// TestEntryTagsDeepCopyWhileRunning verifies Tags deep copy when the
+// scheduler is running (lookup goes through the run loop channel).
+func TestEntryTagsDeepCopyWhileRunning(t *testing.T) {
+	c := New()
+	c.Start()
+	defer c.Stop()
+
+	id, err := c.AddFunc("@every 1s", func() {},
+		WithName("tag-copy-running"),
+		WithTags("x", "y"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// No sleep needed: AddFunc blocks until the run loop has processed the entry
+	entry := c.Entry(id)
+	entry.Tags[0] = "MUTATED"
+
+	entry2 := c.Entry(id)
+	if entry2.Tags[0] != "x" {
+		t.Errorf("internal tags mutated while running: %v", entry2.Tags)
+	}
+
+	// Also via EntryByName
+	entry3 := c.EntryByName("tag-copy-running")
+	entry3.Tags[1] = "MUTATED"
+
+	entry4 := c.EntryByName("tag-copy-running")
+	if entry4.Tags[1] != "y" {
+		t.Errorf("internal tags mutated via EntryByName while running: %v", entry4.Tags)
+	}
+}
+
+// TestScheduleJobWhileRunning verifies that ScheduleJob works correctly
+// when the cron is already running (routed through the add channel).
+func TestScheduleJobWhileRunning(t *testing.T) {
+	startTime := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	fakeClock := NewFakeClock(startTime)
+
+	c := New(WithClock(fakeClock))
+	c.Start()
+	defer c.Stop()
+
+	executed := make(chan struct{}, 1)
+	schedule := Every(time.Second)
+	// ScheduleJob blocks until the run loop has processed the entry
+	id, err := c.ScheduleJob(schedule, FuncJob(func() {
+		select {
+		case executed <- struct{}{}:
+		default:
+		}
+	}), WithName("running-schedule-test"), WithTags("live"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// No sleep needed: ScheduleJob blocks until the run loop schedules the entry
+	entry := c.Entry(id)
+	if !entry.Valid() {
+		t.Fatal("expected valid entry after ScheduleJob while running")
+	}
+	if entry.Name != "running-schedule-test" {
+		t.Errorf("expected name 'running-schedule-test', got %q", entry.Name)
+	}
+	if len(entry.Tags) != 1 || entry.Tags[0] != "live" {
+		t.Errorf("unexpected tags: %v", entry.Tags)
+	}
+
+	// Advance clock and verify the job executes
+	fakeClock.BlockUntil(1)
+	fakeClock.Advance(time.Second)
+
+	select {
+	case <-executed:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("job did not execute within timeout")
+	}
+}
+
+// TestEntrySnapshotTagsDeepCopy verifies that Entries() returns deep copies of Tags.
+func TestEntrySnapshotTagsDeepCopy(t *testing.T) {
+	c := New()
+	defer c.Stop()
+
+	c.AddFunc("@every 1s", func() {}, WithTags("snap-a", "snap-b"))
+
+	entries := c.Entries()
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	entries[0].Tags[0] = "MUTATED"
+
+	entries2 := c.Entries()
+	if entries2[0].Tags[0] != "snap-a" {
+		t.Errorf("snapshot tags mutated: %v", entries2[0].Tags)
 	}
 }

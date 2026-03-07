@@ -779,6 +779,9 @@ func (c *Cron) Entries() []Entry
 ```
 
 Entries returns a snapshot of the cron entries, sorted by next execution time.
+Each returned Entry is a struct copy with its `Tags` slice cloned, so mutating
+the returned tags does not affect internal scheduler state. Other reference-typed
+fields (e.g., `Schedule`, `Job`) are shallow-copied.
 
 #### func (*Cron) Entry
 
@@ -787,7 +790,9 @@ func (c *Cron) Entry(id EntryID) Entry
 ```
 
 Entry returns a snapshot of the given entry, or a zero Entry if not found.
-This operation is O(1) using the internal index map.
+This operation is O(1) using the internal index map. The returned Entry is a
+struct copy with its `Tags` slice cloned, so mutating the returned tags does
+not affect internal scheduler state.
 
 #### func (*Cron) EntryByName
 
@@ -797,7 +802,9 @@ func (c *Cron) EntryByName(name string) Entry
 
 EntryByName returns a snapshot of the entry with the given name,
 or an invalid Entry (`Entry.Valid() == false`) if not found.
-This operation is O(1) using the internal name index.
+This operation is O(1) using the internal name index. The returned Entry is a
+struct copy with its `Tags` slice cloned, so mutating the returned tags does
+not affect internal scheduler state.
 
 **Example:**
 ```go
