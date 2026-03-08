@@ -655,7 +655,7 @@ Recommended Patterns:
 
 # Migration from robfig/cron
 
-This library is a maintained fork of github.com/robfig/cron/v3 with full
+This library is originally based on github.com/robfig/cron/v3 with full
 backward compatibility. To migrate:
 
 	// Before

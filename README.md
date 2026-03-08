@@ -13,13 +13,13 @@
 
 # go-cron
 
-A maintained fork of [robfig/cron](https://github.com/robfig/cron) — the most popular cron library for Go — with bug fixes, runtime schedule updates, per-entry context, resilience middleware, and modern toolchain support.
+A cron job scheduler for Go with runtime updates, per-entry context, resilience middleware, and production-grade reliability. Originally based on [robfig/cron](https://github.com/robfig/cron).
 
 ## Why?
 
-The original `robfig/cron` has been unmaintained since 2020, accumulating 50+ open PRs and several critical panic bugs that affect production systems. This fork fixes those issues and adds features demanded by real-world dependents like [weaviate](https://github.com/weaviate/weaviate):
+[robfig/cron](https://github.com/robfig/cron) — the most widely used Go cron library — has been unmaintained since 2020, accumulating 50+ open PRs and several critical panic bugs. go-cron fixes those issues and adds features demanded by real-world dependents like [weaviate](https://github.com/weaviate/weaviate):
 
-| Area | Original | This Fork |
+| Area | robfig/cron | go-cron |
 |------|----------|-----------|
 | TZ= parsing | Panics on malformed input | Fixed (#554, #555) |
 | Chain decorators | `Entry.Run()` bypasses chains | Properly invokes wrappers (#551) |
@@ -58,8 +58,8 @@ import "github.com/robfig/cron/v3"
 import cron "github.com/netresearch/go-cron"
 ```
 
-The API is 100% compatible with robfig/cron v3. However, this fork includes
-knowingly accepted behavior changes that fix bugs and inconsistencies in the
+The API is 100% compatible with robfig/cron v3. However, go-cron includes
+intentional behavior changes that fix bugs and inconsistencies in the
 unmaintained upstream — see the [comparison table above](#why) for a summary.
 
 > [!WARNING]
@@ -577,4 +577,4 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 ---
 
-*This fork is maintained by [Netresearch](https://github.com/netresearch). The original cron library was created by [Rob Figueiredo](https://github.com/robfig).*
+*go-cron is maintained by [Netresearch](https://github.com/netresearch). Originally based on the cron library created by [Rob Figueiredo](https://github.com/robfig).*
