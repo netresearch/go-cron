@@ -20,7 +20,6 @@ features, bug fixes, and modernization improvements.
   callers from mutating internal scheduler state.
 
 [PR#336]: https://github.com/netresearch/go-cron/pull/336
-[PR#341]: https://github.com/netresearch/go-cron/pull/341
 
 ### Planned for v2
 - Context-aware Job interface with graceful shutdown support
