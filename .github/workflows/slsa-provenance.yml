@@ -60,10 +60,9 @@ jobs:
             sha256sum ./* > ../provenance-subjects.txt
             cat ../provenance-subjects.txt
 
-            # Create base64 encoded subjects for SLSA
-            SUBJECTS=$(awk '{print "{\"name\":\""$2"\",\"digest\":{\"sha256\":\""$1"\"}}"}' ../provenance-subjects.txt | jq -s -c '.')
-            # Base64 encode for the reusable workflow
-            SUBJECTS_BASE64=$(echo "$SUBJECTS" | base64 -w0)
+            # Base64 encode raw sha256sum output for the SLSA reusable workflow
+            # (generator expects "HASH  FILENAME\n" format, NOT JSON array)
+            SUBJECTS_BASE64=$(base64 -w0 < ../provenance-subjects.txt)
             echo "subjects=$SUBJECTS_BASE64" >> "$GITHUB_OUTPUT"
             echo "has_subjects=true" >> "$GITHUB_OUTPUT"
           else
@@ -86,6 +85,7 @@ jobs:
     with:
       base64-subjects: ${{ needs.prepare.outputs.subjects }}
       upload-assets: true
+      private-repository: true  # Workaround: generator falsely detects public repos as private
 
   # Third job: Generate source attestation
   source-attestation:
