@@ -10,6 +10,11 @@ features, bug fixes, and modernization improvements.
 
 ## [Unreleased]
 
+### Planned for v2
+- Context-aware Job interface with graceful shutdown support
+
+## [0.13.1] - 2026-03-08
+
 ### Fixed
 - **Race condition in `Entry`/`EntryByName` and `ScheduleJob`** ([PR#336]): When the
   scheduler is running, `Entry`/`EntryByName` now route lookups through the run loop
@@ -20,9 +25,6 @@ features, bug fixes, and modernization improvements.
   callers from mutating internal scheduler state.
 
 [PR#336]: https://github.com/netresearch/go-cron/pull/336
-
-### Planned for v2
-- Context-aware Job interface with graceful shutdown support
 
 ## [0.13.0] - 2026-02-23
 
@@ -501,7 +503,8 @@ This fork includes all features from robfig/cron v3 plus:
    _, err := cron.ParseStandard("*/60 * * * *") // Error: step (60) must be less than range size (60)
    ```
 
-[Unreleased]: https://github.com/netresearch/go-cron/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/netresearch/go-cron/compare/v0.13.1...HEAD
+[0.13.1]: https://github.com/netresearch/go-cron/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/netresearch/go-cron/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/netresearch/go-cron/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/netresearch/go-cron/compare/v0.10.0...v0.11.0
