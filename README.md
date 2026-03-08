@@ -17,7 +17,7 @@ A cron job scheduler for Go with runtime updates, per-entry context, resilience 
 
 ## Why?
 
-[robfig/cron](https://github.com/robfig/cron) — the most widely used Go cron library — has been unmaintained since 2020, accumulating 50+ open PRs and several critical panic bugs. go-cron fixes those issues and adds features demanded by real-world dependents like [weaviate](https://github.com/weaviate/weaviate):
+[robfig/cron](https://github.com/robfig/cron) — the most widely used Go cron library — has been unmaintained since 2020, accumulating 50+ open PRs and several critical panic bugs. go-cron fixes those issues and adds features demanded by real-world dependents like [weaviate](https://github.com/weaviate/weaviate) and [ofelia](https://github.com/netresearch/ofelia):
 
 | Area | robfig/cron | go-cron |
 |------|----------|-----------|
