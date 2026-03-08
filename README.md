@@ -13,11 +13,11 @@
 
 # go-cron
 
-A cron job scheduler for Go with runtime updates, per-entry context, resilience middleware, and production-grade reliability. Originally based on [robfig/cron](https://github.com/robfig/cron).
+A production-grade cron job scheduler for Go — drop-in replacement for [robfig/cron](https://github.com/robfig/cron) with runtime schedule updates, per-entry context, resilience middleware (retry, circuit breaker, rate limiting), and active maintenance.
 
-## Why?
+## Why go-cron?
 
-[robfig/cron](https://github.com/robfig/cron) — the most widely used Go cron library — has been unmaintained since 2020, accumulating 50+ open PRs and several critical panic bugs. go-cron fixes those issues and adds features demanded by real-world dependents like [weaviate](https://github.com/weaviate/weaviate) and [ofelia](https://github.com/netresearch/ofelia):
+[robfig/cron](https://github.com/robfig/cron) — the most widely used Go cron library — has been unmaintained since 2020, accumulating 50+ open PRs and several critical panic bugs. go-cron is the actively maintained successor, fixing those issues and adding features demanded by real-world users like [weaviate](https://github.com/weaviate/weaviate) and [ofelia](https://github.com/netresearch/ofelia):
 
 | Area | robfig/cron | go-cron |
 |------|----------|-----------|
@@ -48,7 +48,7 @@ import cron "github.com/netresearch/go-cron"
 
 ## Migrating from robfig/cron
 
-Drop-in replacement — just change the import path:
+go-cron is a drop-in replacement for robfig/cron v3 — just change the import path:
 
 ```go
 // Before
@@ -60,7 +60,7 @@ import cron "github.com/netresearch/go-cron"
 
 The API is 100% compatible with robfig/cron v3. However, go-cron includes
 intentional behavior changes that fix bugs and inconsistencies in the
-unmaintained upstream — see the [comparison table above](#why) for a summary.
+unmaintained upstream — see the [comparison table above](#why-go-cron) for a summary.
 
 > [!WARNING]
 > **Behavior differences exist.** While the API is compatible, some runtime behavior

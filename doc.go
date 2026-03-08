@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: MIT.
 
 /*
-Package cron implements a cron spec parser and job runner.
+Package cron implements a cron spec parser and job runner — a drop-in
+replacement for robfig/cron with runtime updates, resilience middleware,
+and active maintenance.
 
 # Installation
 
