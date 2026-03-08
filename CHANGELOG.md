@@ -10,37 +10,60 @@ features, bug fixes, and modernization improvements.
 
 ## [Unreleased]
 
+### Fixed
+- **Race condition in `Entry`/`EntryByName` and `ScheduleJob`** ([PR#336]): When the
+  scheduler is running, `Entry`/`EntryByName` now route lookups through the run loop
+  channel while holding `runningMu`, preventing concurrent map access. `ScheduleJob`
+  now routes through the `c.add` channel when running, ensuring all heap/map
+  modifications happen atomically in the run loop. `Entry`, `EntryByName`, and
+  `Entries` now return struct copies with cloned `Tags` slices, preventing
+  callers from mutating internal scheduler state.
+
+[PR#336]: https://github.com/netresearch/go-cron/pull/336
+
+### Planned for v2
+- Context-aware Job interface with graceful shutdown support
+
+## [0.13.0] - 2026-02-23
+
+### Added
+- **Quoted timezone values** ([#335], [PR#337]): Shell users can now write
+  `TZ="America/New_York"` or `TZ='UTC'` in cron spec strings. Matching single
+  or double quotes are stripped before validation.
+
+[#335]: https://github.com/netresearch/go-cron/issues/335
+[PR#337]: https://github.com/netresearch/go-cron/pull/337
+
+## [0.12.0] - 2026-02-17
+
 ### Added
 - **`PauseEntry`/`ResumeEntry`** ([#203], [PR#323]): Temporarily suspend individual
   entries without removing them. Paused entries remain in the scheduler with their
   schedule advancing, but execution is skipped. Includes `ByName` variants,
   `IsEntryPaused`/`IsEntryPausedByName` query methods, `WithPaused()` JobOption,
   and exported `Entry.Paused` field visible in snapshots.
-- **Triggered jobs** ([#311]): Jobs that never fire automatically, only when explicitly
-  triggered. Register with `@triggered`, `@manual`, or `@none` descriptors, then
-  execute on demand via `TriggerEntry`/`TriggerEntryByName`. Includes
+- **Triggered jobs** ([#311], [PR#325]): Jobs that never fire automatically, only when
+  explicitly triggered. Register with `@triggered`, `@manual`, or `@none` descriptors,
+  then execute on demand via `TriggerEntry`/`TriggerEntryByName`. Includes
   `TriggeredSchedule` type, `IsTriggered()` helper, exported `Entry.Triggered` field,
   `ErrEntryPaused`/`ErrNotRunning` sentinel errors, and compatibility with all existing
   features (middleware, context, pause/resume, run-once, observability hooks).
-- **CircuitBreaker state monitoring** ([#185]): `CircuitBreakerWithHandle()` returns a
-  `*CircuitBreakerHandle` for querying state (`State()`, `Failures()`, `LastFailure()`,
-  `CooldownEnds()`). `WithStateChangeCallback()` option emits events on state transitions
-  (Closed→Open, Open→HalfOpen, HalfOpen→Closed, HalfOpen→Open). New exported types:
-  `CircuitBreakerState`, `CircuitBreakerEvent`, `CircuitBreakerHandle`,
-  `CircuitBreakerOption`.
-- **RetryWithBackoff/RetryOnError attempt callback** ([#186]): `WithRetryCallback()`
-  option invokes a callback after each attempt with `RetryAttempt` metadata (attempt
-  number, delay, error/panic value, whether another retry will follow). Enables external
-  metrics collection for retry behavior.
-- **Rate limiting middleware** ([#167]): `MaxConcurrent(n)` limits total concurrent
-  job executions across all wrapped entries (wait for slot). `MaxConcurrentSkip(logger, n)`
-  skips execution when full. Both propagate context and share state across all wrapped
-  jobs, unlike per-job `SkipIfStillRunning`/`DelayIfStillRunning`.
-- **`PrevN` schedule introspection** ([#297]): Query the previous n execution times
-  for any schedule implementing `ScheduleWithPrev`. Returns times in reverse
+- **CircuitBreaker state monitoring** ([#185], [PR#326]): `CircuitBreakerWithHandle()`
+  returns a `*CircuitBreakerHandle` for querying state (`State()`, `Failures()`,
+  `LastFailure()`, `CooldownEnds()`). `WithStateChangeCallback()` option emits events
+  on state transitions (Closed→Open, Open→HalfOpen, HalfOpen→Closed, HalfOpen→Open).
+- **RetryWithBackoff/RetryOnError attempt callback** ([#186], [PR#326]):
+  `WithRetryCallback()` option invokes a callback after each attempt with
+  `RetryAttempt` metadata (attempt number, delay, error/panic value, whether another
+  retry will follow).
+- **Rate limiting middleware** ([#167], [PR#327]): `MaxConcurrent(n)` limits total
+  concurrent job executions across all wrapped entries (wait for slot).
+  `MaxConcurrentSkip(logger, n)` skips execution when full.
+- **`PrevN` schedule introspection** ([#297], [PR#328]): Query the previous n execution
+  times for any schedule implementing `ScheduleWithPrev`. Returns times in reverse
   chronological order. Complements the existing `NextN`, `Between`, `Count`, and
   `Matches` introspection functions.
-- **Workflow/DAG dependencies** ([#312]):
+- **Workflow/DAG dependencies** ([#312], [PR#330]):
   - `AddDependency`/`AddDependencyByName` — wire dependency edges between entries
   - `RemoveDependency`/`RemoveDependencyByName` — remove dependency edges
   - `Dependencies`/`DependenciesByName` — query dependency edges for an entry
@@ -50,6 +73,20 @@ features, bug fixes, and modernization improvements.
   - `WithWorkflowRetention` — configure completed execution retention count
   - 4 trigger conditions: `OnSuccess`, `OnFailure`, `OnSkipped`, `OnComplete`
   - `OnWorkflowComplete` observability hook
+- **CodSpeed continuous benchmarking** ([PR#333])
+
+### Fixed
+- **Recover workflow-awareness** ([PR#331]): `Recover` wrapper now re-panics in
+  workflow context so the workflow engine correctly detects job failures.
+- **Workflow shutdown hang** ([PR#331]): `Stop()` no longer hangs when workflow jobs
+  are in flight. The `jobDone` send is now non-blocking when the entry context is
+  canceled, preventing goroutines from blocking forever after the run loop exits.
+- **Workflow state isolation** ([PR#331]): `WorkflowStatus` and `ActiveWorkflows` now
+  return deep copies of workflow execution state, preventing callers from mutating
+  internal scheduler maps.
+- **Multi-condition dependency removal** ([PR#331]): `RemoveDependency` now correctly
+  removes all edges between a parent-child pair (e.g., `OnSuccess` + `OnFailure`),
+  not just the first match. Also fixed in `removeEntry` cleanup.
 
 [#167]: https://github.com/netresearch/go-cron/issues/167
 [#185]: https://github.com/netresearch/go-cron/issues/185
@@ -59,31 +96,13 @@ features, bug fixes, and modernization improvements.
 [#311]: https://github.com/netresearch/go-cron/issues/311
 [#312]: https://github.com/netresearch/go-cron/issues/312
 [PR#323]: https://github.com/netresearch/go-cron/pull/323
-[PR#336]: https://github.com/netresearch/go-cron/pull/336
-
-### Fixed
-- **Race condition in `Entry`/`EntryByName` and `ScheduleJob`** ([PR#336]): When the
-  scheduler is running, `Entry`/`EntryByName` now route lookups through the run loop
-  channel while holding `runningMu`, preventing concurrent map access. `ScheduleJob`
-  now routes through the `c.add` channel when running, ensuring all heap/map
-  modifications happen atomically in the run loop. `Entry`, `EntryByName`, and
-  `Entries` now return struct copies with cloned `Tags` slices, preventing
-  callers from mutating internal scheduler state.
-- **Recover workflow-awareness**: `Recover` wrapper now re-panics in workflow context
-  so the workflow engine correctly detects job failures. Previously, `Recover` would
-  swallow the panic and the workflow would treat the step as `ResultSuccess`.
-- **Workflow shutdown hang**: `Stop()` no longer hangs when workflow jobs are in
-  flight. The `jobDone` send is now non-blocking when the entry context is canceled,
-  preventing goroutines from blocking forever after the run loop exits.
-- **Workflow state isolation**: `WorkflowStatus` and `ActiveWorkflows` now return
-  deep copies of workflow execution state, preventing callers from mutating
-  internal scheduler maps.
-- **Multi-condition dependency removal**: `RemoveDependency` now correctly removes
-  all edges between a parent-child pair (e.g., `OnSuccess` + `OnFailure`), not just
-  the first match. Also fixed in `removeEntry` cleanup.
-
-### Planned for v2
-- Context-aware Job interface with graceful shutdown support
+[PR#325]: https://github.com/netresearch/go-cron/pull/325
+[PR#326]: https://github.com/netresearch/go-cron/pull/326
+[PR#327]: https://github.com/netresearch/go-cron/pull/327
+[PR#328]: https://github.com/netresearch/go-cron/pull/328
+[PR#330]: https://github.com/netresearch/go-cron/pull/330
+[PR#331]: https://github.com/netresearch/go-cron/pull/331
+[PR#333]: https://github.com/netresearch/go-cron/pull/333
 
 ## [0.11.0] - 2026-02-12
 
@@ -130,6 +149,31 @@ features, bug fixes, and modernization improvements.
 [#317]: https://github.com/netresearch/go-cron/issues/317
 [PR#318]: https://github.com/netresearch/go-cron/pull/318
 [PR#319]: https://github.com/netresearch/go-cron/pull/319
+
+## [0.10.0] - 2026-02-08
+
+### Added
+- **`WithCapacity(n)`** ([#287], [PR#290]): Pre-allocate internal data structures for
+  known workload sizes.
+- **`WithMissedPolicy()`** ([#296], [PR#303]): Catch-up policy for jobs that missed
+  their scheduled time while the scheduler was stopped.
+- **`RetryOnError()`** ([PR#306]): Error-based retry middleware — retries when a job
+  returns an error (complements `RetryWithBackoff` which retries on panics).
+- **`UpdateSchedule()`/`UpdateScheduleByName()`** ([PR#307]): Atomically replace an
+  entry's schedule at runtime without removing and re-adding.
+- **`UpdateJob()`/`UpdateJobByName()`** ([PR#309]): Atomically replace an entry's job
+  function at runtime.
+- **`ValidateSpecWith()`/`Cron.ValidateSpec()`** ([PR#308]): Rich validation API that
+  returns structured analysis without creating a schedule.
+
+[#287]: https://github.com/netresearch/go-cron/issues/287
+[#296]: https://github.com/netresearch/go-cron/issues/296
+[PR#290]: https://github.com/netresearch/go-cron/pull/290
+[PR#303]: https://github.com/netresearch/go-cron/pull/303
+[PR#306]: https://github.com/netresearch/go-cron/pull/306
+[PR#307]: https://github.com/netresearch/go-cron/pull/307
+[PR#308]: https://github.com/netresearch/go-cron/pull/308
+[PR#309]: https://github.com/netresearch/go-cron/pull/309
 
 ## [0.9.1] - 2026-01-17
 
@@ -457,7 +501,9 @@ This fork includes all features from robfig/cron v3 plus:
    _, err := cron.ParseStandard("*/60 * * * *") // Error: step (60) must be less than range size (60)
    ```
 
-[Unreleased]: https://github.com/netresearch/go-cron/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/netresearch/go-cron/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/netresearch/go-cron/compare/v0.12.0...v0.13.0
+[0.12.0]: https://github.com/netresearch/go-cron/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/netresearch/go-cron/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/netresearch/go-cron/compare/v0.9.1...v0.10.0
 [0.9.1]: https://github.com/netresearch/go-cron/compare/v0.9.0...v0.9.1
