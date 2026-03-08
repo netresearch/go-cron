@@ -279,6 +279,7 @@ func ExampleCron_Entries() {
 	c.AddFunc("0 0 * * *", func() { fmt.Println("daily") })
 
 	c.Start()
+	defer c.Stop()
 
 	// Get all entries
 	entries := c.Entries()
@@ -296,6 +297,7 @@ func ExampleCron_Remove() {
 	})
 
 	c.Start()
+	defer c.Stop()
 
 	// Remove the job using its ID
 	c.Remove(entryID)
@@ -1132,7 +1134,7 @@ func ExampleWithRunOnce_withRunImmediately() {
 // The entry is removed after dispatch, even if the job panics.
 func ExampleWithRunOnce_withRecover() {
 	c := cron.New(cron.WithChain(
-		cron.Recover(cron.DefaultLogger),
+		cron.Recover(cron.DiscardLogger),
 	))
 
 	done := make(chan struct{})
