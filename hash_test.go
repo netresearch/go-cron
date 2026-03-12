@@ -275,6 +275,29 @@ func TestWithHashKey(t *testing.T) {
 	}
 }
 
+// TestDayNameWithH tests that day names containing "H" (e.g. THU) are not
+// mistaken for hash expressions when the Hash option is not enabled.
+func TestDayNameWithH(t *testing.T) {
+	tests := []struct {
+		name string
+		spec string
+	}{
+		{"THU in standard parse", "0 0 * * THU"},
+		{"Thu mixed case", "0 0 * * Thu"},
+		{"THU with other days", "0 0 * * MON,THU,FRI"},
+		{"THU in range", "0 0 * * MON-THU"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ParseStandard(tt.spec)
+			if err != nil {
+				t.Errorf("ParseStandard(%q) unexpected error: %v", tt.spec, err)
+			}
+		})
+	}
+}
+
 // TestHashFieldConcurrent tests concurrent access with hash fields.
 func TestHashFieldConcurrent(t *testing.T) {
 	parser := NewParser(Minute | Hour | Dom | Month | Dow | Descriptor | Hash)
