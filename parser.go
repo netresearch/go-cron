@@ -450,15 +450,8 @@ func (p Parser) parse(spec string) (Schedule, error) {
 		return nil, err
 	}
 
-	// Check if any field contains H expression
 	hashEnabled := p.options&Hash != 0
-	hasHashExpr := false
-	for _, f := range fields {
-		if strings.Contains(f, "H") {
-			hasHashExpr = true
-			break
-		}
-	}
+	hasHashExpr := containsHashExpr(fields)
 
 	// Validate hash requirements
 	if hasHashExpr {
@@ -566,6 +559,21 @@ func (p Parser) parseDowField(fieldStr string, hashEnabled bool) (uint64, []DowC
 		bits, err := getFieldWithHash(fieldStr, dow, p.hashKey, hashEnabled)
 		return NormalizeDOW(bits), nil, err
 	}
+}
+
+// containsHashExpr reports whether any field contains a hash expression.
+// It checks HasPrefix on each comma-separated part rather than Contains on the
+// whole field, because named fields like day-of-week names (e.g. "THU") contain "H"
+// but are not hash expressions. Hash expressions always start with "H" (e.g. H, H/5, H(0-30)).
+func containsHashExpr(fields []string) bool {
+	for _, f := range fields {
+		for part := range strings.SplitSeq(f, ",") {
+			if strings.HasPrefix(part, "H") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // normalizeFields takes a subset set of the time fields and returns the full set
