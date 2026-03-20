@@ -149,7 +149,7 @@ jobs:
       # attestations prove WHERE/HOW artifacts were built. Both are needed for
       # full supply chain security and OpenSSF Scorecard compliance.
       - name: Generate artifact attestations
-        uses: actions/attest-build-provenance@ef244123eb79f2f7a7e75d99086184180e6d0018 # v2.1.0
+        uses: actions/attest-build-provenance@7668571508540a607bdfd90a87a560489fe372eb # v2.1.0
         with:
           subject-path: |
             sbom.cyclonedx.json
