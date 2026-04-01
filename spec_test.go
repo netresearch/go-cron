@@ -1006,9 +1006,9 @@ func TestIsDSTFallBackDuplicate(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "same wall-clock, same offset — not duplicate",
-			prev: time.Date(2026, 11, 1, 4, 0, 0, 0, time.UTC), // 00:00 EDT
-			next: time.Date(2026, 11, 2, 4, 0, 0, 0, time.UTC), // 00:00 EDT next day
+			name: "same wall-clock, same offset, different day — not duplicate",
+			prev: time.Date(2026, 11, 3, 5, 0, 0, 0, time.UTC), // 00:00 EST Nov 3
+			next: time.Date(2026, 11, 4, 5, 0, 0, 0, time.UTC), // 00:00 EST Nov 4
 			want: false,
 		},
 		{

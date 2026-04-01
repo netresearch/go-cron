@@ -46,7 +46,7 @@ The original `robfig/cron` silently skipped jobs scheduled during spring-forward
 
 ## Fall Back (Clock Repeats Hour)
 
-When DST causes clocks to fall back (e.g., 2:00 AM becomes 1:00 AM), an hour occurs twice. Go's `time` package resolves this ambiguity by using the **first occurrence** (the DST time, before the transition).
+When DST causes clocks to fall back (e.g., 2:00 AM becomes 1:00 AM), an hour occurs twice. The scheduler detects and skips the second occurrence to prevent duplicate execution (see `isDSTFallBackDuplicate` in `cron.go` and ADR-016).
 
 ### Example: US Eastern Time
 

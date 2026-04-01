@@ -1018,6 +1018,15 @@ func (c *Cron) scheduleEntryNext(entry *Entry, now time.Time) {
 	}
 }
 
+// scheduleLocation returns the effective timezone for a schedule.
+// Per-schedule TZ= overrides take precedence over the cron instance's location.
+func (c *Cron) scheduleLocation(sched Schedule) *time.Location {
+	if ss, ok := sched.(*SpecSchedule); ok && ss.Location != nil && ss.Location != time.Local {
+		return ss.Location
+	}
+	return c.location
+}
+
 // isDSTFallBackDuplicate detects when the next scheduled time is the second
 // occurrence of the same wall-clock time as the previous execution, which
 // happens during DST fall-back transitions when clocks repeat an hour.
@@ -1065,20 +1074,27 @@ func (c *Cron) postDispatchScheduled(e *Entry, now time.Time) {
 		e.cancelEntryCtx = nil
 		c.removeEntry(e.ID)
 		c.logger.Info("run-once", "now", now, "entry", e.ID, "removed", true)
-	} else {
-		e.Next = e.Schedule.Next(now)
-		// DST fall-back guard: if Next() returned the second occurrence of the
-		// same wall-clock time we just fired (e.Prev), skip it to prevent
-		// duplicate execution during repeated hours. See ADR-016.
-		if isDSTFallBackDuplicate(e.Prev, e.Next, c.location) {
-			c.logger.Info("skip-dst-duplicate", "entry", e.ID,
-				"prev", e.Prev, "skipped", e.Next)
-			e.Next = e.Schedule.Next(e.Next)
-		}
-		c.hooks.callOnSchedule(e.ID, e.Job, e.Next)
-		c.entries.Update(e)
-		c.logger.Info("run", "now", now, "entry", e.ID, "next", e.Next)
+		return
 	}
+
+	e.Next = e.Schedule.Next(now)
+	// DST fall-back guard: if Next() returned the second occurrence of the
+	// same wall-clock time we just fired (e.Prev), skip it to prevent
+	// duplicate execution during repeated hours. See ADR-016.
+	loc := c.scheduleLocation(e.Schedule)
+	if isDSTFallBackDuplicate(e.Prev, e.Next, loc) {
+		skipped := e.Next
+		e.Next = e.Schedule.Next(e.Next)
+		c.logger.Info("skip-dst-duplicate", "entry", e.ID,
+			"prev", e.Prev.In(loc), "skipped", skipped.In(loc), "next", e.Next.In(loc))
+		if e.Next.IsZero() {
+			c.logger.Error(errors.New("schedule exhausted after DST skip"),
+				"schedule-exhausted", "entry", e.ID, "skipped", skipped.In(loc))
+		}
+	}
+	c.hooks.callOnSchedule(e.ID, e.Job, e.Next)
+	c.entries.Update(e)
+	c.logger.Info("run", "now", now, "entry", e.ID, "next", e.Next)
 }
 
 // postDispatchTriggered handles run-once removal after a manually triggered
