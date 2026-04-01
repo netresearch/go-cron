@@ -1037,8 +1037,11 @@ func isDSTFallBackDuplicate(prev, next time.Time, loc *time.Location) bool {
 	}
 	p := prev.In(loc)
 	n := next.In(loc)
-	if p.Year() == n.Year() && p.Month() == n.Month() && p.Day() == n.Day() &&
-		p.Hour() == n.Hour() && p.Minute() == n.Minute() && p.Second() == n.Second() {
+	y1, m1, d1 := p.Date()
+	y2, m2, d2 := n.Date()
+	h1, min1, s1 := p.Clock()
+	h2, min2, s2 := n.Clock()
+	if y1 == y2 && m1 == m2 && d1 == d2 && h1 == h2 && min1 == min2 && s1 == s2 {
 		_, pOff := p.Zone()
 		_, nOff := n.Zone()
 		return nOff < pOff // offset decreased = fall-back transition
