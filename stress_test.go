@@ -380,11 +380,45 @@ func TestDST_USEastern_FallBack(t *testing.T) {
 	clock.Advance(3 * time.Hour)
 	time.Sleep(100 * time.Millisecond)
 
-	// Job should run at least once (may run twice due to ambiguous time)
-	if atomic.LoadInt32(&runs) < 1 {
-		t.Errorf("expected job to run at least once during fall back, got %d", runs)
+	// Job must run exactly once — isDSTFallBackDuplicate prevents the second occurrence.
+	if runs := atomic.LoadInt32(&runs); runs != 1 {
+		t.Errorf("expected job to run exactly once during fall back, got %d", runs)
 	}
-	t.Logf("Job ran %d times through DST fall back (duplicate hour)", atomic.LoadInt32(&runs))
+}
+
+// TestDST_USEastern_FallBack_MinuteByMinute reproduces GitHub issue #349:
+// minute-by-minute clock advancement through a DST fall-back transition
+// must fire the job exactly once.
+func TestDST_USEastern_FallBack_MinuteByMinute(t *testing.T) {
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Skip("America/New_York timezone not available")
+	}
+
+	// Nov 1, 2026: 2:00 AM EDT → 1:00 AM EST
+	start := time.Date(2026, 11, 1, 0, 58, 0, 0, loc)
+	clock := NewFakeClock(start.UTC())
+
+	c := New(WithClock(clock), WithLocation(loc))
+
+	var runs int32
+	c.AddFunc("30 1 * * *", func() {
+		atomic.AddInt32(&runs, 1)
+	})
+
+	c.Start()
+	defer c.Stop()
+
+	// Advance minute-by-minute through the fall-back transition (~3 hours)
+	for i := 0; i < 180; i++ {
+		time.Sleep(2 * time.Millisecond)
+		clock.Advance(1 * time.Minute)
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	if got := atomic.LoadInt32(&runs); got != 1 {
+		t.Errorf("expected job to run exactly once during fall back, got %d", got)
+	}
 }
 
 // TestDST_Europe_London tests Europe/London DST transitions.

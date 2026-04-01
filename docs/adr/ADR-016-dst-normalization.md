@@ -92,24 +92,51 @@ t := time.Date(2024, 3, 10, 2, 30, 0, 0, loc)
 
 We use this normalization to detect and handle gaps.
 
-### Detecting DST Overlap
+### Preventing Duplicate Execution During Fall-Back
+
+The `Next()` function correctly returns the second occurrence as a valid future
+time (it IS chronologically after the first occurrence in UTC). Deduplication is
+therefore handled in the **scheduler** rather than in the schedule calculation.
+
+After dispatching a job, `postDispatchScheduled()` calls `isDSTFallBackDuplicate()`
+to compare the just-fired time (`e.Prev`) with the newly computed next time
+(`e.Next`). If both have the same wall-clock time in the scheduler's location
+but the UTC offset decreased (indicating a fall-back transition), the scheduler
+skips the duplicate by advancing to the next valid time:
 
 ```go
-// Check if we're in the second occurrence of a repeated hour
-func isSecondOccurrence(t time.Time) bool {
-    // Compare offset before and after
-    _, offset1 := t.Zone()
-    _, offset2 := t.Add(-time.Hour).Zone()
-    return offset1 != offset2
+// isDSTFallBackDuplicate detects when the next scheduled time is the second
+// occurrence of the same wall-clock time as the previous execution.
+func isDSTFallBackDuplicate(prev, next time.Time, loc *time.Location) bool {
+    if prev.IsZero() || next.IsZero() {
+        return false
+    }
+    p := prev.In(loc)
+    n := next.In(loc)
+    if p.Year() == n.Year() && p.Month() == n.Month() && p.Day() == n.Day() &&
+        p.Hour() == n.Hour() && p.Minute() == n.Minute() && p.Second() == n.Second() {
+        _, pOff := p.Zone()
+        _, nOff := n.Zone()
+        return nOff < pOff // offset decreased = fall-back transition
+    }
+    return false
 }
 ```
+
+**Design note:** An earlier draft proposed detecting second occurrences inside
+`Next()` itself, but this was rejected because `Next()` is a pure function used
+by callers outside the scheduler. Placing the guard in the dispatch path keeps
+`Next()` correct (the second occurrence IS the next matching time) while
+preventing duplicate execution at the scheduler level.
 
 ### Schedule Calculation
 
 The `SpecSchedule.Next()` function:
 1. Calculates next time based on cron fields
-2. Normalizes for DST if needed
-3. Returns normalized time
+2. Normalizes for spring-forward via `checkHourDSTSkip()`
+3. Returns the next matching time (may be in the second occurrence during fall-back)
+
+The scheduler's `postDispatchScheduled()` then applies the fall-back guard.
 
 ## Alternatives Considered
 

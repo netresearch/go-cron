@@ -65,7 +65,9 @@ The hour 1:00-1:59 AM occurs twice
 
 - Jobs run **once** during fall-back transitions (not twice)
 - The first occurrence (before transition) is used
-- This matches Go's `time.Date()` behavior for ambiguous times
+- The scheduler's `isDSTFallBackDuplicate()` guard in `postDispatchScheduled()`
+  detects when `Next()` returns the second occurrence of the same wall-clock time
+  and skips it (see ADR-016)
 
 ## Midnight DST Transitions
 
@@ -230,9 +232,8 @@ c.AddFunc("0 0 2 * * *", func() {
 
 ## Known Limitations
 
-1. **Fall-back ambiguity**: When clocks repeat, the first occurrence is always used
-2. **Historical DST changes**: The library relies on Go's timezone database, which may not have complete historical DST data
-3. **Leap seconds**: Not handled (Go's time package ignores leap seconds)
+1. **Historical DST changes**: The library relies on Go's timezone database, which may not have complete historical DST data
+2. **Leap seconds**: Not handled (Go's time package ignores leap seconds)
 
 ## References
 
