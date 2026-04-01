@@ -46,7 +46,7 @@ The original `robfig/cron` silently skipped jobs scheduled during spring-forward
 
 ## Fall Back (Clock Repeats Hour)
 
-When DST causes clocks to fall back (e.g., 2:00 AM becomes 1:00 AM), an hour occurs twice. Go's `time` package resolves this ambiguity by using the **first occurrence** (the DST time, before the transition).
+When DST causes clocks to fall back (e.g., 2:00 AM becomes 1:00 AM), an hour occurs twice. The scheduler detects and skips the second occurrence to prevent duplicate execution (see `isDSTFallBackDuplicate` in `cron.go` and ADR-016).
 
 ### Example: US Eastern Time
 
@@ -65,7 +65,9 @@ The hour 1:00-1:59 AM occurs twice
 
 - Jobs run **once** during fall-back transitions (not twice)
 - The first occurrence (before transition) is used
-- This matches Go's `time.Date()` behavior for ambiguous times
+- The scheduler's `isDSTFallBackDuplicate()` guard in `postDispatchScheduled()`
+  detects when `Next()` returns the second occurrence of the same wall-clock time
+  and skips it (see ADR-016)
 
 ## Midnight DST Transitions
 
@@ -230,9 +232,8 @@ c.AddFunc("0 0 2 * * *", func() {
 
 ## Known Limitations
 
-1. **Fall-back ambiguity**: When clocks repeat, the first occurrence is always used
-2. **Historical DST changes**: The library relies on Go's timezone database, which may not have complete historical DST data
-3. **Leap seconds**: Not handled (Go's time package ignores leap seconds)
+1. **Historical DST changes**: The library relies on Go's timezone database, which may not have complete historical DST data
+2. **Leap seconds**: Not handled (Go's time package ignores leap seconds)
 
 ## References
 

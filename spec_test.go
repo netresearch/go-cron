@@ -148,7 +148,8 @@ func TestNext(t *testing.T) {
 		{"2012-11-04T01:00:00-0400", "TZ=America/New_York 0 0 * * * ?", "2012-11-04T01:00:00-0500"},
 		{"2012-11-04T01:00:00-0500", "TZ=America/New_York 0 0 * * * ?", "2012-11-04T02:00:00-0500"},
 
-		// 1am nightly job (runs twice)
+		// 1am nightly job — Next() returns both occurrences (the scheduler
+		// prevents duplicate execution via isDSTFallBackDuplicate; see ADR-016).
 		{"2012-11-04T00:00:00-0400", "TZ=America/New_York 0 0 1 * * ?", "2012-11-04T01:00:00-0400"},
 		{"2012-11-04T01:00:00-0400", "TZ=America/New_York 0 0 1 * * ?", "2012-11-04T01:00:00-0500"},
 		{"2012-11-04T01:00:00-0500", "TZ=America/New_York 0 0 1 * * ?", "2012-11-05T01:00:00-0500"},
@@ -166,7 +167,8 @@ func TestNext(t *testing.T) {
 		{"TZ=America/New_York 2012-11-04T01:00:00-0400", "0 0 * * * ?", "2012-11-04T01:00:00-0500"},
 		{"TZ=America/New_York 2012-11-04T01:00:00-0500", "0 0 * * * ?", "2012-11-04T02:00:00-0500"},
 
-		// 1am nightly job (runs twice)
+		// 1am nightly job — Next() returns both occurrences (the scheduler
+		// prevents duplicate execution via isDSTFallBackDuplicate; see ADR-016).
 		{"TZ=America/New_York 2012-11-04T00:00:00-0400", "0 0 1 * * ?", "2012-11-04T01:00:00-0400"},
 		{"TZ=America/New_York 2012-11-04T01:00:00-0400", "0 0 1 * * ?", "2012-11-04T01:00:00-0500"},
 		{"TZ=America/New_York 2012-11-04T01:00:00-0500", "0 0 1 * * ?", "2012-11-05T01:00:00-0500"},
@@ -970,4 +972,103 @@ func TestRetreatMinute_SubtractsNotAdds(t *testing.T) {
 	if result.Minute() != 30 {
 		t.Errorf("retreatMinute should find minute 30, got minute %d", result.Minute())
 	}
+}
+
+// TestIsDSTFallBackDuplicate tests the isDSTFallBackDuplicate function
+// that prevents duplicate job execution during DST fall-back transitions
+// (GitHub issue #349).
+func TestIsDSTFallBackDuplicate(t *testing.T) {
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Skip("America/New_York timezone not available")
+	}
+
+	// Nov 1, 2026: 2:00 AM EDT → 1:00 AM EST (fall-back)
+	// 01:30 EDT = 05:30 UTC (first occurrence)
+	// 01:30 EST = 06:30 UTC (second occurrence)
+
+	tests := []struct {
+		name string
+		prev time.Time
+		next time.Time
+		want bool
+	}{
+		{
+			name: "same wall-clock, different offset (fall-back) — duplicate",
+			prev: time.Date(2026, 11, 1, 5, 30, 0, 0, time.UTC), // 01:30 EDT
+			next: time.Date(2026, 11, 1, 6, 30, 0, 0, time.UTC), // 01:30 EST
+			want: true,
+		},
+		{
+			name: "different wall-clock times — not duplicate",
+			prev: time.Date(2026, 11, 1, 5, 45, 0, 0, time.UTC), // 01:45 EDT
+			next: time.Date(2026, 11, 1, 6, 30, 0, 0, time.UTC), // 01:30 EST
+			want: false,
+		},
+		{
+			name: "same wall-clock, same offset, different day — not duplicate",
+			prev: time.Date(2026, 11, 3, 5, 0, 0, 0, time.UTC), // 00:00 EST Nov 3
+			next: time.Date(2026, 11, 4, 5, 0, 0, 0, time.UTC), // 00:00 EST Nov 4
+			want: false,
+		},
+		{
+			name: "zero prev — not duplicate",
+			prev: time.Time{},
+			next: time.Date(2026, 11, 1, 6, 30, 0, 0, time.UTC),
+			want: false,
+		},
+		{
+			name: "hourly at :00, fall-back — duplicate",
+			prev: time.Date(2026, 11, 1, 5, 0, 0, 0, time.UTC), // 01:00 EDT
+			next: time.Date(2026, 11, 1, 6, 0, 0, 0, time.UTC), // 01:00 EST
+			want: true,
+		},
+		{
+			name: "spring-forward — must NOT trigger (offset increases)",
+			prev: time.Date(2026, 3, 8, 6, 0, 0, 0, time.UTC), // 01:00 EST
+			next: time.Date(2026, 3, 8, 7, 0, 0, 0, time.UTC), // 03:00 EDT (2am skipped)
+			want: false,
+		},
+		{
+			name: "zero next — not duplicate",
+			prev: time.Date(2026, 11, 1, 5, 30, 0, 0, time.UTC),
+			next: time.Time{},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isDSTFallBackDuplicate(tt.prev, tt.next, loc)
+			if got != tt.want {
+				t.Errorf("isDSTFallBackDuplicate(%v, %v) = %v, want %v",
+					tt.prev.In(loc), tt.next.In(loc), got, tt.want)
+			}
+		})
+	}
+
+	// Nil location guard
+	t.Run("nil location — not duplicate", func(t *testing.T) {
+		prev := time.Date(2026, 11, 1, 5, 30, 0, 0, time.UTC)
+		next := time.Date(2026, 11, 1, 6, 30, 0, 0, time.UTC)
+		if isDSTFallBackDuplicate(prev, next, nil) {
+			t.Error("expected false for nil location")
+		}
+	})
+
+	// Also test with Europe/London (last Sunday of October)
+	t.Run("Europe/London fall-back", func(t *testing.T) {
+		londonLoc, err := time.LoadLocation("Europe/London")
+		if err != nil {
+			t.Skip("Europe/London timezone not available")
+		}
+		// Oct 25, 2026: 2:00 BST → 1:00 GMT (fall-back)
+		// 01:30 BST = 00:30 UTC, 01:30 GMT = 01:30 UTC
+		prev := time.Date(2026, 10, 25, 0, 30, 0, 0, time.UTC) // 01:30 BST
+		next := time.Date(2026, 10, 25, 1, 30, 0, 0, time.UTC) // 01:30 GMT
+		if !isDSTFallBackDuplicate(prev, next, londonLoc) {
+			t.Errorf("expected duplicate for Europe/London fall-back: prev=%v, next=%v",
+				prev.In(londonLoc), next.In(londonLoc))
+		}
+	})
 }

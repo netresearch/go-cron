@@ -1018,6 +1018,39 @@ func (c *Cron) scheduleEntryNext(entry *Entry, now time.Time) {
 	}
 }
 
+// scheduleLocation returns the effective timezone for a schedule.
+// When a schedule has an explicit TZ= override (ss.Location is a named timezone,
+// not the time.Local sentinel set by the parser for specs without TZ=), use it.
+// Otherwise fall back to the cron instance's configured location.
+func (c *Cron) scheduleLocation(sched Schedule) *time.Location {
+	if ss, ok := sched.(*SpecSchedule); ok && ss.Location != nil && ss.Location != time.Local {
+		return ss.Location
+	}
+	return c.location
+}
+
+// isDSTFallBackDuplicate detects when the next scheduled time is the second
+// occurrence of the same wall-clock time as the previous execution, which
+// happens during DST fall-back transitions when clocks repeat an hour.
+// Used by postDispatchScheduled to prevent duplicate job execution (see ADR-016).
+func isDSTFallBackDuplicate(prev, next time.Time, loc *time.Location) bool {
+	if prev.IsZero() || next.IsZero() || loc == nil {
+		return false
+	}
+	p := prev.In(loc)
+	n := next.In(loc)
+	y1, m1, d1 := p.Date()
+	y2, m2, d2 := n.Date()
+	h1, min1, s1 := p.Clock()
+	h2, min2, s2 := n.Clock()
+	if y1 == y2 && m1 == m2 && d1 == d2 && h1 == h2 && min1 == min2 && s1 == s2 {
+		_, pOff := p.Zone()
+		_, nOff := n.Zone()
+		return nOff < pOff // offset decreased = fall-back transition
+	}
+	return false
+}
+
 // handleTimeBackwards reschedules entries when system time moves backwards.
 // This can happen due to NTP correction or VM snapshot restore.
 func (c *Cron) handleTimeBackwards(now time.Time) {
@@ -1046,12 +1079,27 @@ func (c *Cron) postDispatchScheduled(e *Entry, now time.Time) {
 		e.cancelEntryCtx = nil
 		c.removeEntry(e.ID)
 		c.logger.Info("run-once", "now", now, "entry", e.ID, "removed", true)
-	} else {
-		e.Next = e.Schedule.Next(now)
-		c.hooks.callOnSchedule(e.ID, e.Job, e.Next)
-		c.entries.Update(e)
-		c.logger.Info("run", "now", now, "entry", e.ID, "next", e.Next)
+		return
 	}
+
+	e.Next = e.Schedule.Next(now)
+	// DST fall-back guard: if Next() returned the second occurrence of the
+	// same wall-clock time we just fired (e.Prev), skip it to prevent
+	// duplicate execution during repeated hours. See ADR-016.
+	loc := c.scheduleLocation(e.Schedule)
+	if isDSTFallBackDuplicate(e.Prev, e.Next, loc) {
+		skipped := e.Next
+		e.Next = e.Schedule.Next(e.Next)
+		c.logger.Info("skip-dst-duplicate", "entry", e.ID,
+			"prev", e.Prev.In(loc), "skipped", skipped.In(loc), "next", e.Next.In(loc))
+		if e.Next.IsZero() {
+			c.logger.Error(errors.New("schedule exhausted after DST skip"),
+				"schedule-exhausted", "entry", e.ID, "skipped", skipped.In(loc))
+		}
+	}
+	c.hooks.callOnSchedule(e.ID, e.Job, e.Next)
+	c.entries.Update(e)
+	c.logger.Info("run", "now", now, "entry", e.ID, "next", e.Next)
 }
 
 // postDispatchTriggered handles run-once removal after a manually triggered

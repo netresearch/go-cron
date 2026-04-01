@@ -5338,3 +5338,132 @@ func TestEntrySnapshotTagsDeepCopy(t *testing.T) {
 		t.Errorf("snapshot tags mutated: %v", entries2[0].Tags)
 	}
 }
+
+// TestDSTFallBack_SchedulerDedup verifies that the scheduler's DST fall-back
+// guard in postDispatchScheduled prevents duplicate execution when wall-clock
+// time repeats during a DST transition. Covers scheduleLocation() and the
+// isDSTFallBackDuplicate integration path. (GitHub issue #349)
+func TestDSTFallBack_SchedulerDedup(t *testing.T) {
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Skip("America/New_York timezone not available")
+	}
+
+	// Nov 1, 2026: 2:00 AM EDT → 1:00 AM EST (fall-back)
+	// Start at 01:29 EDT, just before the scheduled 01:30 fire time.
+	start := time.Date(2026, 11, 1, 1, 29, 0, 0, loc)
+	clock := NewFakeClock(start.UTC())
+
+	c := New(WithClock(clock), WithLocation(loc))
+
+	var runs int32
+	c.AddFunc("30 1 * * *", func() {
+		atomic.AddInt32(&runs, 1)
+	})
+
+	c.Start()
+	defer c.Stop()
+
+	clock.BlockUntil(1)
+
+	// Advance 1 minute to fire at 01:30 EDT (first occurrence).
+	clock.Advance(1 * time.Minute)
+	time.Sleep(20 * time.Millisecond)
+
+	if got := atomic.LoadInt32(&runs); got != 1 {
+		t.Fatalf("expected 1 run after first occurrence, got %d", got)
+	}
+
+	// Advance 2 hours past the fall-back transition.
+	// Without the guard, the scheduler would fire again at 01:30 EST.
+	clock.BlockUntil(1)
+	clock.Advance(2 * time.Hour)
+	time.Sleep(20 * time.Millisecond)
+
+	if got := atomic.LoadInt32(&runs); got != 1 {
+		t.Errorf("expected exactly 1 run (DST dedup), got %d", got)
+	}
+}
+
+// TestDSTFallBack_ConstantDelay verifies that ConstantDelaySchedule (@every)
+// is NOT affected by the DST fall-back guard — fixed-interval schedules produce
+// different wall-clock times across transitions, so the guard never triggers.
+func TestDSTFallBack_ConstantDelay(t *testing.T) {
+	_, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Skip("America/New_York timezone not available")
+	}
+
+	loc, _ := time.LoadLocation("America/New_York")
+	// Start at 01:29 EDT, 1 minute before fall-back hour
+	start := time.Date(2026, 11, 1, 1, 29, 0, 0, loc)
+	clock := NewFakeClock(start.UTC())
+
+	c := New(WithClock(clock), WithLocation(loc))
+
+	var runs int32
+	c.AddFunc("@every 30m", func() {
+		atomic.AddInt32(&runs, 1)
+	})
+
+	c.Start()
+	defer c.Stop()
+
+	// Advance in 30-minute increments through the fall-back transition.
+	// The DST guard must NOT suppress any of these — ConstantDelaySchedule
+	// produces different wall-clock times across the transition.
+	for range 6 {
+		clock.BlockUntil(1)
+		clock.Advance(30 * time.Minute)
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if got := atomic.LoadInt32(&runs); got < 5 {
+		t.Errorf("expected @every 30m to fire at least 5 times in 3 hours, got %d", got)
+	}
+}
+
+// TestDSTFallBack_PerScheduleTZ verifies that the DST fall-back guard uses the
+// schedule's TZ= location rather than the cron instance's default location.
+func TestDSTFallBack_PerScheduleTZ(t *testing.T) {
+	_, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Skip("America/New_York timezone not available")
+	}
+
+	// Cron instance in UTC, but schedule uses TZ=America/New_York.
+	// Nov 1, 2026: 2:00 AM EDT → 1:00 AM EST.
+	// 01:29 EDT = 05:29 UTC
+	start := time.Date(2026, 11, 1, 5, 29, 0, 0, time.UTC)
+	clock := NewFakeClock(start)
+
+	c := New(WithClock(clock), WithLocation(time.UTC))
+
+	var runs int32
+	c.AddFunc("TZ=America/New_York 30 1 * * *", func() {
+		atomic.AddInt32(&runs, 1)
+	})
+
+	c.Start()
+	defer c.Stop()
+
+	clock.BlockUntil(1)
+
+	// Advance to 01:30 EDT (05:30 UTC).
+	clock.Advance(1 * time.Minute)
+	time.Sleep(20 * time.Millisecond)
+
+	if got := atomic.LoadInt32(&runs); got != 1 {
+		t.Fatalf("expected 1 run after first occurrence, got %d", got)
+	}
+
+	// Advance past fall-back. Without scheduleLocation(), the guard would
+	// compare in UTC (no DST) and miss the duplicate.
+	clock.BlockUntil(1)
+	clock.Advance(2 * time.Hour)
+	time.Sleep(20 * time.Millisecond)
+
+	if got := atomic.LoadInt32(&runs); got != 1 {
+		t.Errorf("expected exactly 1 run with per-schedule TZ dedup, got %d", got)
+	}
+}
