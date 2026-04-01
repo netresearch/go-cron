@@ -5385,6 +5385,44 @@ func TestDSTFallBack_SchedulerDedup(t *testing.T) {
 	}
 }
 
+// TestDSTFallBack_ConstantDelay verifies that ConstantDelaySchedule (@every)
+// is NOT affected by the DST fall-back guard — fixed-interval schedules produce
+// different wall-clock times across transitions, so the guard never triggers.
+func TestDSTFallBack_ConstantDelay(t *testing.T) {
+	_, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Skip("America/New_York timezone not available")
+	}
+
+	loc, _ := time.LoadLocation("America/New_York")
+	// Start at 01:29 EDT, 1 minute before fall-back hour
+	start := time.Date(2026, 11, 1, 1, 29, 0, 0, loc)
+	clock := NewFakeClock(start.UTC())
+
+	c := New(WithClock(clock), WithLocation(loc))
+
+	var runs int32
+	c.AddFunc("@every 30m", func() {
+		atomic.AddInt32(&runs, 1)
+	})
+
+	c.Start()
+	defer c.Stop()
+
+	// Advance in 30-minute increments through the fall-back transition.
+	// The DST guard must NOT suppress any of these — ConstantDelaySchedule
+	// produces different wall-clock times across the transition.
+	for range 6 {
+		clock.BlockUntil(1)
+		clock.Advance(30 * time.Minute)
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if got := atomic.LoadInt32(&runs); got < 5 {
+		t.Errorf("expected @every 30m to fire at least 5 times in 3 hours, got %d", got)
+	}
+}
+
 // TestDSTFallBack_PerScheduleTZ verifies that the DST fall-back guard uses the
 // schedule's TZ= location rather than the cron instance's default location.
 func TestDSTFallBack_PerScheduleTZ(t *testing.T) {

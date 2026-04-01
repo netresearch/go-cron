@@ -100,8 +100,9 @@ therefore handled in the **scheduler** rather than in the schedule calculation.
 
 After dispatching a job, `postDispatchScheduled()` calls `isDSTFallBackDuplicate()`
 to compare the just-fired time (`e.Prev`) with the newly computed next time
-(`e.Next`). If both have the same wall-clock time in the scheduler's location
-but the UTC offset decreased (indicating a fall-back transition), the scheduler
+(`e.Next`). If both have the same wall-clock time in the schedule's effective
+location (per-schedule `TZ=` override or the cron instance's default) but the
+UTC offset decreased (indicating a fall-back transition), the scheduler
 skips the duplicate by advancing to the next valid time:
 
 ```go

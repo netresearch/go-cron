@@ -1019,7 +1019,9 @@ func (c *Cron) scheduleEntryNext(entry *Entry, now time.Time) {
 }
 
 // scheduleLocation returns the effective timezone for a schedule.
-// Per-schedule TZ= overrides take precedence over the cron instance's location.
+// When a schedule has an explicit TZ= override (ss.Location is a named timezone,
+// not the time.Local sentinel set by the parser for specs without TZ=), use it.
+// Otherwise fall back to the cron instance's configured location.
 func (c *Cron) scheduleLocation(sched Schedule) *time.Location {
 	if ss, ok := sched.(*SpecSchedule); ok && ss.Location != nil && ss.Location != time.Local {
 		return ss.Location
@@ -1030,9 +1032,9 @@ func (c *Cron) scheduleLocation(sched Schedule) *time.Location {
 // isDSTFallBackDuplicate detects when the next scheduled time is the second
 // occurrence of the same wall-clock time as the previous execution, which
 // happens during DST fall-back transitions when clocks repeat an hour.
-// This prevents duplicate job execution per ADR-016.
+// Used by postDispatchScheduled to prevent duplicate job execution (see ADR-016).
 func isDSTFallBackDuplicate(prev, next time.Time, loc *time.Location) bool {
-	if prev.IsZero() || next.IsZero() {
+	if prev.IsZero() || next.IsZero() || loc == nil {
 		return false
 	}
 	p := prev.In(loc)

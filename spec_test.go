@@ -1047,6 +1047,15 @@ func TestIsDSTFallBackDuplicate(t *testing.T) {
 		})
 	}
 
+	// Nil location guard
+	t.Run("nil location — not duplicate", func(t *testing.T) {
+		prev := time.Date(2026, 11, 1, 5, 30, 0, 0, time.UTC)
+		next := time.Date(2026, 11, 1, 6, 30, 0, 0, time.UTC)
+		if isDSTFallBackDuplicate(prev, next, nil) {
+			t.Error("expected false for nil location")
+		}
+	})
+
 	// Also test with Europe/London (last Sunday of October)
 	t.Run("Europe/London fall-back", func(t *testing.T) {
 		londonLoc, err := time.LoadLocation("Europe/London")
