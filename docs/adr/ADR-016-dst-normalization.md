@@ -186,8 +186,58 @@ if inDSTTransition(t) {
 - Users must handle errors
 - Jobs still need to run
 
+## Industry Context
+
+**No standard exists.** POSIX (IEEE Std 1003.1) crontab specification contains zero
+mentions of DST, timezone handling, or ambiguous times. Fall-back behavior is entirely
+implementation-defined. The only IETF standard that addresses the ambiguity is
+RFC 5545 (iCalendar), Section 3.3.5:
+
+> "If the local time described occurs more than once (when changing from daylight
+> to standard time), the DATE-TIME value refers to the first occurrence."
+
+### Vixie cron (the reference implementation)
+
+The [Vixie cron source](https://github.com/vixie/cron/blob/master/cron.c) explicitly
+handles fall-back by distinguishing **wildcard jobs** (e.g., `* * * * *`) from
+**fixed-time jobs** (e.g., `30 1 * * *`):
+
+```c
+case negative:  /* DST fall-back */
+    /* Just run the wildcard jobs. The fixed-time jobs
+     * probably have already run, and should not be repeated. */
+    find_jobs(timeRunning, &database, TRUE, FALSE);
+```
+
+All BSD and Linux man pages agree:
+- OpenBSD/NetBSD/Linux: *"if time has moved backward, care is taken to avoid running jobs twice"*
+- FreeBSD: *"They are executed exactly once, they are not skipped nor executed twice"*
+
+### Cross-ecosystem survey
+
+| Implementation | Fall-back behavior |
+|----------------|-------------------|
+| Vixie/ISC cron (C) | Once (reference) |
+| FreeBSD cron (C) | Once (per-entry `NOT_UNTIL` flag) |
+| Quartz (Java) | Once (*"it only fires once"*) |
+| go-cron (this project) | Once (`isDSTFallBackDuplicate`) |
+| robfig/cron (Go) | Twice (unfixed since 2014) |
+| APScheduler (Python) | Twice (documented, recommends UTC) |
+| Celery Beat (Python) | Crashes (`AmbiguousTimeError`) |
+| node-cron (Node.js) | Missed executions (fixed in 4.1.1) |
+| systemd timers (Linux) | Skips entire repeated hour (open bug) |
+
+Our implementation aligns with Vixie cron and Quartz — the two most widely deployed
+schedulers. The wall-clock comparison in `isDSTFallBackDuplicate` naturally handles
+the wildcard/fixed-time distinction: wildcard jobs have different minutes each tick
+and are never flagged as duplicates, matching Vixie cron's behavior.
+
 ## References
 
-- ISC cron: https://man.freebsd.org/cgi/man.cgi?query=cron
-- Go time package DST handling: https://pkg.go.dev/time
+- Vixie cron source: https://github.com/vixie/cron/blob/master/cron.c
+- OpenBSD cron(8): https://man.openbsd.org/cron
+- FreeBSD cron(8): https://man.freebsd.org/cgi/man.cgi?query=cron
+- RFC 5545 (iCalendar) Section 3.3.5: https://datatracker.ietf.org/doc/html/rfc5545#section-3.3.5
+- POSIX crontab (no DST mention): https://pubs.opengroup.org/onlinepubs/9699919799/utilities/crontab.html
+- Go time package: https://pkg.go.dev/time
 - DST_HANDLING.md: Comprehensive documentation

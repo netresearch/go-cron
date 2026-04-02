@@ -68,6 +68,11 @@ The hour 1:00-1:59 AM occurs twice
 - The scheduler's `isDSTFallBackDuplicate()` guard in `postDispatchScheduled()`
   detects when `Next()` returns the second occurrence of the same wall-clock time
   and skips it (see ADR-016)
+- Wildcard jobs (e.g., `* * * * *`) are unaffected — they have different wall-clock
+  times each tick and are never flagged as duplicates, matching Vixie cron behavior
+- This aligns with [RFC 5545 Section 3.3.5](https://datatracker.ietf.org/doc/html/rfc5545#section-3.3.5):
+  *"If the local time described occurs more than once [...] the DATE-TIME value
+  refers to the first occurrence"*
 
 ## Midnight DST Transitions
 
@@ -237,7 +242,11 @@ c.AddFunc("0 0 2 * * *", func() {
 
 ## References
 
-- [ISC cron behavior specification](https://man.openbsd.org/cron.8)
+- [Vixie cron source (DST logic)](https://github.com/vixie/cron/blob/master/cron.c)
+- [OpenBSD cron(8)](https://man.openbsd.org/cron) — *"care is taken to avoid running jobs twice"*
+- [FreeBSD cron(8)](https://man.freebsd.org/cgi/man.cgi?query=cron) — *"executed exactly once"*
+- [RFC 5545 Section 3.3.5](https://datatracker.ietf.org/doc/html/rfc5545#section-3.3.5) — *"refers to the first occurrence"*
+- [POSIX crontab](https://pubs.opengroup.org/onlinepubs/9699919799/utilities/crontab.html) — no DST specification (implementation-defined)
 - [Go time package documentation](https://pkg.go.dev/time)
 - [IANA Time Zone Database](https://www.iana.org/time-zones)
 - [Original robfig/cron DST issue](https://github.com/robfig/cron/issues/157)
