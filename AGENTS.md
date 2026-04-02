@@ -72,7 +72,7 @@ When proposing changes that conflict with an ADR, you MUST:
 - Ask before: adding dependencies, breaking API changes, repo-wide rewrites
 - Never commit secrets or sensitive data
 - Maintain backwards compatibility with `robfig/cron/v3` API
-- **NEVER create releases or tags with `gh release create` or `git tag`** — releases MUST be created by pushing a signed tag, which triggers `.github/workflows/release.yml`. This workflow generates SBOMs, Cosign signatures, SLSA provenance attestations, and checksums. CLI-created releases lack these supply chain security artifacts.
+- **NEVER create GitHub Releases with `gh release create`** — releases MUST be created by pushing a signed tag (`git tag -s`), which triggers `.github/workflows/release.yml`. This workflow generates SBOMs, Cosign signatures, SLSA provenance attestations, and checksums. CLI-created releases bypass this and lack all supply chain security artifacts.
 
 ## Pre-commit checks
 
