@@ -68,8 +68,10 @@ The hour 1:00-1:59 AM occurs twice
 - The scheduler's `isDSTFallBackDuplicate()` guard in `postDispatchScheduled()`
   detects when `Next()` returns the second occurrence of the same wall-clock time
   and skips it (see ADR-016)
-- Wildcard jobs (e.g., `* * * * *`) are unaffected — they have different wall-clock
-  times each tick and are never flagged as duplicates, matching Vixie cron behavior
+- Jobs that fire every minute (e.g., `* * * * *`) are unaffected — their wall-clock
+  times differ each tick. Jobs with a fixed minute but wildcard hour (e.g., `0 * * * *`)
+  ARE deduplicated — stricter than Vixie cron (which runs them twice) but consistent
+  with Quartz's "once per wall-clock time" behavior
 - This aligns with [RFC 5545 Section 3.3.5](https://datatracker.ietf.org/doc/html/rfc5545#section-3.3.5):
   *"If the local time described occurs more than once [...] the DATE-TIME value
   refers to the first occurrence"*

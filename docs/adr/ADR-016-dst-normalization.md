@@ -227,10 +227,12 @@ All BSD and Linux man pages agree:
 | node-cron (Node.js) | Missed executions (fixed in 4.1.1) |
 | systemd timers (Linux) | Skips entire repeated hour (open bug) |
 
-Our implementation aligns with Vixie cron and Quartz — the two most widely deployed
-schedulers. The wall-clock comparison in `isDSTFallBackDuplicate` naturally handles
-the wildcard/fixed-time distinction: wildcard jobs have different minutes each tick
-and are never flagged as duplicates, matching Vixie cron's behavior.
+Our implementation aligns with Quartz and is stricter than Vixie cron: while Vixie
+cron distinguishes wildcard-hour jobs (e.g., `0 * * * *`, runs both occurrences) from
+fixed-time jobs (e.g., `30 1 * * *`, runs once), we deduplicate **any** job that
+fires at the same wall-clock time. This means hourly jobs like `0 * * * *` run once
+during fall-back (not twice as in Vixie cron). Jobs that fire every minute (e.g.,
+`* * * * *`) are unaffected because their wall-clock times differ each tick.
 
 ## References
 
