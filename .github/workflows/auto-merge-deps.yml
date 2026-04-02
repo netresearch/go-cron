@@ -8,27 +8,7 @@ permissions: read-all
 
 jobs:
   auto-merge:
-    runs-on: ubuntu-latest
     permissions:
       contents: write
       pull-requests: write
-    # Only run for bot accounts
-    if: github.actor == 'dependabot[bot]' || github.actor == 'renovate[bot]'
-    steps:
-      - name: Harden Runner
-        uses: step-security/harden-runner@0634a2670c59f64b4a01f0f96f84700a4088b9f0 # v2.12.0
-        with:
-          egress-policy: audit
-
-      - name: Approve PR
-        env:
-          PR_URL: ${{ github.event.pull_request.html_url }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh pr review --approve "$PR_URL"
-
-      - name: Enable auto-merge
-        env:
-          PR_URL: ${{ github.event.pull_request.html_url }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        # --auto waits for required status checks before merging
-        run: gh pr merge --auto --squash "$PR_URL"
+    uses: netresearch/.github/.github/workflows/auto-merge-deps.yml@eafa800ce23f3b52e0863ab042a8ba0801e97cab
