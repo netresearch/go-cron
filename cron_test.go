@@ -5467,3 +5467,72 @@ func TestDSTFallBack_PerScheduleTZ(t *testing.T) {
 		t.Errorf("expected exactly 1 run with per-schedule TZ dedup, got %d", got)
 	}
 }
+
+// TestDSTFallBack_ScheduleExhaustedAfterSkip verifies that when the DST guard
+// skips the second occurrence and the schedule has no further valid times
+// (e.g., year-constrained), the entry goes dormant with a zero Next and an
+// error is logged. Covers the e.Next.IsZero() path in postDispatchScheduled.
+func TestDSTFallBack_ScheduleExhaustedAfterSkip(t *testing.T) {
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Skip("America/New_York timezone not available")
+	}
+
+	// Tightly constrained schedule: 01:30 on Nov 1, only in 2026.
+	// After the first fire at 01:30 EDT and the DST skip of 01:30 EST,
+	// Next() has no more valid times → returns zero.
+	sched := &SpecSchedule{
+		Second:   1 << 0,  // second 0
+		Minute:   1 << 30, // minute 30
+		Hour:     1 << 1,  // hour 1
+		Dom:      1 << 1,  // day 1 only
+		Month:    1 << 11, // November only
+		Dow:      starBit | 0x7F,
+		Year:     map[int]struct{}{2026: {}}, // only 2026
+		Location: loc,
+	}
+
+	// Start at 01:29 EDT, 1 minute before fire time.
+	start := time.Date(2026, 11, 1, 1, 29, 0, 0, loc)
+	clock := NewFakeClock(start.UTC())
+
+	c := New(WithClock(clock), WithLocation(loc))
+
+	var runs int32
+	c.Schedule(sched, FuncJob(func() {
+		atomic.AddInt32(&runs, 1)
+	}))
+
+	c.Start()
+	defer c.Stop()
+
+	clock.BlockUntil(1)
+
+	// Fire at 01:30 EDT (first occurrence).
+	clock.Advance(1 * time.Minute)
+	time.Sleep(20 * time.Millisecond)
+
+	if got := atomic.LoadInt32(&runs); got != 1 {
+		t.Fatalf("expected 1 run, got %d", got)
+	}
+
+	// Advance past fall-back. The guard skips 01:30 EST, then Next()
+	// returns zero (year 2026 exhausted). Entry should go dormant.
+	clock.BlockUntil(1)
+	clock.Advance(2 * time.Hour)
+	time.Sleep(20 * time.Millisecond)
+
+	// Job must not have fired again.
+	if got := atomic.LoadInt32(&runs); got != 1 {
+		t.Errorf("expected exactly 1 run after schedule exhaustion, got %d", got)
+	}
+
+	// Entry's Next should be zero (dormant).
+	entries := c.Entries()
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	if !entries[0].Next.IsZero() {
+		t.Errorf("expected zero Next after schedule exhaustion, got %v", entries[0].Next)
+	}
+}
