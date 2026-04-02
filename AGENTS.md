@@ -1,8 +1,8 @@
-<!-- Managed by agent: keep sections and order; edit content, not structure. Last updated: 2026-02-13 -->
+<!-- Managed by agent: keep sections and order; edit content, not structure. Last updated: 2026-04-02 -->
 
 # AGENTS.md
 
-Maintained fork of robfig/cron - a cron spec parser and job scheduler for Go.
+Cron spec parser and job scheduler for Go (successor to robfig/cron).
 
 **Precedence:** The **closest `AGENTS.md`** to the files you're changing wins. This root file holds global defaults.
 
@@ -57,6 +57,8 @@ Maintained fork of robfig/cron - a cron spec parser and job scheduler for Go.
 | [ADR-017](docs/adr/ADR-017-job-with-context.md) | JobWithContext | Optional interface for context-aware jobs |
 | [ADR-018](docs/adr/ADR-018-run-flags.md) | Run Flags | WithRunImmediately() and WithRunOnce() entry flags |
 | [ADR-019](docs/adr/ADR-019-atomic-entry-limit.md) | Atomic Entry Limit | CAS loop for lock-free entry count limiting |
+| [ADR-020](docs/adr/ADR-020-feature-scope-boundary.md) | Feature Scope Boundary | What belongs in go-cron vs external tools |
+| [ADR-021](docs/adr/ADR-021-quoted-timezone-values.md) | Quoted Timezone Values | `TZ="America/New_York"` and `CRON_TZ='...'` accepted |
 
 When proposing changes that conflict with an ADR, you MUST:
 1. Read the full ADR including alternatives considered
@@ -70,6 +72,7 @@ When proposing changes that conflict with an ADR, you MUST:
 - Ask before: adding dependencies, breaking API changes, repo-wide rewrites
 - Never commit secrets or sensitive data
 - Maintain backwards compatibility with `robfig/cron/v3` API
+- **NEVER create releases or tags with `gh release create` or `git tag`** — releases MUST be created by pushing a signed tag, which triggers `.github/workflows/release.yml`. This workflow generates SBOMs, Cosign signatures, SLSA provenance attestations, and checksums. CLI-created releases lack these supply chain security artifacts.
 
 ## Pre-commit checks
 
@@ -150,7 +153,19 @@ import (
 | `docs/OPERATIONS.md` | Production deployment, shutdown, monitoring |
 | `docs/TROUBLESHOOTING.md` | Common issues and debugging techniques |
 | `docs/PROJECT_INDEX.md` | Complete project file index |
-| `docs/adr/` | Architecture Decision Records (20 ADRs) |
+| `docs/adr/` | Architecture Decision Records (22 ADRs) |
+
+## Releasing
+
+**NEVER use `gh release create` or `git tag` directly.** The release workflow (`.github/workflows/release.yml`) handles supply chain security artifacts (SBOMs, Cosign signatures, SLSA provenance, checksums).
+
+```bash
+# Correct release process:
+git tag -s v0.X.Y -m "v0.X.Y"   # Create signed tag
+git push origin v0.X.Y            # Triggers release workflow
+```
+
+The workflow will: run tests → generate SBOMs → sign with Cosign → create attestations → publish release with all artifacts.
 
 ## PR/commit checklist
 
