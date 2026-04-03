@@ -114,8 +114,9 @@ func toError(v any) error {
 	return fmt.Errorf("%v", v)
 }
 
-// RunJob executes a job, passing ctx if it implements JobWithContext.
-// This is a helper to be used in job wrapper.
+// RunJob executes the job. If the job implements JobWithContext, it is called
+// with the provided context. Otherwise, its Run method is called.
+// This is a helper intended for use in custom job wrappers.
 func RunJob(ctx context.Context, j Job) {
 	if jc, ok := j.(JobWithContext); ok {
 		jc.RunWithContext(ctx)
