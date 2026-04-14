@@ -66,7 +66,7 @@ func (r *realTimer) Reset(d time.Duration) bool {
 // It allows advancing time manually and fires timers deterministically.
 type FakeClock struct {
 	mu     sync.Mutex
-	cond   sync.Cond
+	cond   *sync.Cond
 	now    time.Time
 	timers timerHeap
 }
@@ -77,7 +77,8 @@ func NewFakeClock(t time.Time) *FakeClock {
 		now:    t,
 		timers: make(timerHeap, 0),
 	}
-	f.cond = sync.Cond{L: &f.mu}
+
+	f.cond = sync.NewCond(&f.mu)
 	return f
 }
 
