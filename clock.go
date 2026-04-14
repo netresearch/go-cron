@@ -157,7 +157,6 @@ func (f *FakeClock) TimerCount() int {
 func (f *FakeClock) fireExpiredTimers() {
 	for len(f.timers) > 0 && !f.timers[0].deadline.After(f.now) {
 		t := heap.Pop(&f.timers).(*fakeTimer) //nolint:forcetypeassert,errcheck // heap.Interface contract guarantees type
-		t.fired = true
 		if !t.stopped {
 			select {
 			case t.ch <- f.now:
@@ -185,7 +184,6 @@ type fakeTimer struct {
 	deadline  time.Time
 	ch        chan time.Time
 	stopped   bool
-	fired     bool
 	heapIndex int // position in timerHeap, -1 if not in heap
 }
 
@@ -210,9 +208,8 @@ func (t *fakeTimer) Reset(d time.Duration) bool {
 	t.clock.mu.Lock()
 	defer t.clock.mu.Unlock()
 
-	wasActive := !t.fired && !t.stopped && t.clock.removeTimer(t)
+	wasActive := !t.stopped && t.clock.removeTimer(t)
 
-	t.fired = false
 	t.stopped = false
 	t.deadline = t.clock.now.Add(d)
 
