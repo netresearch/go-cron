@@ -33,6 +33,26 @@ func appendingWrapper(slice *[]int, value int) JobWrapper {
 	}
 }
 
+func TestRunJob_PlainJob(t *testing.T) {
+	var called bool
+	j := FuncJob(func() { called = true })
+	RunJob(context.Background(), j)
+	if !called {
+		t.Fatal("RunJob did not call Run on plain Job")
+	}
+}
+
+func TestRunJob_JobWithContext(t *testing.T) {
+	var got context.Context
+	j := FuncJobWithContext(func(ctx context.Context) { got = ctx })
+	type ctxKey struct{}
+	ctx := context.WithValue(context.Background(), ctxKey{}, "val")
+	RunJob(ctx, j)
+	if got != ctx {
+		t.Fatal("RunJob did not pass context to RunWithContext")
+	}
+}
+
 func TestChain(t *testing.T) {
 	var nums []int
 	var (
