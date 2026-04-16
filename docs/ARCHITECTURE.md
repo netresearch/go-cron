@@ -180,7 +180,7 @@ Abstraction for time operations:
 │                     │     │                             │
 │  Now() → time.Now() │     │  now      time.Time         │
 │  NewTimer() →       │     │  timers   timerHeap         │
-│    time.NewTimer()  │     │  waiters  []chan struct{}   │
+│    time.NewTimer()  │     │  cond     *sync.Cond        │
 └─────────────────────┘     │                             │
                             │  Advance(d) → fire timers   │
                             │  Set(t) → jump to time      │
@@ -544,10 +544,10 @@ func TestScheduledJob(t *testing.T) {
 
 ```go
 type FakeClock struct {
-    mu      sync.Mutex
-    now     time.Time
-    timers  timerHeap         // Min-heap of fake timers
-    waiters []chan struct{}   // BlockUntil waiters
+    mu     sync.Mutex
+    cond   *sync.Cond        // BlockUntil waiters (Broadcast on timer add)
+    now    time.Time
+    timers timerHeap          // Min-heap of fake timers
 }
 
 type fakeTimer struct {

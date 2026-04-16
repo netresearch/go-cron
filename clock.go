@@ -65,18 +65,21 @@ func (r *realTimer) Reset(d time.Duration) bool {
 // FakeClock provides a controllable clock for testing.
 // It allows advancing time manually and fires timers deterministically.
 type FakeClock struct {
-	mu      sync.Mutex
-	now     time.Time
-	timers  timerHeap
-	waiters []chan struct{}
+	mu     sync.Mutex
+	cond   *sync.Cond
+	now    time.Time
+	timers timerHeap
 }
 
 // NewFakeClock creates a new FakeClock initialized to the given time.
 func NewFakeClock(t time.Time) *FakeClock {
-	return &FakeClock{
+	f := &FakeClock{
 		now:    t,
 		timers: make(timerHeap, 0),
 	}
+
+	f.cond = sync.NewCond(&f.mu)
+	return f
 }
 
 // Now returns the fake clock's current time.
@@ -135,27 +138,10 @@ func (f *FakeClock) Advance(d time.Duration) {
 // This is useful for synchronizing tests with timer creation.
 func (f *FakeClock) BlockUntil(n int) {
 	f.mu.Lock()
-
-	if len(f.timers) >= n {
-		f.mu.Unlock()
-		return
+	for len(f.timers) < n {
+		f.cond.Wait()
 	}
-
-	waiter := make(chan struct{})
-	f.waiters = append(f.waiters, waiter)
 	f.mu.Unlock()
-
-	for {
-		<-waiter
-		f.mu.Lock()
-		if len(f.timers) >= n {
-			f.mu.Unlock()
-			return
-		}
-		waiter = make(chan struct{})
-		f.waiters = append(f.waiters, waiter)
-		f.mu.Unlock()
-	}
 }
 
 // TimerCount returns the number of active timers.
@@ -175,7 +161,6 @@ func (f *FakeClock) fireExpiredTimers() {
 			select {
 			case t.ch <- f.now:
 			default:
-				// Channel full, timer already fired
 			}
 		}
 	}
@@ -184,13 +169,7 @@ func (f *FakeClock) fireExpiredTimers() {
 // notifyWaiters wakes up any goroutines waiting in BlockUntil.
 // Must be called with f.mu held.
 func (f *FakeClock) notifyWaiters() {
-	for _, w := range f.waiters {
-		select {
-		case w <- struct{}{}:
-		default:
-		}
-	}
-	f.waiters = nil
+	f.cond.Broadcast()
 }
 
 // removeTimer removes a timer from the heap using O(log n) indexed removal.

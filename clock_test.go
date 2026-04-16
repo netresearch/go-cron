@@ -299,6 +299,32 @@ func TestFakeClockBlockUntil(t *testing.T) {
 	}
 }
 
+// TestFakeClockBlockUntilRace is a regression test for the missed-wakeup race
+// that existed when BlockUntil used channels instead of sync.Cond. The old
+// implementation could hang indefinitely if a timer was created between the
+// mutex unlock and the channel receive in BlockUntil.
+func TestFakeClockBlockUntilRace(t *testing.T) {
+	for range 100 {
+		clock := NewFakeClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
+
+		done := make(chan struct{})
+		go func() {
+			clock.BlockUntil(1)
+			close(done)
+		}()
+
+		// Create timer concurrently — previously could race with BlockUntil
+		clock.NewTimer(time.Second)
+
+		select {
+		case <-done:
+			// BlockUntil returned — no missed wakeup
+		case <-time.After(time.Second):
+			t.Fatal("BlockUntil hung — missed wakeup regression")
+		}
+	}
+}
+
 func TestFakeClockTimerCount(t *testing.T) {
 	start := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
 	clock := NewFakeClock(start)
