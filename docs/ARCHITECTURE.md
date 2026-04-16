@@ -607,15 +607,27 @@ c := cron.New(cron.WithLogger(MyLogger{}))
 
 ### Custom Job Wrapper
 
+Use `RunJob` to dispatch the inner job so that context-aware jobs
+(`JobWithContext`) receive the context automatically:
+
 ```go
 func MetricsWrapper(m *metrics.Registry) cron.JobWrapper {
     return func(j cron.Job) cron.Job {
-        return cron.FuncJob(func() {
-            start := time.Now()
-            j.Run()
-            m.RecordDuration("cron.job.duration", time.Since(start))
-        })
+        return &metricsJob{inner: j, metrics: m}
     }
+}
+
+type metricsJob struct {
+    inner   cron.Job
+    metrics *metrics.Registry
+}
+
+func (m *metricsJob) Run() { m.RunWithContext(context.Background()) }
+
+func (m *metricsJob) RunWithContext(ctx context.Context) {
+    start := time.Now()
+    cron.RunJob(ctx, m.inner)
+    m.metrics.RecordDuration("cron.job.duration", time.Since(start))
 }
 
 c := cron.New(cron.WithChain(MetricsWrapper(registry)))

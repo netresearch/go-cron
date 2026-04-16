@@ -1347,12 +1347,7 @@ func (c *Cron) startJobWithExecution(entryCtx context.Context, entryRunning *job
 			defer func() {
 				recovered = recover()
 			}()
-			// Check if the job supports context and call appropriate method
-			if jc, ok := wrappedJob.(JobWithContext); ok {
-				jc.RunWithContext(runCtx)
-			} else {
-				wrappedJob.Run()
-			}
+			RunJob(runCtx, wrappedJob)
 		}()
 		duration := c.clock.Now().Sub(start)
 

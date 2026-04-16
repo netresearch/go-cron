@@ -114,8 +114,10 @@ func toError(v any) error {
 	return fmt.Errorf("%v", v)
 }
 
-// runJob executes a job, passing ctx if it implements JobWithContext.
-func runJob(ctx context.Context, j Job) {
+// RunJob executes the job. If the job implements JobWithContext, it is called
+// with the provided context. Otherwise, its Run method is called.
+// This is a helper intended for use in custom job wrappers.
+func RunJob(ctx context.Context, j Job) {
 	if jc, ok := j.(JobWithContext); ok {
 		jc.RunWithContext(ctx)
 	} else {
@@ -154,7 +156,7 @@ func (r *recoverJob) RunWithContext(ctx context.Context) {
 			}
 		}
 	}()
-	runJob(ctx, r.inner)
+	RunJob(ctx, r.inner)
 }
 
 // Recover panics in wrapped jobs and log them with the provided logger.
@@ -213,7 +215,7 @@ func (d *delayJob) RunWithContext(ctx context.Context) {
 	if dur := time.Since(start); dur > d.logThreshold {
 		d.logger.Info("delay", "duration", dur)
 	}
-	runJob(ctx, d.inner)
+	RunJob(ctx, d.inner)
 }
 
 // DelayIfStillRunning serializes jobs, delaying subsequent runs until the
@@ -245,7 +247,7 @@ func (s *skipJob) RunWithContext(ctx context.Context) {
 	select {
 	case v := <-s.ch:
 		defer func() { s.ch <- v }()
-		runJob(ctx, s.inner)
+		RunJob(ctx, s.inner)
 	default:
 		s.logger.Info("skip")
 	}
@@ -394,7 +396,7 @@ func (t *timeoutJob) RunWithContext(ctx context.Context) {
 	var panicVal any
 	go func() {
 		defer close(done)
-		panicVal = safeExecute(func() { runJob(ctx, t.inner) })
+		panicVal = safeExecute(func() { RunJob(ctx, t.inner) })
 	}()
 
 	timer := time.NewTimer(t.timeout)
@@ -499,7 +501,7 @@ func (t *timeoutContextJob) RunWithContext(ctx context.Context) {
 
 	go func() {
 		defer close(done)
-		panicVal = safeExecute(func() { runJob(ctx, t.inner) })
+		panicVal = safeExecute(func() { RunJob(ctx, t.inner) })
 	}()
 
 	select {
@@ -552,7 +554,7 @@ func (j *jitterJob) RunWithContext(ctx context.Context) {
 		jitter := time.Duration(rand.Int64N(int64(j.maxJitter)))
 		time.Sleep(jitter)
 	}
-	runJob(ctx, j.inner)
+	RunJob(ctx, j.inner)
 }
 
 // Jitter adds a random delay before job execution to prevent thundering herd.
@@ -606,7 +608,7 @@ func (j *jitterLogJob) RunWithContext(ctx context.Context) {
 		j.logger.Info("jitter", "delay", jitter, "max", j.maxJitter)
 		time.Sleep(jitter)
 	}
-	runJob(ctx, j.inner)
+	RunJob(ctx, j.inner)
 }
 
 // JitterWithLogger is like Jitter but logs the applied delay.
@@ -641,7 +643,7 @@ func (m *maxConcurrentJob) RunWithContext(ctx context.Context) {
 	select {
 	case m.sem <- struct{}{}: // acquire slot
 		defer func() { <-m.sem }()
-		runJob(ctx, m.inner)
+		RunJob(ctx, m.inner)
 	case <-ctx.Done():
 		return // context canceled while waiting for slot
 	}
@@ -713,7 +715,7 @@ func (m *maxConcurrentSkipJob) RunWithContext(ctx context.Context) {
 	select {
 	case m.sem <- struct{}{}: // try to acquire slot
 		defer func() { <-m.sem }()
-		runJob(ctx, m.inner)
+		RunJob(ctx, m.inner)
 	default:
 		m.logger.Info("skip", "reason", "max concurrent reached")
 	}

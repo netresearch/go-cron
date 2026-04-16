@@ -1781,6 +1781,16 @@ All chain wrappers implement `JobWithContext` and propagate the incoming context
 to inner jobs that also implement `JobWithContext`. This means per-entry context
 flows through the entire wrapper chain to context-aware jobs.
 
+#### func RunJob
+
+```go
+func RunJob(ctx context.Context, j Job)
+```
+
+RunJob executes the job. If the job implements `JobWithContext`, it is called
+with the provided context. Otherwise, its `Run` method is called.
+This is a helper intended for use in custom `JobWrapper` implementations.
+
 #### func Recover
 
 ```go
