@@ -12,6 +12,6 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-    uses: netresearch/.github/.github/workflows/dependency-review.yml@eafa800ce23f3b52e0863ab042a8ba0801e97cab
+    uses: netresearch/.github/.github/workflows/dependency-review.yml@main
     with:
       fail-on-severity: high

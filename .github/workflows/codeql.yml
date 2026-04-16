@@ -18,6 +18,6 @@ jobs:
       contents: read
       security-events: write
       actions: read
-    uses: netresearch/.github/.github/workflows/codeql.yml@eafa800ce23f3b52e0863ab042a8ba0801e97cab
+    uses: netresearch/.github/.github/workflows/codeql.yml@main
     with:
       languages: go
