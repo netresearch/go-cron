@@ -12,6 +12,68 @@ Originally based on [robfig/cron](https://github.com/robfig/cron).
 ### Planned for v2
 - Context-aware Job interface with graceful shutdown support
 
+## [0.14.0] - 2026-04-16
+
+### Added
+- **`RunJob` helper** ([#355], [PR#356]): Exported `RunJob(ctx, job)` dispatches to
+  `JobWithContext.RunWithContext(ctx)` or `Job.Run()` automatically. Intended for
+  custom `JobWrapper` implementations so they don't need to reimplement the
+  type-switch. The internal `startJobWithExecution` in `cron.go` now uses `RunJob`
+  to consolidate the duplicated dispatch logic.
+
+### Fixed
+- **FakeClock `BlockUntil` missed-wakeup race** ([#357], [PR#358]): The channel-based
+  waiter list had a classic missed-wakeup race — if a timer was created between the
+  mutex unlock and channel receive in `BlockUntil`, the notification was lost and the
+  caller hung indefinitely. Replaced with `sync.Cond` where `Wait()` atomically
+  releases the mutex and sleeps, guaranteeing no missed broadcasts. Also removed the
+  redundant `fired` field from `fakeTimer`.
+
+### Changed
+- **CI: org workflow references** ([PR#359]): Reusable workflows from
+  `netresearch/.github` now reference `@main` instead of SHA-pinned commits,
+  so upstream improvements propagate automatically.
+- **Toolchain** ([PR#360]): Updated from `go1.25.5` to `go1.26.2` (minimum `go 1.25`
+  unchanged).
+- **DST documentation** ([PR#354]): Added industry context and references (POSIX,
+  ISC cron, systemd, Kubernetes CronJob) to DST handling docs.
+
+[#355]: https://github.com/netresearch/go-cron/issues/355
+[PR#356]: https://github.com/netresearch/go-cron/pull/356
+[#357]: https://github.com/netresearch/go-cron/issues/357
+[PR#358]: https://github.com/netresearch/go-cron/pull/358
+[PR#359]: https://github.com/netresearch/go-cron/pull/359
+[PR#360]: https://github.com/netresearch/go-cron/pull/360
+[PR#354]: https://github.com/netresearch/go-cron/pull/354
+
+## [0.13.4] - 2026-04-02
+
+### Fixed
+- **DST fall-back duplicate execution** ([#349], [PR#350]): Jobs scheduled during DST
+  fall-back transitions (when wall-clock time repeats) no longer fire twice. The
+  scheduler detects when `Next()` returns the second occurrence of the same wall-clock
+  time and skips it, consistent with ISC cron behavior and ADR-016.
+- **Hash expression false positive on day names** ([PR#347]): Day-of-week names
+  containing "H" (e.g., `THU`) no longer incorrectly trigger hash expression
+  validation, which previously caused valid expressions like `0 0 * * THU` to fail.
+- **SLSA provenance format** ([PR#345]): Fixed provenance subject format and flaky
+  example test.
+- **Supply chain hardening** ([PR#348]): SHA-pinned all GitHub Actions and added
+  Dependabot for actions updates.
+- **Release attestation** ([PR#353]): Migrated to shared reusable workflows; fixed
+  broken attestation by removing unpinned transitive dependency.
+
+### Changed
+- Rebranded from "maintained fork" to standalone project ([PR#344]).
+
+[#349]: https://github.com/netresearch/go-cron/issues/349
+[PR#350]: https://github.com/netresearch/go-cron/pull/350
+[PR#347]: https://github.com/netresearch/go-cron/pull/347
+[PR#345]: https://github.com/netresearch/go-cron/pull/345
+[PR#348]: https://github.com/netresearch/go-cron/pull/348
+[PR#353]: https://github.com/netresearch/go-cron/pull/353
+[PR#344]: https://github.com/netresearch/go-cron/pull/344
+
 ## [0.13.1] - 2026-03-08
 
 ### Fixed
