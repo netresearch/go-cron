@@ -2,18 +2,13 @@ name: Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    tags: ['v*']
+  workflow_dispatch:
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
-  release:
+  create:
     uses: netresearch/.github/.github/workflows/golib-create-release.yml@main
     permissions:
       contents: write
-      id-token: write
-      attestations: write
-    with:
-      draft: false

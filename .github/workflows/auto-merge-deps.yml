@@ -2,13 +2,12 @@ name: Auto-merge dependency PRs
 
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened]
 
-permissions: read-all
+permissions: {}
 
 jobs:
   auto-merge:
+    uses: netresearch/.github/.github/workflows/auto-merge-deps.yml@main
     permissions:
       contents: write
       pull-requests: write
-    uses: netresearch/.github/.github/workflows/auto-merge-deps.yml@main
