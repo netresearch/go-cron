@@ -1,0 +1,26 @@
+name: Mutation Testing
+
+on:
+  schedule:
+    - cron: '0 2 * * 0'
+  pull_request:
+    paths:
+      - '**.go'
+      - '.gremlins.yaml'
+      - '.github/workflows/mutation.yml'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: mutation-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mutation:
+    uses: netresearch/.github/.github/workflows/go-mutation-testing.yml@main
+    with:
+      diff-only: ${{ github.event_name == 'pull_request' }}
+    permissions:
+      contents: read
+      pull-requests: write

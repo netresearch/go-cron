@@ -1,0 +1,5 @@
+# Managed by netresearch/.github/templates/go-lib/
+# Drift from the template is blocking CI in this repo (check-template-drift.yml).
+# Record explicit exceptions under intentional-drift[] to unblock.
+template: go-lib
+intentional-drift: []

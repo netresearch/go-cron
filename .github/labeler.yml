@@ -1,0 +1,12 @@
+documentation:
+  - changed-files:
+      - any-glob-to-any-file: ['**/*.md', 'docs/**/*']
+ci:
+  - changed-files:
+      - any-glob-to-any-file: ['.github/**/*']
+dependencies:
+  - changed-files:
+      - any-glob-to-any-file: ['go.mod', 'go.sum']
+tests:
+  - changed-files:
+      - any-glob-to-any-file: ['**/*_test.go', 'testdata/**/*']
