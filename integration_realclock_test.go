@@ -85,9 +85,14 @@ func TestIntegrationStartStopNoGoroutineLeak(t *testing.T) {
 	}
 
 	c.Start()
-	// Idempotent safety net: if any assertion below fatals before the
-	// explicit Stop(), the deferred Stop() still drains the run loop.
-	defer c.Stop()
+	// Safety net for early t.Fatal paths only. Stop() always spawns a
+	// goroutine to wait on jobWaiter, so skip it when the explicit
+	// Stop() below has already run.
+	t.Cleanup(func() {
+		if c.IsRunning() {
+			c.Stop()
+		}
+	})
 	// Let the run loop actually schedule at least one tick.
 	time.Sleep(1200 * time.Millisecond)
 
@@ -268,10 +273,14 @@ func TestIntegrationContextCancelOnStop(t *testing.T) {
 	}
 
 	c.Start()
-	// Guard against early t.Fatal paths leaking the run-loop goroutine
-	// into subsequent tests; Stop() is idempotent so the explicit
-	// c.Stop() below still governs cancellation timing.
-	defer c.Stop()
+	// Safety net for early t.Fatal paths only. Stop() always spawns a
+	// goroutine to wait on jobWaiter, so skip it when the explicit
+	// Stop() below has already run.
+	t.Cleanup(func() {
+		if c.IsRunning() {
+			c.Stop()
+		}
+	})
 
 	// Wait for the job to actually start.
 	select {
