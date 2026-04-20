@@ -11,38 +11,10 @@ on:
 permissions: {}
 
 jobs:
-  detect:
-    name: Detect languages
-    runs-on: ubuntu-latest
-    timeout-minutes: 2
-    permissions:
-      contents: read
-    outputs:
-      languages: ${{ steps.detect.outputs.languages }}
-    steps:
-      - name: Harden Runner
-        uses: step-security/harden-runner@6c3c2f2c1c457b00c10c4848d6f5491db3b629df # v2.18.0
-        with:
-          egress-policy: audit
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-      - name: Detect TS/JS + Go
-        id: detect
-        run: |
-          set -euo pipefail
-          langs="go"
-          if [ -f package.json ] || [ -n "$(find . -maxdepth 3 -name '*.ts' -o -name '*.tsx' -o -name '*.mts' 2>/dev/null | head -1)" ]; then
-            langs="${langs},javascript-typescript"
-          fi
-          echo "languages=${langs}" >> "$GITHUB_OUTPUT"
-
   codeql:
-    needs: detect
     uses: netresearch/.github/.github/workflows/codeql.yml@main
     with:
-      languages: ${{ needs.detect.outputs.languages }}
+      languages: auto
     permissions:
       contents: read
       security-events: write
