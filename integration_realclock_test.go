@@ -85,6 +85,14 @@ func TestIntegrationStartStopNoGoroutineLeak(t *testing.T) {
 	}
 
 	c.Start()
+	// Safety net for early t.Fatal paths only. Stop() always spawns a
+	// goroutine to wait on jobWaiter, so skip it when the explicit
+	// Stop() below has already run.
+	t.Cleanup(func() {
+		if c.IsRunning() {
+			c.Stop()
+		}
+	})
 	// Let the run loop actually schedule at least one tick.
 	time.Sleep(1200 * time.Millisecond)
 
@@ -98,19 +106,41 @@ func TestIntegrationStartStopNoGoroutineLeak(t *testing.T) {
 	stopElapsed := time.Since(stopStart)
 	t.Logf("Stop() completed in %v (fired=%d)", stopElapsed, fired.Load())
 
-	// Allow scheduler goroutines a brief moment to fully unwind.
-	time.Sleep(100 * time.Millisecond)
-
-	// Verify no persistent goroutine leak. Allow a small +slack because
-	// the Go runtime may keep a few helper goroutines around.
-	after := runtime.NumGoroutine()
-	if after > baseline+2 {
+	// Poll until the goroutine count stabilizes at baseline instead of
+	// sampling a single point-in-time value. CI-side noise (GC helper
+	// goroutines, runtime timers, test-runner internals) can push the
+	// count transiently above baseline; requiring a run of consecutive
+	// stable samples absorbs that jitter without hiding real leaks.
+	const (
+		maxSamples   = 50
+		stableWindow = 5
+		sampleDelay  = 100 * time.Millisecond
+		slack        = 2
+	)
+	var (
+		stableFor int
+		after     int
+	)
+	for i := 0; i < maxSamples; i++ {
+		time.Sleep(sampleDelay)
+		after = runtime.NumGoroutine()
+		if after <= baseline+slack {
+			stableFor++
+			if stableFor >= stableWindow {
+				break
+			}
+		} else {
+			stableFor = 0
+		}
+	}
+	if stableFor < stableWindow {
 		buf := make([]byte, 1<<15)
 		n := runtime.Stack(buf, true)
-		t.Fatalf("goroutine leak: baseline=%d, after Stop=%d\n%s",
-			baseline, after, buf[:n])
+		t.Fatalf("goroutine leak: baseline=%d, after=%d never stabilized within %v\n%s",
+			baseline, after, time.Duration(maxSamples)*sampleDelay, buf[:n])
 	}
-	t.Logf("goroutine count baseline=%d after_stop=%d", baseline, after)
+	t.Logf("goroutine count baseline=%d after_stop=%d (stable for %d samples)",
+		baseline, after, stableFor)
 }
 
 // TestIntegrationMixedIntervalsCounts schedules two jobs (every 1s and
@@ -243,6 +273,14 @@ func TestIntegrationContextCancelOnStop(t *testing.T) {
 	}
 
 	c.Start()
+	// Safety net for early t.Fatal paths only. Stop() always spawns a
+	// goroutine to wait on jobWaiter, so skip it when the explicit
+	// Stop() below has already run.
+	t.Cleanup(func() {
+		if c.IsRunning() {
+			c.Stop()
+		}
+	})
 
 	// Wait for the job to actually start.
 	select {
