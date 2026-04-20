@@ -30,6 +30,16 @@ updates:
       docker:
         patterns: ['*']
 
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      npm:
+        patterns: ['*']
+
   - package-ecosystem: devcontainers
     directory: /
     schedule:
