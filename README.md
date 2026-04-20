@@ -13,6 +13,9 @@
 
 # go-cron
 
+[![Template Drift](https://github.com/netresearch/go-cron/actions/workflows/check-template-drift.yml/badge.svg)](https://github.com/netresearch/go-cron/actions/workflows/check-template-drift.yml)
+[![managed by netresearch/.github templates](https://img.shields.io/badge/template-netresearch%2F.github-2F99A4?logo=github)](https://github.com/netresearch/.github/tree/main/templates/go-app)
+
 A production-grade cron job scheduler for Go — drop-in replacement for [robfig/cron](https://github.com/robfig/cron) with runtime schedule updates, per-entry context, resilience middleware (retry, circuit breaker, rate limiting), and active maintenance.
 
 ## Why go-cron?
