@@ -2,4 +2,13 @@
 # Drift from the template is blocking CI in this repo (check-template-drift.yml).
 # Record explicit exceptions under intentional-drift[] to unblock.
 template: go-lib
-intentional-drift: []
+intentional-drift:
+- path: .github/workflows/ci.yml
+  reason: Enables enable-integration-tests=true for the go-check reusable workflow.
+    go-cron ships real-clock integration tests (realtime_test.go, stress_test.go,
+    integration_realclock_test.go) behind the `integration` build tag that exercise
+    the scheduler against time.Now() / time.After / real goroutines. These catch
+    timing bugs the mock clock cannot (goroutine leaks, off-by-seconds misfires,
+    context-cancel propagation, middleware order under real scheduling). The
+    go-lib template does not enable this flag by default; drift is intentional
+    until the template exposes integration testing as a standard library facility.
