@@ -1,0 +1,59 @@
+# Codecov configuration managed by netresearch/.github/templates/
+# Declares the three test-tier flags emitted by go-check.yml so flag-scoped
+# uploads accumulate instead of overwriting each other.
+
+coverage:
+  status:
+    project:
+      default:
+        target: 80%
+        threshold: 0.5%
+        if_ci_failed: error
+        if_not_found: success
+    patch:
+      default:
+        target: 80%
+        threshold: 1%
+        if_ci_failed: error
+        if_not_found: success
+
+flags:
+  unittests:
+    paths:
+      - '!**/*_templ.go'     # exclude generated templ files
+      - '!**/testdata/**'
+    carryforward: true
+  integration:
+    paths:
+      - '!**/*_templ.go'
+    carryforward: true
+  e2e:
+    paths:
+      - '!**/*_templ.go'
+    carryforward: true
+
+component_management:
+  default_rules:
+    statuses:
+      - type: project
+        target: auto
+        threshold: 0.5%
+  individual_components:
+    - component_id: cmd
+      paths:
+        - 'cmd/**'
+    - component_id: internal
+      paths:
+        - 'internal/**'
+
+# Don't fail CI purely due to codecov errors / missing tokens — the in-CI
+# coverage-threshold enforcement is the authoritative gate.
+codecov:
+  require_ci_to_pass: false
+  notify:
+    wait_for_ci: true
+
+comment:
+  layout: "header, flags, components, diff, files"
+  behavior: default
+  require_changes: false
