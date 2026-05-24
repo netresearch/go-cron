@@ -414,7 +414,7 @@ func (p Parser) ParseWithHashKey(spec, hashKey string) (Schedule, error) {
 // parse is the internal parsing logic, called by Parse.
 func (p Parser) parse(spec string) (Schedule, error) {
 	if len(spec) == 0 {
-		return nil, errors.New("empty spec string")
+		return nil, errors.New(emptySpecMessage)
 	}
 	if len(spec) > MaxSpecLength {
 		return nil, fmt.Errorf("spec too long: %d > %d", len(spec), MaxSpecLength)
@@ -1487,21 +1487,35 @@ func newDescriptorSchedule(hour, dom, month, dow uint64, loc *time.Location, max
 	}
 }
 
+// Cron descriptor keywords accepted by parseDescriptor.
+const (
+	descriptorYearly    = "@yearly"
+	descriptorAnnually  = "@annually"
+	descriptorMonthly   = "@monthly"
+	descriptorWeekly    = "@weekly"
+	descriptorDaily     = "@daily"
+	descriptorMidnight  = "@midnight"
+	descriptorHourly    = "@hourly"
+	descriptorTriggered = "@triggered"
+	descriptorManual    = "@manual"
+	descriptorNone      = "@none"
+)
+
 func parseDescriptor(descriptor string, loc *time.Location, minEveryInterval time.Duration, maxSearchYears int) (Schedule, error) {
 	// Normalize DOW bits so that both Sunday=0 and Sunday=7 are handled consistently
 	allDow := NormalizeDOW(all(dow))
 	switch descriptor {
-	case "@yearly", "@annually":
+	case descriptorYearly, descriptorAnnually:
 		return newDescriptorSchedule(1<<hours.min, 1<<dom.min, 1<<months.min, allDow, loc, maxSearchYears), nil
-	case "@monthly":
+	case descriptorMonthly:
 		return newDescriptorSchedule(1<<hours.min, 1<<dom.min, all(months), allDow, loc, maxSearchYears), nil
-	case "@weekly":
+	case descriptorWeekly:
 		return newDescriptorSchedule(1<<hours.min, all(dom), all(months), 1<<dow.min, loc, maxSearchYears), nil
-	case "@daily", "@midnight":
+	case descriptorDaily, descriptorMidnight:
 		return newDescriptorSchedule(1<<hours.min, all(dom), all(months), allDow, loc, maxSearchYears), nil
-	case "@hourly":
+	case descriptorHourly:
 		return newDescriptorSchedule(all(hours), all(dom), all(months), allDow, loc, maxSearchYears), nil
-	case "@triggered", "@manual", "@none":
+	case descriptorTriggered, descriptorManual, descriptorNone:
 		return TriggeredSchedule{}, nil
 	}
 

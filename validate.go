@@ -357,8 +357,11 @@ func getParserForOptions(options []ParseOption) Parser {
 	return NewParser(opts)
 }
 
+// emptySpecMessage is the error text used when a spec string is empty.
+const emptySpecMessage = "empty spec string"
+
 // ErrEmptySpec is returned when an empty spec string is provided.
-var ErrEmptySpec = &ValidationError{Message: "empty spec string"}
+var ErrEmptySpec = &ValidationError{Message: emptySpecMessage}
 
 // ValidationError represents a cron expression validation error.
 type ValidationError struct {
