@@ -1487,7 +1487,9 @@ func newDescriptorSchedule(hour, dom, month, dow uint64, loc *time.Location, max
 	}
 }
 
-// Cron descriptor keywords accepted by parseDescriptor.
+// Cron descriptor keywords accepted by parseDescriptor. The calendar and
+// trigger keywords are matched exactly; descriptorEvery is matched as a
+// prefix for "@every <duration>" expressions.
 const (
 	descriptorYearly    = "@yearly"
 	descriptorAnnually  = "@annually"
@@ -1496,6 +1498,7 @@ const (
 	descriptorDaily     = "@daily"
 	descriptorMidnight  = "@midnight"
 	descriptorHourly    = "@hourly"
+	descriptorEvery     = "@every "
 	descriptorTriggered = "@triggered"
 	descriptorManual    = "@manual"
 	descriptorNone      = "@none"
@@ -1519,9 +1522,8 @@ func parseDescriptor(descriptor string, loc *time.Location, minEveryInterval tim
 		return TriggeredSchedule{}, nil
 	}
 
-	const every = "@every "
-	if strings.HasPrefix(descriptor, every) {
-		duration, err := time.ParseDuration(descriptor[len(every):])
+	if strings.HasPrefix(descriptor, descriptorEvery) {
+		duration, err := time.ParseDuration(descriptor[len(descriptorEvery):])
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse duration %q: %w", descriptor, err)
 		}

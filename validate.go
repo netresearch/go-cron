@@ -264,9 +264,8 @@ func (r *SpecAnalysis) analyzeSpec(spec string) {
 
 // analyzeDescriptor extracts information from descriptor-style specs.
 func (r *SpecAnalysis) analyzeDescriptor(descriptor string) {
-	const every = "@every "
-	if strings.HasPrefix(descriptor, every) {
-		durationStr := descriptor[len(every):]
+	if strings.HasPrefix(descriptor, descriptorEvery) {
+		durationStr := descriptor[len(descriptorEvery):]
 		if duration, err := time.ParseDuration(durationStr); err == nil {
 			r.Interval = duration
 		}
@@ -357,7 +356,8 @@ func getParserForOptions(options []ParseOption) Parser {
 	return NewParser(opts)
 }
 
-// emptySpecMessage is the error text used when a spec string is empty.
+// emptySpecMessage is the package-shared error text used when a spec string
+// is empty. It backs both ErrEmptySpec here and the parser.parse() error.
 const emptySpecMessage = "empty spec string"
 
 // ErrEmptySpec is returned when an empty spec string is provided.
