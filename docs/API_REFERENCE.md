@@ -365,6 +365,33 @@ if err := c.UpdateEntryJobByName(name, spec, job); errors.Is(err, cron.ErrEntryN
 id, err := c.UpsertJob(spec, job, cron.WithName(name))
 ```
 
+#### func (*Cron) DrainAndUpsertJob
+
+```go
+func (c *Cron) DrainAndUpsertJob(spec string, cmd Job, opts ...JobOption) (EntryID, error)
+```
+
+DrainAndUpsertJob is the windowless variant of `UpsertJob`. For an existing
+named entry it pauses the entry, waits for any in-flight invocation to finish,
+replaces the schedule and job, then restores the entry's prior paused state.
+Pausing before the drain guarantees the old schedule cannot fire again between
+the wait and the replacement — closing the gap present in the two-step
+`WaitForJobByName` + `UpsertJob` sequence. If no entry with the given name
+exists it creates one (no stale schedule ⇒ no window). Same options and errors
+as `UpsertJob`; a `WithName` option is required.
+
+It blocks for as long as the in-flight invocation runs but holds no cron lock
+while draining, so it never blocks the run loop or other mutators. It is not
+atomic against other concurrent mutators of the same entry (`Remove`, `Resume`,
+`Trigger`); those are handled gracefully but fall outside the no-stale-fire
+guarantee. See [ADR-022](adr/ADR-022-drain-and-upsert.md).
+
+**Example:**
+```go
+// Graceful, windowless reschedule in one call:
+id, err := c.DrainAndUpsertJob(newSpec, newJob, cron.WithName("my-job"))
+```
+
 #### func (*Cron) WaitForJob
 
 ```go
@@ -397,6 +424,10 @@ if the entry is not currently running or no entry has the given name.
 cr.WaitForJobByName("my-job")
 cr.UpsertJob(newSpec, newJob, cron.WithName("my-job"))
 ```
+
+> **Note:** the two calls above are not atomic — the old schedule can fire once
+> between them. Use [`DrainAndUpsertJob`](#func-cron-drainandupsertjob) for a
+> windowless reschedule.
 
 #### func (*Cron) IsJobRunning
 

@@ -263,6 +263,15 @@ c.WaitForJobByName("my-job")  // Block until current execution finishes
 c.UpsertJob(newSpec, newJob, cron.WithName("my-job"))
 ```
 
+These two calls are not atomic — the old schedule can fire once in the gap
+between them. For a windowless reschedule, use `DrainAndUpsertJob`, which pauses
+the entry, drains the in-flight invocation, swaps schedule and job, and restores
+the prior paused state in one call:
+
+```go
+c.DrainAndUpsertJob(newSpec, newJob, cron.WithName("my-job"))
+```
+
 ## Pause/Resume
 
 Temporarily suspend individual entries without removing them:
