@@ -9,6 +9,17 @@ Originally based on [robfig/cron](https://github.com/robfig/cron).
 
 ## [Unreleased]
 
+### Added
+- **`DrainAndUpsertJob`** ([PR#381]): windowless variant of `UpsertJob` for graceful
+  reschedule. Pauses the named entry, drains any in-flight invocation, swaps the
+  schedule and job, then restores the entry's prior paused state — closing the
+  narrow window in which the two-step `WaitForJobByName` → `UpsertJob` sequence
+  could let the old schedule fire once more between the wait and the
+  replacement. Composes existing serialized methods, so the drain never holds a
+  cron lock. Motivated by the
+  [weaviate object-TTL scheduler](https://github.com/weaviate/weaviate/pull/10477);
+  see [ADR-022](docs/adr/ADR-022-drain-and-upsert.md).
+
 ### Planned for v2
 - Context-aware Job interface with graceful shutdown support
 
@@ -403,6 +414,7 @@ Originally based on [robfig/cron](https://github.com/robfig/cron).
 [PR#259]: https://github.com/netresearch/go-cron/pull/259
 [PR#260]: https://github.com/netresearch/go-cron/pull/260
 [PR#261]: https://github.com/netresearch/go-cron/pull/261
+[PR#381]: https://github.com/netresearch/go-cron/pull/381
 [ADR-007]: docs/adr/ADR-007-nw-skip-invalid-days.md
 [ADRs]: docs/adr/
 [COOKBOOK]: docs/COOKBOOK.md
@@ -564,7 +576,7 @@ This fork includes all features from robfig/cron v3 plus:
    _, err := cron.ParseStandard("*/60 * * * *") // Error: step (60) must be less than range size (60)
    ```
 
-[Unreleased]: https://github.com/netresearch/go-cron/compare/v0.13.1...HEAD
+[Unreleased]: https://github.com/netresearch/go-cron/compare/v0.14.0...HEAD
 [0.13.1]: https://github.com/netresearch/go-cron/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/netresearch/go-cron/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/netresearch/go-cron/compare/v0.11.0...v0.12.0

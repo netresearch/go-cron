@@ -5536,3 +5536,384 @@ func TestDSTFallBack_ScheduleExhaustedAfterSkip(t *testing.T) {
 		t.Errorf("expected zero Next after schedule exhaustion, got %v", entries[0].Next)
 	}
 }
+
+// --- DrainAndUpsertJob tests ---
+
+// waitForPaused blocks until the named entry reports paused, or fails the test
+// after a timeout. Used to synchronize with DrainAndUpsertJob's internal pause
+// step without exposing it.
+func waitForPaused(t *testing.T, c *Cron, name string) {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	for {
+		if c.IsEntryPausedByName(name) {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("entry %q never became paused", name)
+		case <-time.After(time.Millisecond):
+		}
+	}
+}
+
+// TestDrainAndUpsertNoStaleFire is the core guarantee: while DrainAndUpsertJob
+// is blocked draining an in-flight invocation, the old schedule must NOT fire
+// again even though the clock advances well past its next tick. The job is a
+// bare FuncJob (no SkipIfStillRunning) so any extra launch would be observable
+// as a second increment.
+func TestDrainAndUpsertNoStaleFire(t *testing.T) {
+	start := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
+	clock := NewFakeClock(start)
+	c := New(WithClock(clock), WithParser(secondParser))
+	c.Start()
+	defer c.Stop()
+
+	var oldRuns, newRuns int32
+	jobStarted := make(chan struct{})
+	jobRelease := make(chan struct{})
+	var startOnce sync.Once
+
+	origID, err := c.AddFunc("* * * * * *", func() {
+		atomic.AddInt32(&oldRuns, 1)
+		startOnce.Do(func() { close(jobStarted) })
+		<-jobRelease
+	}, WithName("ttl"))
+	if err != nil {
+		t.Fatalf("AddFunc failed: %v", err)
+	}
+
+	// Fire the old job exactly once and wait until it is provably in flight.
+	clock.BlockUntil(1)
+	clock.Advance(time.Second)
+	select {
+	case <-jobStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("old job did not start")
+	}
+
+	// Replace the job from another goroutine; it will pause the entry, then
+	// block in the drain because the old invocation is still held.
+	upsertDone := make(chan struct{})
+	var gotID EntryID
+	var upsertErr error
+	go func() {
+		gotID, upsertErr = c.DrainAndUpsertJob("* * * * * *", FuncJob(func() {
+			atomic.AddInt32(&newRuns, 1)
+		}), WithName("ttl"))
+		close(upsertDone)
+	}()
+
+	// Once the entry is paused, advance the clock far past several old ticks.
+	waitForPaused(t, c, "ttl")
+	clock.Advance(5 * time.Second)
+	time.Sleep(20 * time.Millisecond)
+
+	// The old schedule must not have fired again, and the upsert must still be
+	// blocked in the drain.
+	if n := atomic.LoadInt32(&oldRuns); n != 1 {
+		t.Fatalf("stale fire: expected oldRuns==1 while draining, got %d", n)
+	}
+	select {
+	case <-upsertDone:
+		t.Fatal("DrainAndUpsertJob returned before the in-flight job was released")
+	default:
+	}
+
+	// Release the in-flight job; the drain completes, the swap + resume run.
+	close(jobRelease)
+	select {
+	case <-upsertDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("DrainAndUpsertJob did not return after release")
+	}
+	if upsertErr != nil {
+		t.Fatalf("DrainAndUpsertJob error: %v", upsertErr)
+	}
+	if gotID != origID {
+		t.Errorf("expected preserved entry ID %v, got %v", origID, gotID)
+	}
+
+	// The new job runs on the next tick; the old one never fires again.
+	clock.BlockUntil(1)
+	clock.Advance(time.Second)
+	deadline := time.After(2 * time.Second)
+	for atomic.LoadInt32(&newRuns) == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("replacement job did not run")
+		case <-time.After(time.Millisecond):
+		}
+	}
+	if n := atomic.LoadInt32(&oldRuns); n != 1 {
+		t.Errorf("old job fired after replacement: oldRuns=%d", n)
+	}
+}
+
+// TestDrainAndUpsertDrainsInFlight verifies the call blocks until the in-flight
+// invocation completes (not merely until the entry is paused).
+func TestDrainAndUpsertDrainsInFlight(t *testing.T) {
+	c := New()
+	c.Start()
+	defer c.Stop()
+
+	jobStarted := make(chan struct{})
+	jobRelease := make(chan struct{})
+	var startOnce sync.Once
+	_, err := c.AddFunc("@every 1s", func() {
+		startOnce.Do(func() { close(jobStarted) })
+		<-jobRelease
+	}, WithName("drainme"), WithRunImmediately())
+	if err != nil {
+		t.Fatalf("AddFunc failed: %v", err)
+	}
+
+	select {
+	case <-jobStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("job did not start")
+	}
+
+	done := make(chan struct{})
+	go func() {
+		c.DrainAndUpsertJob("@every 1s", FuncJob(func() {}), WithName("drainme"))
+		close(done)
+	}()
+
+	// Must still be draining while the job is held.
+	select {
+	case <-done:
+		t.Fatal("DrainAndUpsertJob returned before in-flight job completed")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(jobRelease)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("DrainAndUpsertJob did not return after release")
+	}
+}
+
+// TestDrainAndUpsertCreatesWhenAbsent verifies the create path: no existing
+// entry means no window, and a new entry is scheduled un-paused.
+func TestDrainAndUpsertCreatesWhenAbsent(t *testing.T) {
+	start := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
+	clock := NewFakeClock(start)
+	c := New(WithClock(clock), WithParser(secondParser))
+	c.Start()
+	defer c.Stop()
+
+	var runs int32
+	id, err := c.DrainAndUpsertJob("* * * * * *", FuncJob(func() {
+		atomic.AddInt32(&runs, 1)
+	}), WithName("fresh"))
+	if err != nil {
+		t.Fatalf("DrainAndUpsertJob failed: %v", err)
+	}
+	if !c.EntryByName("fresh").Valid() {
+		t.Fatal("entry not created")
+	}
+	if c.IsEntryPausedByName("fresh") {
+		t.Error("newly created entry should not be paused")
+	}
+	if !c.Entry(id).Valid() {
+		t.Fatalf("returned id %v is not a valid entry", id)
+	}
+
+	clock.BlockUntil(1)
+	clock.Advance(time.Second)
+	deadline := time.After(2 * time.Second)
+	for atomic.LoadInt32(&runs) == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("created job did not run")
+		case <-time.After(time.Millisecond):
+		}
+	}
+}
+
+// TestDrainAndUpsertPreservesEntryID verifies an update reuses the same ID.
+func TestDrainAndUpsertPreservesEntryID(t *testing.T) {
+	c := New()
+
+	id1, err := c.DrainAndUpsertJob("@every 1h", FuncJob(func() {}), WithName("keep-id"))
+	if err != nil {
+		t.Fatalf("first DrainAndUpsertJob failed: %v", err)
+	}
+	id2, err := c.DrainAndUpsertJob("@every 2h", FuncJob(func() {}), WithName("keep-id"))
+	if err != nil {
+		t.Fatalf("second DrainAndUpsertJob failed: %v", err)
+	}
+	if id1 != id2 {
+		t.Errorf("DrainAndUpsertJob should preserve EntryID: %v != %v", id1, id2)
+	}
+	if got := len(c.Entries()); got != 1 {
+		t.Errorf("expected 1 entry, got %d", got)
+	}
+}
+
+// TestDrainAndUpsertRestoresUnpaused verifies that an entry which was running
+// (not paused) is left un-paused after replacement.
+func TestDrainAndUpsertRestoresUnpaused(t *testing.T) {
+	c := New()
+
+	if _, err := c.AddFunc("@every 1h", func() {}, WithName("u")); err != nil {
+		t.Fatalf("AddFunc failed: %v", err)
+	}
+	if _, err := c.DrainAndUpsertJob("@every 2h", FuncJob(func() {}), WithName("u")); err != nil {
+		t.Fatalf("DrainAndUpsertJob failed: %v", err)
+	}
+	if c.IsEntryPausedByName("u") {
+		t.Error("entry should be un-paused after replacement")
+	}
+}
+
+// TestDrainAndUpsertLeavesAlreadyPausedPaused verifies that an entry the caller
+// had paused before the call remains paused afterward.
+func TestDrainAndUpsertLeavesAlreadyPausedPaused(t *testing.T) {
+	c := New()
+
+	if _, err := c.AddFunc("@every 1h", func() {}, WithName("p")); err != nil {
+		t.Fatalf("AddFunc failed: %v", err)
+	}
+	if err := c.PauseEntryByName("p"); err != nil {
+		t.Fatalf("PauseEntryByName failed: %v", err)
+	}
+	if _, err := c.DrainAndUpsertJob("@every 2h", FuncJob(func() {}), WithName("p")); err != nil {
+		t.Fatalf("DrainAndUpsertJob failed: %v", err)
+	}
+	if !c.IsEntryPausedByName("p") {
+		t.Error("entry paused by caller should remain paused after replacement")
+	}
+}
+
+// TestDrainAndUpsertRequiresName verifies ErrNameRequired with no WithName.
+func TestDrainAndUpsertRequiresName(t *testing.T) {
+	c := New()
+	if _, err := c.DrainAndUpsertJob("@every 1h", FuncJob(func() {})); !errors.Is(err, ErrNameRequired) {
+		t.Errorf("expected ErrNameRequired, got %v", err)
+	}
+}
+
+// TestDrainAndUpsertInvalidSpec verifies parse errors surface with no side effect.
+func TestDrainAndUpsertInvalidSpec(t *testing.T) {
+	c := New()
+	if _, err := c.DrainAndUpsertJob("not-a-spec!!!", FuncJob(func() {}), WithName("bad")); err == nil {
+		t.Error("expected parse error for invalid spec")
+	}
+	if c.EntryByName("bad").Valid() {
+		t.Error("no entry should be created on parse error")
+	}
+}
+
+// TestDrainAndUpsertNilJobOnExisting mirrors UpsertJob: a nil job on an existing
+// entry returns ErrNilJob. It fails fast before pausing, so the entry is left
+// un-paused.
+func TestDrainAndUpsertNilJobOnExisting(t *testing.T) {
+	c := New()
+	if _, err := c.AddFunc("@every 1h", func() {}, WithName("niljob")); err != nil {
+		t.Fatalf("AddFunc failed: %v", err)
+	}
+	if _, err := c.DrainAndUpsertJob("@every 2h", nil, WithName("niljob")); !errors.Is(err, ErrNilJob) {
+		t.Errorf("expected ErrNilJob, got %v", err)
+	}
+	if c.IsEntryPausedByName("niljob") {
+		t.Error("entry should be restored un-paused after a failed swap")
+	}
+}
+
+// TestDrainAndUpsertSchedulerStopped verifies the method works before Start():
+// the drain returns immediately (no run loop launches jobs) and the entry is
+// updated in place.
+func TestDrainAndUpsertSchedulerStopped(t *testing.T) {
+	start := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
+	clock := NewFakeClock(start)
+	c := New(WithClock(clock), WithParser(secondParser))
+
+	id1, err := c.AddFunc("@every 1h", func() {}, WithName("stopped"))
+	if err != nil {
+		t.Fatalf("AddFunc failed: %v", err)
+	}
+	id2, err := c.DrainAndUpsertJob("* * * * * *", FuncJob(func() {}), WithName("stopped"))
+	if err != nil {
+		t.Fatalf("DrainAndUpsertJob failed: %v", err)
+	}
+	if id1 != id2 {
+		t.Errorf("expected preserved ID, got %v != %v", id1, id2)
+	}
+
+	var runs int32
+	// Re-point to a counting job, still stopped, then start and confirm it fires.
+	if _, err := c.DrainAndUpsertJob("* * * * * *", FuncJob(func() {
+		atomic.AddInt32(&runs, 1)
+	}), WithName("stopped")); err != nil {
+		t.Fatalf("second DrainAndUpsertJob failed: %v", err)
+	}
+	c.Start()
+	defer c.Stop()
+	clock.BlockUntil(1)
+	clock.Advance(time.Second)
+	deadline := time.After(2 * time.Second)
+	for atomic.LoadInt32(&runs) == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("job did not fire after Start")
+		case <-time.After(time.Millisecond):
+		}
+	}
+}
+
+// TestDrainAndUpsertRecreatesIfRemovedDuringDrain covers the concurrent-removal
+// path: if the entry is removed while DrainAndUpsertJob is draining the
+// in-flight invocation, the swap finds nothing and the job is re-created.
+func TestDrainAndUpsertRecreatesIfRemovedDuringDrain(t *testing.T) {
+	c := New()
+	c.Start()
+	defer c.Stop()
+
+	jobStarted := make(chan struct{})
+	jobRelease := make(chan struct{})
+	var startOnce, removeOnce sync.Once
+	_, err := c.AddFunc("@every 1s", func() {
+		startOnce.Do(func() { close(jobStarted) })
+		<-jobRelease
+		// Remove our own entry before returning so the drain completes against a
+		// now-absent entry and the swap falls through to create.
+		removeOnce.Do(func() { c.RemoveByName("vanishing") })
+	}, WithName("vanishing"), WithRunImmediately())
+	if err != nil {
+		t.Fatalf("AddFunc failed: %v", err)
+	}
+
+	select {
+	case <-jobStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("job did not start")
+	}
+
+	done := make(chan struct{})
+	var derr error
+	go func() {
+		_, derr = c.DrainAndUpsertJob("@every 2s", FuncJob(func() {}), WithName("vanishing"))
+		close(done)
+	}()
+
+	// Wait until the upsert has paused the entry (so it is past PauseEntry and
+	// into the drain), then release the job — which removes the entry — so the
+	// subsequent UpdateEntry sees ErrEntryNotFound and re-creates.
+	waitForPaused(t, c, "vanishing")
+	close(jobRelease)
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("DrainAndUpsertJob did not return")
+	}
+	if derr != nil {
+		t.Fatalf("DrainAndUpsertJob error: %v", derr)
+	}
+	if !c.EntryByName("vanishing").Valid() {
+		t.Fatal("entry should have been re-created after concurrent removal")
+	}
+}

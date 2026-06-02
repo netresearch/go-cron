@@ -30,9 +30,10 @@ var ErrDuplicateName = errors.New("cron: duplicate entry name")
 // this Cron instance.
 var ErrEntryNotFound = errors.New("cron: entry not found")
 
-// ErrNameRequired is returned by UpsertJob when no WithName option is provided.
-// UpsertJob requires a name to determine whether to create or update.
-var ErrNameRequired = errors.New("cron: UpsertJob requires WithName option")
+// ErrNameRequired is returned by UpsertJob and DrainAndUpsertJob when no
+// WithName option is provided.
+// These methods require a name to address the entry by it.
+var ErrNameRequired = errors.New("cron: WithName option required")
 
 // ErrEntryPaused is returned by TriggerEntry and TriggerEntryByName when
 // attempting to trigger a paused entry. Resume the entry first.
@@ -1901,6 +1902,97 @@ func (c *Cron) upsertScheduled(name string, schedule Schedule, cmd Job, opts []J
 
 	// Entry doesn't exist — create it
 	return c.ScheduleJob(schedule, cmd, opts...)
+}
+
+// DrainAndUpsertJob is the windowless variant of UpsertJob. For an existing
+// named entry it pauses the entry, waits for any in-flight invocation to
+// finish, replaces the schedule and job, then restores the entry's prior
+// paused state. Pausing before the drain guarantees the old schedule cannot
+// fire again between the wait and the replacement — closing the stale-fire
+// window that exists with the two-step WaitForJobByName + UpsertJob sequence:
+//
+//	// Two-step: a tick can still fire the OLD schedule between these calls.
+//	c.WaitForJobByName(name)
+//	c.UpsertJob(spec, job, cron.WithName(name))
+//
+//	// Windowless: no invocation can start under the stale schedule.
+//	c.DrainAndUpsertJob(spec, job, cron.WithName(name))
+//
+// If no entry with the given name exists, the job is created via ScheduleJob;
+// with no stale schedule there is no window to close.
+//
+// The call blocks for as long as the in-flight invocation runs. It does not
+// hold any cron lock while draining, so it never blocks the run loop or other
+// mutators. It is NOT atomic against other concurrent mutators of the same
+// entry (Remove, Resume, Trigger): those are handled gracefully but fall
+// outside the no-stale-fire guarantee.
+//
+// Returns:
+//   - ErrNameRequired if no WithName option is provided
+//   - ErrNilJob if cmd is nil and a matching entry exists (use UpdateSchedule
+//     to change only the schedule)
+//   - Parse errors if spec is invalid for the configured parser
+//   - ErrMaxEntriesReached if creating a new entry would exceed the limit
+func (c *Cron) DrainAndUpsertJob(spec string, cmd Job, opts ...JobOption) (EntryID, error) {
+	name := extractName(opts)
+	if name == "" {
+		return 0, ErrNameRequired
+	}
+
+	schedule, err := c.parser.Parse(spec)
+	if err != nil {
+		return 0, err
+	}
+
+	// Resolve the existing entry once: capture its ID — the swap targets the ID
+	// rather than the name, so a name reused by another entry cannot cause an
+	// ABA — and its prior paused state, so the restore respects caller intent.
+	e := c.EntryByName(name)
+	if !e.Valid() {
+		// No existing entry => no stale schedule => no window. Just create.
+		return c.ScheduleJob(schedule, cmd, opts...)
+	}
+	// Fail fast: with an existing entry, a nil job would only fail at the swap
+	// (UpdateEntry => ErrNilJob) — after needlessly pausing and draining it.
+	if cmd == nil {
+		return 0, ErrNilJob
+	}
+	id := e.ID
+	wasPaused := e.Paused
+
+	// (1) Pause atomically with respect to the run loop. Once this returns,
+	// every subsequent run-loop iteration observes Paused and launches no
+	// further invocation under the stale schedule. PauseEntry's only failure
+	// mode is ErrEntryNotFound (the entry was removed concurrently) — there is
+	// then no stale schedule to replace, so create instead.
+	if c.PauseEntry(id) != nil {
+		return c.ScheduleJob(schedule, cmd, opts...)
+	}
+
+	// (2) Drain the invocation that may already be in flight. The only one
+	// possible is a fire the run loop launched in the same iteration just
+	// before it read the pause request; its tracker was incremented
+	// synchronously before the job goroutine started, so this wait observes and
+	// joins it. The run loop never blocks on this wait, so there is no deadlock.
+	// Wait by ID (not name) so we drain the exact entry we paused and will swap,
+	// even if the name is concurrently reused by a different entry.
+	c.WaitForJob(id)
+
+	// (3) Replace schedule and job while still paused — UpdateEntry leaves
+	// Paused untouched, so no fire can occur during the swap. With a non-nil
+	// cmd its only failure mode is ErrEntryNotFound (removed during the drain);
+	// create instead, matching the pause path.
+	if c.UpdateEntry(id, schedule, cmd) != nil {
+		return c.ScheduleJob(schedule, cmd, opts...)
+	}
+
+	// (4) Restore prior paused state: resume only if the caller had not already
+	// paused the entry themselves. ResumeEntry only fails with ErrEntryNotFound
+	// (removed after the swap), in which case there is nothing to resume.
+	if !wasPaused {
+		_ = c.ResumeEntry(id)
+	}
+	return id, nil
 }
 
 // now returns current time in c location.
