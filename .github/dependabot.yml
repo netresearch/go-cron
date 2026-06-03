@@ -1,3 +1,25 @@
+# Managed by netresearch/.github/templates/go-lib/
+#
+# Declares only the ecosystems every go-lib consumer is guaranteed to have:
+# gomod and github-actions. Libraries don't ship a Dockerfile, so docker is
+# NOT declared by default — declaring an ecosystem without its manifest makes
+# the Dependabot run fail with `dependency_file_not_found`.
+#
+# docker (or npm/devcontainers) is OPT-IN: a library that genuinely has the
+# manifest adds the block to its own dependabot.yml and lists
+# `.github/dependabot.yml` under `intentional-drift:` in .github/template.yaml
+# so the template sync stops managing the file. Example:
+#   - package-ecosystem: docker
+#     directory: /
+#     schedule:
+#       interval: weekly
+#       day: monday
+#     open-pull-requests-limit: 3
+#     groups:
+#       docker:
+#         patterns: ['*']
+#     cooldown:
+#       default-days: 7
 version: 2
 updates:
   - package-ecosystem: gomod
@@ -20,18 +42,6 @@ updates:
     open-pull-requests-limit: 5
     groups:
       github-actions:
-        patterns: ['*']
-    cooldown:
-      default-days: 7
-
-  - package-ecosystem: docker
-    directory: /
-    schedule:
-      interval: weekly
-      day: monday
-    open-pull-requests-limit: 3
-    groups:
-      docker:
         patterns: ['*']
     cooldown:
       default-days: 7
