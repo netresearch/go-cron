@@ -138,7 +138,48 @@ import (
 | `heap.go` | Min-heap implementation for entry scheduling |
 | `missed.go` | `WithMissedPolicy` for catch-up of missed jobs |
 | `constantdelay.go` | `ConstantDelaySchedule` for `@every` intervals |
+| `workflow.go` | DAG execution engine with cascade skip logic (#312) |
+| `triggered.go` | `TriggeredSchedule` for `@triggered`/`@manual`/`@none` on-demand jobs |
 | `doc.go` | Package documentation and cron expression syntax |
+
+## Concurrency model and internal invariants
+
+The run loop goroutine owns all mutable scheduling state (the `entries` heap, the
+`entryIndex`/`nameIndex` maps, and the dependency/workflow maps). External access is
+serialized through channels while the cron is running: `add`, `remove`, `update`,
+`pause`, `trigger`, `snapshot`, `entryLookup`, `nameLookup`, `addDep`, `removeDep`,
+`queryDeps`, `queryWorkflow`, and `queryActiveWorkflows`. `runningMu` guards the
+`running` flag and protects direct access when not running. See ADR-010 (channel sync)
+and ADR-011 (dual-index maps).
+
+Invariants that MUST hold:
+
+- **All state-modifying operations route through channels when running.** Never modify
+  the heap, index maps, or dependency maps from a caller goroutine — the run loop's
+  Ticker may fire concurrently. Methods like `ScheduleJob`, `Remove`, `UpdateSchedule`,
+  `UpdateEntry`, `PauseEntry`/`ResumeEntry`, `TriggerEntry`, `AddDependency`, and
+  `RemoveDependency` send a request on their channel; the run loop processes it
+  sequentially (e.g. `ScheduleJob` → `c.add` → run loop calls internal `scheduleJob()`).
+  (PR #336 fixed a bug where the original code mutated `entryIndex`/`nameIndex` and the
+  heap directly.)
+- **Mutex held during channel ops.** Every external method that talks to the run loop
+  via a channel (`Entry()`, `EntryByName()`, `Entries()`, `Remove()`, `TriggerEntry()`,
+  etc.) holds `runningMu` across the channel send/receive. Intentional: safety over speed.
+  Releasing the mutex before the send would let `Stop()` run, clear `c.running`, and exit
+  the run loop, leaving the caller blocked forever on a channel with no receiver. Lookups
+  are O(1) map access, so contention is minimal. (PR #336)
+- **Deep-copy mutable fields on Entry return.** `Entry.Tags []string` shares its
+  backing array unless cloned; clone it in `Entry()`, `EntryByName()`, and the
+  `Entries()` snapshot so caller mutation cannot race the run loop. (PR #336;
+  chosen over making `Tags` private, which would break the API.)
+
+Key internal types: `EntryID` (monotonic `uint64`), where `EntryID(0)` is the invalid
+sentinel (ADR-009); `request[T, R]` generic channel request/response pattern;
+`scheduleJobRequest`/`scheduleJobResponse`, `entryLookupRequest`/`nameLookupRequest`.
+
+**CodSpeed regressions:** benchmark reports can flag regressions on unrelated code
+paths. Verify relevance before acting; acknowledge unrelated noise on CodSpeed rather
+than chasing it.
 
 ## Documentation index
 
