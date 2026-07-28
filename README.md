@@ -116,7 +116,9 @@ Standard 5-field cron format (minute-first):
 | Hours | Yes | 0-23 | `* / , -` |
 | Day of month | Yes | 1-31 | `* / , - ?` |
 | Month | Yes | 1-12 or JAN-DEC | `* / , -` |
-| Day of week | Yes | 0-6 or SUN-SAT | `* / , - ?` |
+| Day of week | Yes | 0-7 or SUN-SAT | `* / , - ?` |
+
+Note: Sunday can be represented by both 0 and 7.
 
 ### Predefined Schedules
 

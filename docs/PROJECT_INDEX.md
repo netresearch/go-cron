@@ -304,7 +304,7 @@ func (f *FakeClock) TimerCount() int          // Active timer count
 │ ┌───────────── hour (0-23)
 │ │ ┌───────────── day of month (1-31)
 │ │ │ ┌───────────── month (1-12 or JAN-DEC)
-│ │ │ │ ┌───────────── day of week (0-6 or SUN-SAT)
+│ │ │ │ ┌───────────── day of week (0-7 or SUN-SAT)
 │ │ │ │ │
 * * * * *
 ```
@@ -316,7 +316,7 @@ func (f *FakeClock) TimerCount() int          // Active timer count
 │ │ ┌───────────── hour (0-23)
 │ │ │ ┌───────────── day of month (1-31)
 │ │ │ │ ┌───────────── month (1-12)
-│ │ │ │ │ ┌───────────── day of week (0-6)
+│ │ │ │ │ ┌───────────── day of week (0-7)
 │ │ │ │ │ │
 * * * * * *
 ```

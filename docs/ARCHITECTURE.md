@@ -151,7 +151,7 @@ Second/Minute: bits 0-59 represent each second/minute
 Hour:          bits 0-23 represent each hour
 Dom:           bits 1-31 represent each day (bit 0 unused)
 Month:         bits 1-12 represent each month
-Dow:           bits 0-6 represent each day of week
+Dow:           bits 0-7 represent each day of week (bit 7 is Sunday-as-7 alias, normalized to bit 0)
 ```
 
 **Next() Algorithm:**

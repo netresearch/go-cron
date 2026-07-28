@@ -51,10 +51,12 @@ A cron expression represents a set of times, using 5 space-separated fields.
 	Hours        | Yes        | 0-23            | * / , -
 	Day of month | Yes        | 1-31            | * / , - ?
 	Month        | Yes        | 1-12 or JAN-DEC | * / , -
-	Day of week  | Yes        | 0-6 or SUN-SAT  | * / , - ?
+	Day of week  | Yes        | 0-7 or SUN-SAT  | * / , - ?
 
 Month and Day-of-week field values are case insensitive.  "SUN", "Sun", and
 "sun" are equally accepted.
+
+Note: Sunday can be represented by both 0 and 7.
 
 The specific interpretation of the format is based on the Cron Wikipedia page:
 https://en.wikipedia.org/wiki/Cron
