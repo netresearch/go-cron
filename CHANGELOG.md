@@ -12,6 +12,39 @@ Originally based on [robfig/cron](https://github.com/robfig/cron).
 ### Planned for v2
 - Context-aware Job interface with graceful shutdown support
 
+## [0.15.1] - 2026-07-28
+
+Documentation-only release. No library code changed; it exists so that
+pkg.go.dev, which renders the latest tagged version, picks up the corrected
+day-of-week documentation.
+
+### Documentation
+- **Day-of-week accepts `7` for Sunday** ([PR#390]): The day-of-week field is now
+  documented as `0-7` rather than `0-6`, with an explicit note that Sunday can be
+  written as either `0` or `7`. The parser has always normalized `7` to `0`
+  (`parser.go`), so this corrects the documentation, not the behavior. Updated in
+  `doc.go`, README, `docs/ARCHITECTURE.md`, and `docs/PROJECT_INDEX.md`. Thanks to
+  [@hxl9654] for the contribution!
+- **Concurrency model and invariants** ([PR#385]): AGENTS.md now describes which
+  goroutine owns mutable scheduling state, lists the channels that serialize
+  external access, and records the three invariants contributors must preserve
+  (channel-routed mutations, mutex held across channel ops, deep-copied `Entry`
+  fields).
+- **Go Report Card badge removed** ([PR#391]): The service is sunset.
+
+### Changed
+- **CI: sync with `netresearch/.github` go-lib templates** ([PR#384], [PR#387],
+  [PR#388]): Dependabot grouping, labeler and auto-merge-deps configuration
+  realigned with the template; CodeQL gained the `merge_group` trigger.
+
+[PR#384]: https://github.com/netresearch/go-cron/pull/384
+[PR#385]: https://github.com/netresearch/go-cron/pull/385
+[PR#387]: https://github.com/netresearch/go-cron/pull/387
+[PR#388]: https://github.com/netresearch/go-cron/pull/388
+[PR#390]: https://github.com/netresearch/go-cron/pull/390
+[PR#391]: https://github.com/netresearch/go-cron/pull/391
+[@hxl9654]: https://github.com/hxl9654
+
 ## [0.15.0] - 2026-06-02
 
 ### Added
@@ -578,7 +611,8 @@ This fork includes all features from robfig/cron v3 plus:
    _, err := cron.ParseStandard("*/60 * * * *") // Error: step (60) must be less than range size (60)
    ```
 
-[Unreleased]: https://github.com/netresearch/go-cron/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/netresearch/go-cron/compare/v0.15.1...HEAD
+[0.15.1]: https://github.com/netresearch/go-cron/compare/v0.15.0...v0.15.1
 [0.15.0]: https://github.com/netresearch/go-cron/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/netresearch/go-cron/compare/v0.13.4...v0.14.0
 [0.13.4]: https://github.com/netresearch/go-cron/compare/v0.13.1...v0.13.4
