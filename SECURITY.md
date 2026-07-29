@@ -63,6 +63,41 @@ This project employs several security practices:
 - Input validation for cron expressions and timezones
 - Panic recovery in job execution
 
+## Verifying a Release
+
+Every release ships an SBOM in CycloneDX and SPDX form, a `checksums.txt` over
+them, a Sigstore bundle signing that file, and GitHub build provenance.
+
+The signature covers `checksums.txt`, and `checksums.txt` covers the SBOMs, so
+verifying the signature and then the checksums establishes the whole set. There
+is no separate signature per SBOM — the chain is what carries the trust.
+
+```bash
+gh release download v0.15.1 --repo netresearch/go-cron
+
+# 1. The checksum file is the one signed artifact.
+cosign verify-blob \
+  --bundle checksums.txt.sigstore.json \
+  --certificate-identity-regexp "^https://github\.com/netresearch/\.github/\.github/workflows/golib-create-release\.yml@" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  checksums.txt
+
+# 2. It vouches for the SBOMs.
+sha256sum -c checksums.txt
+```
+
+The signing identity is the **reusable** workflow, not this repository: keyless
+signing inside a called workflow carries that workflow's `job_workflow_ref`.
+Verifying against `netresearch/go-cron` will not match.
+
+Build provenance is available independently of the signature:
+
+```bash
+gh attestation verify checksums.txt \
+  --owner netresearch \
+  --signer-workflow netresearch/.github/.github/workflows/golib-create-release.yml
+```
+
 ## Security Considerations for Users
 
 When using this library:
