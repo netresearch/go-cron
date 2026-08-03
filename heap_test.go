@@ -568,3 +568,37 @@ func BenchmarkRemoveAtWithIndex(b *testing.B) {
 		index[e.ID] = e
 	}
 }
+
+// TestScheduleTieSortsByPriority tests that entries scheduled for
+// the same second are sorted by priority
+func TestScheduleTieSortsByPriority(t *testing.T) {
+	h := &entryHeap{}
+	heap.Init(h)
+
+	// Add entries with different times
+	now := time.Now()
+	entries := []*Entry{
+		{ID: 1, Next: now, heapIndex: -1, Priority: 25},
+		{ID: 2, Next: now, heapIndex: -1, Priority: 50},
+		{ID: 3, Next: now, heapIndex: -1, Priority: 100},
+		{ID: 4, Next: now, heapIndex: -1},
+	}
+
+	for _, e := range entries {
+		heap.Push(h, e)
+	}
+
+	// Peek should return highest priority entry (ID=3)
+	if h.Peek().ID != 3 {
+		t.Errorf("expected ID 3 at top, got %d", h.Peek().ID)
+	}
+
+	// Pop should return in order: 3,2,1,4
+	expectedOrder := []EntryID{3, 2, 1, 4}
+	for _, expectedID := range expectedOrder {
+		e := heap.Pop(h).(*Entry)
+		if e.ID != expectedID {
+			t.Errorf("expected ID %d, got %d", expectedID, e.ID)
+		}
+	}
+}

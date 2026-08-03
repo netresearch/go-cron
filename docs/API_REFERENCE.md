@@ -979,6 +979,7 @@ type Entry struct {
     MissedGracePeriod time.Duration // Maximum age for catch-up runs
     Paused            bool          // Whether this entry is paused
     Triggered         bool          // Whether this entry uses a triggered schedule
+    Priority          int           // Optional tiebreaker for same second dispatching (higher better)
 }
 ```
 
@@ -1362,6 +1363,24 @@ retention (not recommended for long-running services).
 **Example:**
 ```go
 c := cron.New(cron.WithWorkflowRetention(50))
+```
+
+#### func WithPriority
+
+```go
+func WithPriority(p int) JobOption
+```
+
+WithPriority sets the Priority of the entry so that if multiple jobs
+are scheduled for the same second, critical jobs are guaranteed to be dispatched
+first. Default is 0. Higher is better.
+
+**Example:**
+```go
+id1, _ := c.AddFunc("0 * * * *", criticalJob, cron.WithPriority(100))
+id2, _ := c.AddFunc("0 * * * *", normalJob, cron.WithPriority(50))
+id3, _ := c.AddFunc("0 * * * *", lowPriorityJob, cron.WithPriority(25))
+id4, _ := c.AddFunc("0 * * * *", defaultJob) // Default priority: 0.
 ```
 
 ---
