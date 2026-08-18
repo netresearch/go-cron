@@ -385,6 +385,15 @@ type Entry struct {
 	// Visible in Entry snapshots.
 	Triggered bool
 
+	// Priority is the optional priority of the submitted Job. It breaks ties
+	// when multiple entries are due at the same time: the run loop starts
+	// higher-priority job goroutines first. Higher is better; the default is 0.
+	// The guarantee covers goroutine start order only — execution and completion
+	// order is decided by the Go scheduler, and chain wrappers such as Jitter or
+	// SkipIfStillRunning decouple it further. The dispatch order of entries due
+	// at the same time with the same priority is undefined.
+	Priority int
+
 	// entryCtx is a per-entry context derived from the Cron's baseCtx.
 	// It is canceled when the entry is removed or when its job is replaced
 	// via UpdateEntry. Jobs implementing JobWithContext receive this context,
@@ -714,6 +723,30 @@ func WithMissedGracePeriod(d time.Duration) JobOption {
 func WithPaused() JobOption {
 	return func(e *Entry) {
 		e.Paused = true
+	}
+}
+
+// WithPriority sets the Priority of the entry. Priority breaks ties when
+// several entries are due at the same time: the run loop starts
+// higher-priority jobs first. Higher is better; the default is 0.
+//
+// The guarantee is limited to the order in which job goroutines are started.
+// Actual execution and completion order is decided by the Go scheduler, and
+// chain wrappers such as Jitter or SkipIfStillRunning decouple it further.
+//
+// Priority is applied at add time. UpdateEntry and UpdateSchedule preserve it;
+// UpsertJob's update path ignores JobOptions, which is the existing behavior
+// for every option.
+//
+// Example:
+//
+//	id1, _ := c.AddFunc("0 * * * *", criticalJob, cron.WithPriority(100))
+//	id2, _ := c.AddFunc("0 * * * *", normalJob, cron.WithPriority(50))
+//	id3, _ := c.AddFunc("0 * * * *", lowPriorityJob, cron.WithPriority(25))
+//	id4, _ := c.AddFunc("0 * * * *", defaultJob) // Default priority: 0.
+func WithPriority(p int) JobOption {
+	return func(e *Entry) {
+		e.Priority = p
 	}
 }
 
@@ -2096,6 +2129,7 @@ func (c *Cron) entrySnapshot() []Entry {
 // sortEntriesByTime sorts entries in place by their Next scheduled execution time.
 // Entries with zero time (not scheduled or schedule exhausted) are moved to the
 // end of the slice to keep active entries at the front for efficient iteration.
+// Entries scheduled for the same time are sorted by their Priority.
 func sortEntriesByTime(entries []Entry) {
 	sort.Slice(entries, func(i, j int) bool {
 		// Zero times sort to the end (highest priority = earliest time)
@@ -2104,6 +2138,10 @@ func sortEntriesByTime(entries []Entry) {
 		}
 		if entries[j].Next.IsZero() {
 			return true
+		}
+		if entries[i].Next.Equal(entries[j].Next) {
+			// Higher priority entries sort first
+			return entries[i].Priority > entries[j].Priority
 		}
 		return entries[i].Next.Before(entries[j].Next)
 	})

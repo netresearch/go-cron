@@ -1374,3 +1374,19 @@ func ExampleDomW_lastWeekday() {
 	// 31W from Feb 1: March 29
 	// LW from Feb 1: February 29
 }
+
+// This example demonstrates priority as a tiebreaker for entries due at the
+// same time. Higher-priority job goroutines are started first; execution and
+// completion order remains up to the Go scheduler.
+func ExampleWithPriority() {
+	c := cron.New()
+
+	id1, _ := c.AddFunc("0 * * * *", func() {}, cron.WithPriority(100))
+	id2, _ := c.AddFunc("0 * * * *", func() {}) // Default priority: 0.
+
+	fmt.Println(c.Entry(id1).Priority)
+	fmt.Println(c.Entry(id2).Priority)
+	// Output:
+	// 100
+	// 0
+}

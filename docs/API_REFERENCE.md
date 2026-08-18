@@ -979,6 +979,7 @@ type Entry struct {
     MissedGracePeriod time.Duration // Maximum age for catch-up runs
     Paused            bool          // Whether this entry is paused
     Triggered         bool          // Whether this entry uses a triggered schedule
+    Priority          int           // Optional tiebreaker for entries due at the same time (higher starts first)
 }
 ```
 
@@ -1362,6 +1363,32 @@ retention (not recommended for long-running services).
 **Example:**
 ```go
 c := cron.New(cron.WithWorkflowRetention(50))
+```
+
+#### func WithPriority
+
+```go
+func WithPriority(p int) JobOption
+```
+
+WithPriority sets the Priority of the entry. Priority breaks ties when several
+entries are due at the same time: the run loop starts higher-priority jobs
+first. Higher is better; the default is 0.
+
+The guarantee is limited to the order in which job goroutines are started.
+Actual execution and completion order is decided by the Go scheduler, and chain
+wrappers such as `Jitter` or `SkipIfStillRunning` decouple it further.
+
+Priority is applied at add time. `UpdateEntry` and `UpdateSchedule` preserve
+it; `UpsertJob`'s update path ignores `JobOption`s, which is the existing
+behavior for every option.
+
+**Example:**
+```go
+id1, _ := c.AddFunc("0 * * * *", criticalJob, cron.WithPriority(100))
+id2, _ := c.AddFunc("0 * * * *", normalJob, cron.WithPriority(50))
+id3, _ := c.AddFunc("0 * * * *", lowPriorityJob, cron.WithPriority(25))
+id4, _ := c.AddFunc("0 * * * *", defaultJob) // Default priority: 0.
 ```
 
 ---

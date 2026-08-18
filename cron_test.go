@@ -5061,6 +5061,28 @@ func TestWithPausedOption(t *testing.T) {
 	}
 }
 
+// TestWithPriorityOption verifies that WithPriority sets Entry.Priority
+// through the public API and that entries without the option default to 0.
+func TestWithPriorityOption(t *testing.T) {
+	c := New()
+
+	high, err := c.AddFunc("0 * * * *", func() {}, WithPriority(100))
+	if err != nil {
+		t.Fatalf("AddFunc with WithPriority: %v", err)
+	}
+	deflt, err := c.AddFunc("0 * * * *", func() {})
+	if err != nil {
+		t.Fatalf("AddFunc without priority: %v", err)
+	}
+
+	if got := c.Entry(high).Priority; got != 100 {
+		t.Errorf("expected Priority 100, got %d", got)
+	}
+	if got := c.Entry(deflt).Priority; got != 0 {
+		t.Errorf("expected default Priority 0, got %d", got)
+	}
+}
+
 // TestPauseDoesNotAffectRunningJob verifies that pausing while a job is
 // in-flight does not cancel the currently executing job.
 func TestPauseDoesNotAffectRunningJob(t *testing.T) {

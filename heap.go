@@ -24,6 +24,10 @@ func (h entryHeap) Less(i, j int) bool {
 	if h[j].Next.IsZero() {
 		return true
 	}
+	if h[i].Next.Equal(h[j].Next) {
+		// Higher priority entries sort first
+		return h[i].Priority > h[j].Priority
+	}
 	return h[i].Next.Before(h[j].Next)
 }
 
