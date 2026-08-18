@@ -385,10 +385,13 @@ type Entry struct {
 	// Visible in Entry snapshots.
 	Triggered bool
 
-	// Priority is the optional priority of the submitted Job. It is used as a
-	// tiebreaker when multiple jobs are scheduled for the same time; higher is better.
-	// Note: the dispatch order of jobs scheduled for the same time with the same
-	// priority is undefined
+	// Priority is the optional priority of the submitted Job. It breaks ties
+	// when multiple entries are due at the same time: the run loop starts
+	// higher-priority job goroutines first. Higher is better; the default is 0.
+	// The guarantee covers goroutine start order only — execution and completion
+	// order is decided by the Go scheduler, and chain wrappers such as Jitter or
+	// SkipIfStillRunning decouple it further. The dispatch order of entries due
+	// at the same time with the same priority is undefined.
 	Priority int
 
 	// entryCtx is a per-entry context derived from the Cron's baseCtx.
@@ -723,9 +726,17 @@ func WithPaused() JobOption {
 	}
 }
 
-// WithPriority sets the Priority of the entry so that if multiple jobs
-// are scheduled for the same second, critical jobs are guaranteed to be dispatched first.
-// Higher is better.
+// WithPriority sets the Priority of the entry. Priority breaks ties when
+// several entries are due at the same time: the run loop starts
+// higher-priority jobs first. Higher is better; the default is 0.
+//
+// The guarantee is limited to the order in which job goroutines are started.
+// Actual execution and completion order is decided by the Go scheduler, and
+// chain wrappers such as Jitter or SkipIfStillRunning decouple it further.
+//
+// Priority is applied at add time. UpdateEntry and UpdateSchedule preserve it;
+// UpsertJob's update path ignores JobOptions, which is the existing behavior
+// for every option.
 //
 // Example:
 //
