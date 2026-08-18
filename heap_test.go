@@ -570,12 +570,13 @@ func BenchmarkRemoveAtWithIndex(b *testing.B) {
 }
 
 // TestScheduleTieSortsByPriority tests that entries scheduled for
-// the same second are sorted by priority
+// the same time are sorted by priority
 func TestScheduleTieSortsByPriority(t *testing.T) {
 	h := &entryHeap{}
 	heap.Init(h)
 
-	// Add entries with different times
+	// All entries share the same Next time — the tie is the point of the
+	// test: with equal times, the heap must order by Priority alone.
 	now := time.Now()
 	entries := []*Entry{
 		{ID: 1, Next: now, heapIndex: -1, Priority: 25},
