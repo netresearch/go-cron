@@ -54,7 +54,7 @@ Go 1.26 and later. We follow Go's [release policy](https://go.dev/doc/devel/rele
 ```
 module github.com/netresearch/go-cron
 
-go 1.25
+go 1.26
 ```
 
 This means:

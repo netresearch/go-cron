@@ -16,7 +16,7 @@ Import it in your program as:
 
 	import "github.com/netresearch/go-cron"
 
-It requires Go 1.25 or later.
+It requires Go 1.26 or later.
 
 # Usage
 

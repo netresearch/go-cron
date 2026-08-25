@@ -12,20 +12,17 @@ The following protection rules should be configured in GitHub Settings > Branche
 - [x] Require status checks to pass before merging
 - [x] Require branches to be up to date before merging
 
-**Required checks:**
-- `unit / unit tests (1.25.x, ubuntu-latest)`
-- `unit / unit tests (1.25.x, windows-latest)`
-- `unit / unit tests (1.25.x, macos-latest)`
-- `unit / unit tests (1.26.x, ubuntu-latest)`
-- `unit / unit tests (1.26.x, windows-latest)`
-- `unit / unit tests (1.26.x, macos-latest)`
-- `lint / golangci-lint`
-- `vulncheck / govulncheck`
-- `gosec / gosec`
-- `trivy / trivy scan (fs)`
-- `workflow-lint / actionlint`
-- `integration / integration tests`
-- `license-check / license compliance`
+**Required checks** (as configured in the live `main` ruleset; CI runs the single Go version from the go.mod toolchain via the shared go-check workflow):
+- `go-check / Build & Test`
+- `go-check / Integration Tests`
+- `go-check / E2E Tests`
+- `go-check / Smoke Tests (fast feedback)`
+- `go-check / golangci-lint`
+- `go-check / gosec`
+- `go-check / govulncheck`
+- `go-check / Fuzz (corpus replay)`
+- `go-check / License Scan`
+- `drift / Template drift`
 
 #### Code Review Requirements
 - [x] Require pull request reviews before merging

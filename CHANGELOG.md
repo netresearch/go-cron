@@ -9,6 +9,9 @@ Originally based on [robfig/cron](https://github.com/robfig/cron).
 
 ## [Unreleased]
 
+### Changed
+- **BREAKING**: minimum supported Go version raised from 1.25 to 1.26 (Go release policy: two most recent releases, now 1.26 + 1.27); toolchain updated to go1.27.0
+
 ### Planned for v2
 - Context-aware Job interface with graceful shutdown support
 
