@@ -4,6 +4,7 @@
 package cron
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -437,7 +438,7 @@ func TestValidateSpecPerformance(t *testing.T) {
 	start := time.Now()
 	iterations := 1000
 
-	for i := 0; i < iterations; i++ {
+	for range iterations {
 		for _, spec := range specs {
 			_ = ValidateSpec(spec)
 		}
@@ -520,9 +521,9 @@ func TestValidateSpecConcurrent(t *testing.T) {
 	}
 
 	done := make(chan bool)
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		go func() {
-			for j := 0; j < 100; j++ {
+			for range 100 {
 				for _, spec := range specs {
 					_ = ValidateSpec(spec)
 					_ = AnalyzeSpec(spec)
@@ -532,7 +533,7 @@ func TestValidateSpecConcurrent(t *testing.T) {
 		}()
 	}
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		<-done
 	}
 }
@@ -624,13 +625,7 @@ func TestValidateSpecs(t *testing.T) {
 
 			// Verify no unexpected errors
 			for idx := range errors {
-				found := false
-				for _, wantIdx := range tt.wantErrIndices {
-					if idx == wantIdx {
-						found = true
-						break
-					}
-				}
+				found := slices.Contains(tt.wantErrIndices, idx)
 				if !found {
 					t.Errorf("unexpected error at index %d: %v", idx, errors[idx])
 				}
@@ -684,9 +679,9 @@ func TestValidateSpecsConcurrent(t *testing.T) {
 	specs := []string{"* * * * *", "invalid", "@hourly", "bad", "0 9 * * MON-FRI"}
 	done := make(chan bool)
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		go func() {
-			for j := 0; j < 100; j++ {
+			for range 100 {
 				errors := ValidateSpecs(specs)
 				// Should always have exactly 2 errors (indices 1 and 3)
 				if len(errors) != 2 {
@@ -697,7 +692,7 @@ func TestValidateSpecsConcurrent(t *testing.T) {
 		}()
 	}
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		<-done
 	}
 }

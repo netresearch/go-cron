@@ -7,7 +7,7 @@
 | Attribute | Value |
 |-----------|-------|
 | **Module** | `github.com/netresearch/go-cron` |
-| **Go Version** | 1.25+ |
+| **Go Version** | 1.26+ |
 | **Total Lines** | ~5,870 |
 | **Test Coverage** | Comprehensive (unit, fuzz, benchmark, integration) |
 | **License** | MIT |

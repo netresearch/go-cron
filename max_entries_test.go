@@ -79,7 +79,7 @@ func TestWithMaxEntries_ZeroMeansUnlimited(t *testing.T) {
 	c := New() // Default is 0 (unlimited)
 
 	// Should be able to add many entries
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		_, err := c.AddFunc("* * * * *", func() {})
 		if err != nil {
 			t.Fatalf("AddFunc failed at iteration %d: %v", i, err)
@@ -94,7 +94,7 @@ func TestWithMaxEntries_ZeroMeansUnlimited(t *testing.T) {
 func TestWithMaxEntries_ExplicitZeroIsUnlimited(t *testing.T) {
 	c := New(WithMaxEntries(0)) // Explicit 0 = unlimited
 
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		_, err := c.AddFunc("* * * * *", func() {})
 		if err != nil {
 			t.Fatalf("AddFunc failed at iteration %d: %v", i, err)
@@ -386,7 +386,7 @@ func TestCompactionThresholdBoundary(t *testing.T) {
 	// Add entries
 	const numEntries = 100
 	ids := make([]EntryID, numEntries)
-	for i := 0; i < numEntries; i++ {
+	for i := range numEntries {
 		id, _ := c.AddFunc("* * * * *", func() {})
 		ids[i] = id
 	}
@@ -398,7 +398,7 @@ func TestCompactionThresholdBoundary(t *testing.T) {
 
 	// Remove entries one at a time - should not trigger compaction yet
 	// because indexDeletions < indexCompactionThreshold (1000)
-	for i := 0; i < numEntries/2; i++ {
+	for i := range numEntries / 2 {
 		c.Remove(ids[i])
 	}
 

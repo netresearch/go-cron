@@ -1,8 +1,8 @@
 module github.com/netresearch/go-cron
 
-go 1.25
+go 1.26
 
-toolchain go1.26.2
+toolchain go1.27.0
 
 retract (
 	v1.3.0 // Retraction-only release; use v0.6.x

@@ -35,7 +35,7 @@ The API is 100% compatible with robfig/cron v3 — no code changes required for 
 | Library | Minimum Go Version |
 |---------|-------------------|
 | robfig/cron v3 | Go 1.13 |
-| netresearch/go-cron | Go 1.25 |
+| netresearch/go-cron | Go 1.26 |
 
 ## Behavioral Differences
 
@@ -323,7 +323,7 @@ c := cron.New(cron.WithLogger(
 
 - [ ] Update import path to `github.com/netresearch/go-cron`
 - [ ] Update go.mod with `go get github.com/netresearch/go-cron@latest`
-- [ ] Verify Go version is 1.25+
+- [ ] Verify Go version is 1.26+
 - [ ] Review timezone handling for empty/invalid timezone cases
 - [ ] Update `entry.Job.Run()` calls to `entry.Run()` if chain behavior is expected
 - [ ] Review cron expressions for step validation (`*/60` style patterns)

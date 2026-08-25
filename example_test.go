@@ -462,7 +462,7 @@ func ExampleTimeout_cancellable() {
 	// Wrap the worker in a FuncJob
 	c.Schedule(cron.Every(time.Minute), cron.FuncJob(func() {
 		defer close(worker.done)
-		for i := 0; i < 100; i++ {
+		for range 100 {
 			select {
 			case <-worker.cancel:
 				fmt.Println("Job canceled cleanly")
@@ -1005,7 +1005,7 @@ func ExampleNewParser_hashStep() {
 	from := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 
 	// Get the first 4 execution times
-	for i := 0; i < 4; i++ {
+	for range 4 {
 		next := schedule.Next(from)
 		fmt.Printf("%s\n", next.Format("15:04"))
 		from = next

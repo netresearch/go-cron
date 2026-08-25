@@ -193,7 +193,7 @@ func TestWithMinEveryInterval_SubSecondExecution(t *testing.T) {
 	defer c.Stop()
 
 	// Advance time by 350ms - should trigger ~3 executions
-	for i := 0; i < 35; i++ {
+	for range 35 {
 		clock.Advance(10 * time.Millisecond)
 		time.Sleep(1 * time.Millisecond) // Let scheduler process
 	}

@@ -743,9 +743,9 @@ func TestIntrospectionConcurrent(t *testing.T) {
 	end := time.Date(2024, 6, 16, 10, 0, 0, 0, time.UTC)
 
 	done := make(chan bool)
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		go func() {
-			for j := 0; j < 100; j++ {
+			for range 100 {
 				_ = NextN(schedule, start, 10)
 				_ = PrevN(schedule, start, 10)
 				_ = Between(schedule, start, end)
@@ -756,7 +756,7 @@ func TestIntrospectionConcurrent(t *testing.T) {
 		}()
 	}
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		<-done
 	}
 }

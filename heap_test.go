@@ -232,7 +232,7 @@ func BenchmarkHeapPush(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		h := &entryHeap{}
 		heap.Init(h)
-		for j := 0; j < 1000; j++ {
+		for j := range 1000 {
 			e := &Entry{
 				ID:        EntryID(j),
 				Next:      now.Add(time.Duration(j) * time.Second),
@@ -249,7 +249,7 @@ func BenchmarkHeapPopPush(b *testing.B) {
 	heap.Init(h)
 
 	// Pre-populate with 1000 entries
-	for j := 0; j < 1000; j++ {
+	for j := range 1000 {
 		e := &Entry{
 			ID:        EntryID(j),
 			Next:      now.Add(time.Duration(j) * time.Second),
@@ -273,7 +273,7 @@ func BenchmarkHeapUpdate(b *testing.B) {
 
 	// Pre-populate with 1000 entries
 	entries := make([]*Entry, 1000)
-	for j := 0; j < 1000; j++ {
+	for j := range 1000 {
 		e := &Entry{
 			ID:        EntryID(j),
 			Next:      now.Add(time.Duration(j) * time.Second),
@@ -541,7 +541,7 @@ func BenchmarkRemoveAtWithIndex(b *testing.B) {
 	h := &entryHeap{}
 	heap.Init(h)
 	index := make(map[EntryID]*Entry)
-	for j := 0; j < size; j++ {
+	for j := range size {
 		e := &Entry{
 			ID:        EntryID(j + 1),
 			Next:      now.Add(time.Duration(j) * time.Second),

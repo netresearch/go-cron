@@ -10,7 +10,7 @@ Cron spec parser and job scheduler for Go (successor to robfig/cron).
 
 | Attribute | Value |
 |-----------|-------|
-| Language | Go 1.25+ (CI tests 1.25.x + 1.26.x) |
+| Language | Go 1.26+ (two most recent Go releases; CI tests the go.mod toolchain, currently go1.27.0) |
 | Module | `github.com/netresearch/go-cron` |
 | Type | Library (zero external dependencies) |
 | API | Drop-in replacement for `robfig/cron/v3` |

@@ -151,7 +151,7 @@ func TestHashWithStep(t *testing.T) {
 	from := time.Date(2024, 1, 1, 0, 0, 0, 0, loc)
 	times := make([]time.Time, 4)
 	current := from
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		times[i] = schedule.Next(current)
 		current = times[i]
 	}
@@ -177,7 +177,7 @@ func TestHashWithRange(t *testing.T) {
 	}
 
 	from := time.Date(2024, 1, 1, 0, 0, 0, 0, loc)
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		next := schedule.Next(from)
 		if next.Minute() < 0 || next.Minute() > 29 {
 			t.Errorf("Minute %d outside range 0-29", next.Minute())
@@ -202,7 +202,7 @@ func TestHashWithRangeAndStep(t *testing.T) {
 	// Get first few execution times and verify they're 10 minutes apart
 	times := make([]time.Time, 3)
 	current := from
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		times[i] = schedule.Next(current)
 		if times[i].Minute() > 30 {
 			t.Errorf("Minute %d exceeds range max 30", times[i].Minute())
@@ -303,9 +303,9 @@ func TestHashFieldConcurrent(t *testing.T) {
 	parser := NewParser(Minute | Hour | Dom | Month | Dow | Descriptor | Hash)
 
 	done := make(chan bool)
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		go func(id int) {
-			for j := 0; j < 100; j++ {
+			for range 100 {
 				key := "job" + string(rune('0'+id))
 				schedule, err := parser.ParseWithHashKey("H * * * *", key)
 				if err != nil {
@@ -321,7 +321,7 @@ func TestHashFieldConcurrent(t *testing.T) {
 		}(i)
 	}
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		<-done
 	}
 }

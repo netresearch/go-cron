@@ -275,11 +275,9 @@ func TestFakeClockBlockUntil(t *testing.T) {
 
 	// BlockUntil with 1 timer
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
+	wg.Go(func() {
 		clock.BlockUntil(1)
-		wg.Done()
-	}()
+	})
 
 	// Create a timer
 	clock.NewTimer(time.Hour)
@@ -362,7 +360,7 @@ func TestFakeClockConcurrency(t *testing.T) {
 	timerCount := 100
 
 	// Create many timers concurrently
-	for i := 0; i < timerCount; i++ {
+	for i := range timerCount {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()

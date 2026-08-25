@@ -33,7 +33,7 @@ A production-grade cron job scheduler for Go — drop-in replacement for [robfig
 | Context support | None | Per-entry context, `FuncJobWithContext` |
 | Resilience | None | Retry, circuit breaker, timeout, rate limiting |
 | Observability | None | Hooks for metrics (Prometheus, etc.) |
-| Go version | Stuck on 1.13 | Go 1.25+ with modern toolchain |
+| Go version | Stuck on 1.13 | Go 1.26+ with modern toolchain |
 
 ## Installation
 
@@ -46,7 +46,7 @@ import cron "github.com/netresearch/go-cron"
 ```
 
 > [!NOTE]
-> Requires Go 1.25 or later.
+> Requires Go 1.26 or later.
 
 ## Migrating from robfig/cron
 

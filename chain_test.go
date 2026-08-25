@@ -74,13 +74,13 @@ type testLogCapture struct {
 	mu         sync.Mutex
 }
 
-func (l *testLogCapture) Info(msg string, keysAndValues ...interface{}) {
+func (l *testLogCapture) Info(msg string, keysAndValues ...any) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.infoCalls = append(l.infoCalls, msg)
 }
 
-func (l *testLogCapture) Error(err error, msg string, keysAndValues ...interface{}) {
+func (l *testLogCapture) Error(err error, msg string, keysAndValues ...any) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.errorCalls = append(l.errorCalls, msg)
@@ -328,7 +328,7 @@ func TestChainDelayIfStillRunning(t *testing.T) {
 		close(j.canProceed)
 
 		// Wait for both jobs to complete
-		for i := 0; i < 2; i++ {
+		for i := range 2 {
 			select {
 			case <-j.onDone:
 			case <-time.After(5 * time.Second):
@@ -508,12 +508,10 @@ func TestSkipIfStillRunning_Skip10JobsOnRapidFire(t *testing.T) {
 	var wrappersDone sync.WaitGroup
 
 	// Fire 11 jobs rapidly
-	for i := 0; i < 11; i++ {
-		wrappersDone.Add(1)
-		go func() {
-			defer wrappersDone.Done()
+	for range 11 {
+		wrappersDone.Go(func() {
 			wrappedJob.Run()
-		}()
+		})
 	}
 
 	// Wait for first job to start (it will hold the semaphore)
@@ -601,7 +599,7 @@ func TestSkipIfStillRunning_DifferentJobsIndependent(t *testing.T) {
 	var wrappersDone sync.WaitGroup
 
 	// Fire 11 jobs for each wrapped job
-	for i := 0; i < 11; i++ {
+	for range 11 {
 		wrappersDone.Add(2)
 		go func() {
 			defer wrappersDone.Done()
@@ -803,11 +801,11 @@ func TestChainTimeout(t *testing.T) {
 	})
 
 	t.Run("callback invoked on timeout", func(t *testing.T) {
-		var callbackCalled int32
+		var callbackCalled atomic.Int32
 		var callbackTimeout time.Duration
 
 		callback := func(timeout time.Duration) {
-			atomic.AddInt32(&callbackCalled, 1)
+			callbackCalled.Add(1)
 			callbackTimeout = timeout
 		}
 
@@ -819,7 +817,7 @@ func TestChainTimeout(t *testing.T) {
 		wrappedJob.Run()
 
 		// Callback should have been invoked
-		if c := atomic.LoadInt32(&callbackCalled); c != 1 {
+		if c := callbackCalled.Load(); c != 1 {
 			t.Errorf("expected callback to be called once, got %d", c)
 		}
 		if callbackTimeout != 5*time.Millisecond {
@@ -835,10 +833,10 @@ func TestChainTimeout(t *testing.T) {
 	})
 
 	t.Run("callback not invoked when job completes in time", func(t *testing.T) {
-		var callbackCalled int32
+		var callbackCalled atomic.Int32
 
 		callback := func(timeout time.Duration) {
-			atomic.AddInt32(&callbackCalled, 1)
+			callbackCalled.Add(1)
 		}
 
 		var j countJob
@@ -847,7 +845,7 @@ func TestChainTimeout(t *testing.T) {
 		wrappedJob.Run()
 
 		// Callback should NOT have been invoked
-		if c := atomic.LoadInt32(&callbackCalled); c != 0 {
+		if c := callbackCalled.Load(); c != 0 {
 			t.Errorf("expected callback not to be called, got %d calls", c)
 		}
 	})
@@ -858,11 +856,11 @@ func TestChainTimeout(t *testing.T) {
 // chain.go:418 where ctx.Err() == context.DeadlineExceeded could be negated.
 func TestTimeoutWithContextCancellation(t *testing.T) {
 	t.Run("callback not invoked on context cancellation", func(t *testing.T) {
-		var callbackCalled int32
+		var callbackCalled atomic.Int32
 		var errorLogged int32
 
 		callback := func(timeout time.Duration) {
-			atomic.AddInt32(&callbackCalled, 1)
+			callbackCalled.Add(1)
 		}
 
 		logger := &testLogCapture{}
@@ -908,7 +906,7 @@ func TestTimeoutWithContextCancellation(t *testing.T) {
 		}
 
 		// Callback should NOT be called because context was canceled, not timed out
-		if c := atomic.LoadInt32(&callbackCalled); c != 0 {
+		if c := callbackCalled.Load(); c != 0 {
 			t.Errorf("expected callback NOT called on cancellation, got %d calls", c)
 		}
 
@@ -921,10 +919,10 @@ func TestTimeoutWithContextCancellation(t *testing.T) {
 	})
 
 	t.Run("callback invoked on actual timeout", func(t *testing.T) {
-		var callbackCalled int32
+		var callbackCalled atomic.Int32
 
 		callback := func(timeout time.Duration) {
-			atomic.AddInt32(&callbackCalled, 1)
+			callbackCalled.Add(1)
 		}
 
 		logger := &testLogCapture{}
@@ -949,7 +947,7 @@ func TestTimeoutWithContextCancellation(t *testing.T) {
 		}
 
 		// Callback SHOULD be called because job actually timed out
-		if c := atomic.LoadInt32(&callbackCalled); c != 1 {
+		if c := callbackCalled.Load(); c != 1 {
 			t.Errorf("expected callback called once on timeout, got %d calls", c)
 		}
 
@@ -1099,7 +1097,7 @@ func TestJitter_Distribution(t *testing.T) {
 	iterations := 20
 	var totalDelay time.Duration
 
-	for i := 0; i < iterations; i++ {
+	for range iterations {
 		job := FuncJob(func() {})
 		wrappedJob := NewChain(Jitter(maxJitter)).Then(job)
 
@@ -1229,11 +1227,11 @@ func TestRecoverWithNonErrorPanic(t *testing.T) {
 
 // TestTimeoutWithContext_CallbackOnTimeout tests that RunWithContext fires onTimeout callback.
 func TestTimeoutWithContext_CallbackOnTimeout(t *testing.T) {
-	var callbackCalled int32
+	var callbackCalled atomic.Int32
 	var callbackDuration time.Duration
 
 	callback := func(timeout time.Duration) {
-		atomic.AddInt32(&callbackCalled, 1)
+		callbackCalled.Add(1)
 		callbackDuration = timeout
 	}
 
@@ -1262,7 +1260,7 @@ func TestTimeoutWithContext_CallbackOnTimeout(t *testing.T) {
 		t.Fatal("timeout waiting for abandoned goroutine")
 	}
 
-	if c := atomic.LoadInt32(&callbackCalled); c != 1 {
+	if c := callbackCalled.Load(); c != 1 {
 		t.Errorf("expected callback called once, got %d", c)
 	}
 	if callbackDuration != timeout {

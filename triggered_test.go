@@ -60,8 +60,8 @@ func TestTriggeredEntry_NeverAutoRuns(t *testing.T) {
 	c := New(WithClock(clock), WithParser(secondParser))
 	defer c.Stop()
 
-	var runs int32
-	_, err := c.AddFunc("@triggered", func() { atomic.AddInt32(&runs, 1) }, WithName("never-auto"))
+	var runs atomic.Int32
+	_, err := c.AddFunc("@triggered", func() { runs.Add(1) }, WithName("never-auto"))
 	if err != nil {
 		t.Fatalf("add failed: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestTriggeredEntry_NeverAutoRuns(t *testing.T) {
 	clock.Advance(10 * time.Second)
 	time.Sleep(20 * time.Millisecond)
 
-	if n := atomic.LoadInt32(&runs); n != 0 {
+	if n := runs.Load(); n != 0 {
 		t.Errorf("expected 0 auto runs, got %d", n)
 	}
 }
@@ -201,10 +201,10 @@ func TestTriggerEntry_WithMiddleware(t *testing.T) {
 
 	running := make(chan struct{})
 	unblock := make(chan struct{})
-	var runs int32
+	var runs atomic.Int32
 
 	id, err := c.AddFunc("@triggered", func() {
-		atomic.AddInt32(&runs, 1)
+		runs.Add(1)
 		running <- struct{}{}
 		<-unblock
 	})
@@ -230,7 +230,7 @@ func TestTriggerEntry_WithMiddleware(t *testing.T) {
 	close(unblock) // Let first job finish
 	time.Sleep(20 * time.Millisecond)
 
-	if n := atomic.LoadInt32(&runs); n != 1 {
+	if n := runs.Load(); n != 1 {
 		t.Errorf("expected 1 run (second skipped), got %d", n)
 	}
 }
@@ -307,11 +307,11 @@ func TestWithRunImmediately_Triggered(t *testing.T) {
 	c := New(WithClock(clock), WithParser(secondParser))
 	defer c.Stop()
 
-	var runs int32
+	var runs atomic.Int32
 	var once sync.Once
 	done := make(chan struct{})
 	_, err := c.AddFunc("@triggered", func() {
-		atomic.AddInt32(&runs, 1)
+		runs.Add(1)
 		once.Do(func() { close(done) })
 	}, WithRunImmediately())
 	if err != nil {
@@ -330,7 +330,7 @@ func TestWithRunImmediately_Triggered(t *testing.T) {
 		t.Fatal("immediate run did not fire within 1s")
 	}
 
-	if n := atomic.LoadInt32(&runs); n != 1 {
+	if n := runs.Load(); n != 1 {
 		t.Errorf("expected 1 immediate run, got %d", n)
 	}
 
@@ -339,7 +339,7 @@ func TestWithRunImmediately_Triggered(t *testing.T) {
 	clock.Advance(10 * time.Second)
 	time.Sleep(20 * time.Millisecond)
 
-	if n := atomic.LoadInt32(&runs); n != 1 {
+	if n := runs.Load(); n != 1 {
 		t.Errorf("expected still 1 run after advance, got %d", n)
 	}
 }
@@ -483,8 +483,8 @@ func TestTriggerEntry_MultipleTriggers(t *testing.T) {
 	c := New(WithClock(clock), WithParser(secondParser))
 	defer c.Stop()
 
-	var runs int32
-	_, err := c.AddFunc("@triggered", func() { atomic.AddInt32(&runs, 1) }, WithName("multi"))
+	var runs atomic.Int32
+	_, err := c.AddFunc("@triggered", func() { runs.Add(1) }, WithName("multi"))
 	if err != nil {
 		t.Fatalf("add failed: %v", err)
 	}
@@ -492,7 +492,7 @@ func TestTriggerEntry_MultipleTriggers(t *testing.T) {
 	c.Start()
 	clock.BlockUntil(1)
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if err := c.TriggerEntryByName("multi"); err != nil {
 			t.Fatalf("trigger %d failed: %v", i, err)
 		}
@@ -500,7 +500,7 @@ func TestTriggerEntry_MultipleTriggers(t *testing.T) {
 	}
 
 	time.Sleep(20 * time.Millisecond)
-	if n := atomic.LoadInt32(&runs); n != 3 {
+	if n := runs.Load(); n != 3 {
 		t.Errorf("expected 3 runs, got %d", n)
 	}
 }
