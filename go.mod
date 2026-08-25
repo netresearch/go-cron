@@ -1,6 +1,6 @@
 module github.com/netresearch/go-cron
 
-go 1.25
+go 1.26
 
 toolchain go1.27.0
 

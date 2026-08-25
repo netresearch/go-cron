@@ -45,7 +45,7 @@ import cron "github.com/netresearch/go-cron"
 
 ### What Go versions are supported?
 
-Go 1.25 and later. We follow Go's [release policy](https://go.dev/doc/devel/release#policy) and support the two most recent major versions.
+Go 1.26 and later. We follow Go's [release policy](https://go.dev/doc/devel/release#policy) and support the two most recent major versions.
 
 ### Does this library have any dependencies?
 

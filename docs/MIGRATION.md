@@ -35,7 +35,7 @@ The API is 100% compatible with robfig/cron v3 — no code changes required for 
 | Library | Minimum Go Version |
 |---------|-------------------|
 | robfig/cron v3 | Go 1.13 |
-| netresearch/go-cron | Go 1.25 |
+| netresearch/go-cron | Go 1.26 |
 
 ## Behavioral Differences
 
