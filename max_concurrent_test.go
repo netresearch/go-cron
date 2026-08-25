@@ -19,7 +19,7 @@ func TestMaxConcurrent_LimitsParallelism(t *testing.T) {
 	wrapper := MaxConcurrent(limit)
 	var wg sync.WaitGroup
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		wg.Add(1)
 		wrapped := wrapper(FuncJob(func() {
 			defer wg.Done()
@@ -50,24 +50,24 @@ func TestMaxConcurrent_LimitsParallelism(t *testing.T) {
 }
 
 func TestMaxConcurrent_AllJobsComplete(t *testing.T) {
-	var completed int32
+	var completed atomic.Int32
 
 	wrapper := MaxConcurrent(2)
 	var wg sync.WaitGroup
 
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		wg.Add(1)
 		wrapped := wrapper(FuncJob(func() {
 			defer wg.Done()
 			time.Sleep(5 * time.Millisecond)
-			atomic.AddInt32(&completed, 1)
+			completed.Add(1)
 		}))
 		go wrapped.Run()
 	}
 
 	wg.Wait()
 
-	if got := atomic.LoadInt32(&completed); got != 20 {
+	if got := completed.Load(); got != 20 {
 		t.Errorf("expected 20 completed, got %d", got)
 	}
 }
@@ -103,7 +103,7 @@ func TestMaxConcurrent_SharedAcrossJobs(t *testing.T) {
 	var wg sync.WaitGroup
 
 	// Create multiple distinct jobs
-	for i := 0; i < 6; i++ {
+	for range 6 {
 		wg.Add(1)
 		job := FuncJob(func() {
 			defer wg.Done()
@@ -157,7 +157,7 @@ func TestMaxConcurrent_SingleSlot(t *testing.T) {
 
 	wrapper := MaxConcurrent(1)
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		wg.Add(1)
 		idx := i
 		wrapped := wrapper(FuncJob(func() {
@@ -221,23 +221,23 @@ func TestMaxConcurrentSkip_SkipsWhenFull(t *testing.T) {
 }
 
 func TestMaxConcurrentSkip_ExecutesWhenAvailable(t *testing.T) {
-	var completed int32
+	var completed atomic.Int32
 
 	wrapper := MaxConcurrentSkip(DiscardLogger, 5)
 
 	var wg sync.WaitGroup
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		wg.Add(1)
 		wrapped := wrapper(FuncJob(func() {
 			defer wg.Done()
-			atomic.AddInt32(&completed, 1)
+			completed.Add(1)
 		}))
 		wrapped.Run()
 	}
 
 	wg.Wait()
 
-	if got := atomic.LoadInt32(&completed); got != 5 {
+	if got := completed.Load(); got != 5 {
 		t.Errorf("expected 5 completed, got %d", got)
 	}
 }
@@ -280,7 +280,7 @@ func TestMaxConcurrentSkip_LimitsParallelism(t *testing.T) {
 
 	wrapper := MaxConcurrentSkip(DiscardLogger, limit)
 
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		wg.Add(1)
 		wrapped := wrapper(FuncJob(func() {
 			cur := atomic.AddInt32(&running, 1)
@@ -333,7 +333,7 @@ func TestMaxConcurrent_IntegrationWithCron(t *testing.T) {
 	)
 
 	// Add 5 jobs all triggering at the same time
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		c.AddFunc("@every 1h", func() {
 			cur := atomic.AddInt32(&running, 1)
 			mu.Lock()

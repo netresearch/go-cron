@@ -50,7 +50,7 @@ func TestRetryWithBackoff_Callback_SuccessFirstAttempt(t *testing.T) {
 func TestRetryWithBackoff_Callback_RetryThenSuccess(t *testing.T) {
 	var events []RetryAttempt
 	var mu sync.Mutex
-	var attempts int32
+	var attempts atomic.Int32
 
 	wrapped := RetryWithBackoff(DiscardLogger, 3, 10*time.Millisecond, time.Second, 2.0,
 		WithRetryCallback(func(a RetryAttempt) {
@@ -59,7 +59,7 @@ func TestRetryWithBackoff_Callback_RetryThenSuccess(t *testing.T) {
 			mu.Unlock()
 		}),
 	)(FuncJob(func() {
-		count := atomic.AddInt32(&attempts, 1)
+		count := attempts.Add(1)
 		if count < 3 {
 			panic("transient")
 		}
@@ -142,11 +142,11 @@ func TestRetryWithBackoff_Callback_Exhausted(t *testing.T) {
 
 func TestRetryWithBackoff_NoCallback(t *testing.T) {
 	// Verify RetryWithBackoff works without callback (backward compat)
-	var attempts int32
+	var attempts atomic.Int32
 
 	wrapped := RetryWithBackoff(DiscardLogger, 3, 10*time.Millisecond, time.Second, 2.0)(
 		FuncJob(func() {
-			count := atomic.AddInt32(&attempts, 1)
+			count := attempts.Add(1)
 			if count < 2 {
 				panic("transient")
 			}
@@ -155,7 +155,7 @@ func TestRetryWithBackoff_NoCallback(t *testing.T) {
 
 	wrapped.Run()
 
-	if got := atomic.LoadInt32(&attempts); got != 2 {
+	if got := attempts.Load(); got != 2 {
 		t.Errorf("expected 2 attempts, got %d", got)
 	}
 }
@@ -195,7 +195,7 @@ func TestRetryOnError_Callback_SuccessFirstAttempt(t *testing.T) {
 func TestRetryOnError_Callback_RetryThenSuccess(t *testing.T) {
 	var events []RetryAttempt
 	var mu sync.Mutex
-	var attempts int32
+	var attempts atomic.Int32
 
 	wrapped := RetryOnError(DiscardLogger, 3, 10*time.Millisecond, time.Second, 2.0,
 		WithRetryCallback(func(a RetryAttempt) {
@@ -204,7 +204,7 @@ func TestRetryOnError_Callback_RetryThenSuccess(t *testing.T) {
 			mu.Unlock()
 		}),
 	)(FuncErrorJob(func() error {
-		count := atomic.AddInt32(&attempts, 1)
+		count := attempts.Add(1)
 		if count < 3 {
 			return errors.New("transient")
 		}
@@ -310,7 +310,7 @@ func TestCircuitBreaker_StateChangeCallback_ClosedToOpen(t *testing.T) {
 		panic("always fails")
 	}))
 
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		func() {
 			defer func() { recover() }()
 			wrapped.Run()
@@ -351,7 +351,7 @@ func TestCircuitBreaker_StateChangeCallback_HalfOpenToOpen(t *testing.T) {
 	}))
 
 	// Open circuit
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		func() {
 			defer func() { recover() }()
 			wrapped.Run()
@@ -404,7 +404,7 @@ func TestCircuitBreaker_StateChangeCallback_HalfOpenToClosed(t *testing.T) {
 	}))
 
 	// Open circuit
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		func() {
 			defer func() { recover() }()
 			wrapped.Run()
@@ -438,19 +438,19 @@ func TestCircuitBreaker_StateChangeCallback_HalfOpenToClosed(t *testing.T) {
 
 func TestCircuitBreaker_NoCallback(t *testing.T) {
 	// Verify CircuitBreaker works without callback (backward compat)
-	var executions int32
+	var executions atomic.Int32
 
 	wrapped := CircuitBreaker(DiscardLogger, 3, time.Hour)(
 		FuncJob(func() {
-			atomic.AddInt32(&executions, 1)
+			executions.Add(1)
 		}),
 	)
 
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		wrapped.Run()
 	}
 
-	if got := atomic.LoadInt32(&executions); got != 5 {
+	if got := executions.Load(); got != 5 {
 		t.Errorf("expected 5 executions, got %d", got)
 	}
 }
@@ -482,7 +482,7 @@ func TestCircuitBreakerHandle_Open(t *testing.T) {
 	}))
 
 	// Fail twice to open
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		func() {
 			defer func() { recover() }()
 			wrapped.Run()
@@ -515,7 +515,7 @@ func TestCircuitBreakerHandle_HalfOpen(t *testing.T) {
 	}))
 
 	// Open circuit
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		func() {
 			defer func() { recover() }()
 			wrapped.Run()
@@ -548,7 +548,7 @@ func TestCircuitBreakerHandle_Recovery(t *testing.T) {
 	}))
 
 	// Open circuit
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		func() {
 			defer func() { recover() }()
 			wrapped.Run()
@@ -586,7 +586,7 @@ func TestCircuitBreakerHandle_WithCallback(t *testing.T) {
 		panic("fail")
 	}))
 
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		func() {
 			defer func() { recover() }()
 			wrapped.Run()
@@ -630,11 +630,11 @@ func TestCircuitBreakerState_String(t *testing.T) {
 // --- RetryWithBackoff callback with unlimited retries ---
 
 func TestRetryWithBackoff_Callback_UnlimitedRetries(t *testing.T) {
-	var eventCount int32
+	var eventCount atomic.Int32
 
 	wrapped := RetryWithBackoff(DiscardLogger, -1, 1*time.Millisecond, 5*time.Millisecond, 2.0,
 		WithRetryCallback(func(a RetryAttempt) {
-			atomic.AddInt32(&eventCount, 1)
+			eventCount.Add(1)
 			// With unlimited retries and a failing job, WillRetry should be true
 			// until the job eventually succeeds
 			if a.Err != nil && !a.WillRetry {
@@ -642,7 +642,7 @@ func TestRetryWithBackoff_Callback_UnlimitedRetries(t *testing.T) {
 			}
 		}),
 	)(FuncJob(func() {
-		count := atomic.LoadInt32(&eventCount)
+		count := eventCount.Load()
 		if count < 5 {
 			panic("keep trying")
 		}
@@ -650,7 +650,7 @@ func TestRetryWithBackoff_Callback_UnlimitedRetries(t *testing.T) {
 
 	wrapped.Run()
 
-	if got := atomic.LoadInt32(&eventCount); got < 5 {
+	if got := eventCount.Load(); got < 5 {
 		t.Errorf("expected at least 5 events, got %d", got)
 	}
 }

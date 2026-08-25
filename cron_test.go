@@ -479,12 +479,10 @@ func TestIsRunningConcurrent(t *testing.T) {
 
 	// Concurrent reads should be safe
 	var wg sync.WaitGroup
-	for i := 0; i < 100; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 100 {
+		wg.Go(func() {
 			_ = cron.IsRunning()
-		}()
+		})
 	}
 	wg.Wait()
 }
@@ -1194,7 +1192,7 @@ func TestWithSecondsOption(t *testing.T) {
 // TestEntryRunWithChain tests fix for issue #551
 // Entry.Run() should execute through the chain wrappers
 func TestEntryRunWithChain(t *testing.T) {
-	var callCount int64
+	var callCount atomic.Int64
 	var mu sync.Mutex
 
 	// Create cron with SkipIfStillRunning to test chain behavior
@@ -1206,7 +1204,7 @@ func TestEntryRunWithChain(t *testing.T) {
 	// Add a job that blocks and counts calls
 	_, err := cron.AddFunc("* * * * * *", func() {
 		mu.Lock()
-		atomic.AddInt64(&callCount, 1)
+		callCount.Add(1)
 		mu.Unlock()
 		time.Sleep(100 * time.Millisecond)
 	})
@@ -1233,13 +1231,13 @@ func TestEntryRunWithChain(t *testing.T) {
 	// Wait for first job to complete
 	time.Sleep(150 * time.Millisecond)
 
-	count := atomic.LoadInt64(&callCount)
+	count := callCount.Load()
 	if count != 1 {
 		t.Errorf("Entry.Run() with SkipIfStillRunning: expected 1 call, got %d (chain not respected)", count)
 	}
 
 	// Test 2: Entry.Job.Run() bypasses chain (documenting existing behavior)
-	atomic.StoreInt64(&callCount, 0)
+	callCount.Store(0)
 
 	// Start job via Entry.Job.Run() (bypasses chain)
 	go entry.Job.Run()
@@ -1251,7 +1249,7 @@ func TestEntryRunWithChain(t *testing.T) {
 	// Wait for both to complete
 	time.Sleep(150 * time.Millisecond)
 
-	count = atomic.LoadInt64(&callCount)
+	count = callCount.Load()
 	if count != 2 {
 		t.Errorf("Entry.Job.Run() (bypass chain): expected 2 calls, got %d", count)
 	}
@@ -1346,7 +1344,7 @@ func TestFakeClock_EverySecondSchedule(t *testing.T) {
 	fakeClock.BlockUntil(1)
 
 	// Advance 5 seconds
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		fakeClock.Advance(time.Second)
 		time.Sleep(5 * time.Millisecond) // Let goroutines run
 		if i < 4 {
@@ -1421,7 +1419,7 @@ func TestFakeClock_MultipleJobsDifferentIntervals(t *testing.T) {
 	fakeClock.BlockUntil(1)
 
 	// Advance 10 seconds total
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		fakeClock.Advance(time.Second)
 		time.Sleep(5 * time.Millisecond)
 		if i < 9 {
@@ -1854,7 +1852,7 @@ func TestIndexCompaction(t *testing.T) {
 	// Compaction triggers when: deletions >= 1000 AND deletions > currentSize
 	// After 1000 deletions, currentSize = 100, so 1000 > 100 triggers compaction.
 	// Then we delete 90 more, so indexDeletions ends at 90.
-	for i := 0; i < indexCompactionThreshold+90; i++ {
+	for i := range indexCompactionThreshold + 90 {
 		c.Remove(ids[i])
 	}
 
@@ -1906,7 +1904,7 @@ func TestIndexCompactionBoundaryCurrentSizeZero(t *testing.T) {
 	}
 
 	// Remove all entries
-	for i := 0; i < totalEntries; i++ {
+	for i := range totalEntries {
 		c.Remove(ids[i])
 	}
 
@@ -1949,7 +1947,7 @@ func TestIndexCompactionBoundaryDeletionsEqualSize(t *testing.T) {
 	}
 
 	// Remove exactly 1000 entries (reaching threshold but not exceeding currentSize)
-	for i := 0; i < indexCompactionThreshold; i++ {
+	for i := range indexCompactionThreshold {
 		c.Remove(ids[i])
 	}
 
@@ -2001,7 +1999,7 @@ func TestIndexCompactionBoundaryDeletionsEqualSizeExplicit(t *testing.T) {
 	total := 2 * indexCompactionThreshold
 	ids := make([]EntryID, total)
 
-	for i := 0; i < total; i++ {
+	for i := range total {
 		id, err := c.AddFunc("@every 1s", func() {}, WithName(fmt.Sprintf("explicit-%d", i)))
 		if err != nil {
 			t.Fatalf("failed to add job %d: %v", i, err)
@@ -2018,7 +2016,7 @@ func TestIndexCompactionBoundaryDeletionsEqualSizeExplicit(t *testing.T) {
 	}
 
 	// Delete exactly threshold entries
-	for i := 0; i < indexCompactionThreshold; i++ {
+	for i := range indexCompactionThreshold {
 		c.Remove(ids[i])
 	}
 
@@ -2286,7 +2284,7 @@ func TestWithContext_PropagatesContext(t *testing.T) {
 
 	c := New(WithClock(fc), WithContext(baseCtx))
 
-	var receivedValue interface{}
+	var receivedValue any
 	started := make(chan struct{})
 
 	c.AddJob("@every 1s", FuncJobWithContext(func(ctx context.Context) {
@@ -2463,11 +2461,11 @@ func TestRunOnce_BasicExecution(t *testing.T) {
 	fc := NewFakeClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
 	c := New(WithClock(fc), WithParser(secondParser))
 
-	var executions int32
+	var executions atomic.Int32
 	executed := make(chan struct{}, 1)
 
 	id, err := c.AddFunc("* * * * * *", func() {
-		atomic.AddInt32(&executions, 1)
+		executions.Add(1)
 		select {
 		case executed <- struct{}{}:
 		default:
@@ -2518,7 +2516,7 @@ func TestRunOnce_BasicExecution(t *testing.T) {
 	fc.Advance(2 * time.Second)
 	time.Sleep(50 * time.Millisecond)
 
-	if count := atomic.LoadInt32(&executions); count != 1 {
+	if count := executions.Load(); count != 1 {
 		t.Errorf("expected exactly 1 execution, got %d", count)
 	}
 }
@@ -2528,9 +2526,9 @@ func TestRunOnce_WithJobOption(t *testing.T) {
 	fc := NewFakeClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
 	c := New(WithClock(fc), WithParser(secondParser))
 
-	var executions int32
+	var executions atomic.Int32
 	job := FuncJob(func() {
-		atomic.AddInt32(&executions, 1)
+		executions.Add(1)
 	})
 
 	id, err := c.AddJob("* * * * * *", job, WithRunOnce())
@@ -2554,7 +2552,7 @@ func TestRunOnce_WithJobOption(t *testing.T) {
 	fc.Advance(3 * time.Second)
 	time.Sleep(50 * time.Millisecond)
 
-	if count := atomic.LoadInt32(&executions); count != 1 {
+	if count := executions.Load(); count != 1 {
 		t.Errorf("expected 1 execution, got %d", count)
 	}
 }
@@ -2610,11 +2608,11 @@ func TestRunOnce_WithRunImmediately(t *testing.T) {
 	fc := NewFakeClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
 	c := New(WithClock(fc))
 
-	var executions int32
+	var executions atomic.Int32
 	executed := make(chan struct{}, 1)
 
 	id, err := c.AddFunc("@hourly", func() {
-		atomic.AddInt32(&executions, 1)
+		executions.Add(1)
 		select {
 		case executed <- struct{}{}:
 		default:
@@ -2643,7 +2641,7 @@ func TestRunOnce_WithRunImmediately(t *testing.T) {
 	}
 
 	// Verify only one execution
-	if count := atomic.LoadInt32(&executions); count != 1 {
+	if count := executions.Load(); count != 1 {
 		t.Errorf("expected 1 execution, got %d", count)
 	}
 }
@@ -2653,9 +2651,9 @@ func TestAddOnceFunc(t *testing.T) {
 	fc := NewFakeClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
 	c := New(WithClock(fc), WithParser(secondParser))
 
-	var executions int32
+	var executions atomic.Int32
 	id, err := c.AddOnceFunc("* * * * * *", func() {
-		atomic.AddInt32(&executions, 1)
+		executions.Add(1)
 	})
 	if err != nil {
 		t.Fatalf("AddOnceFunc failed: %v", err)
@@ -2676,7 +2674,7 @@ func TestAddOnceFunc(t *testing.T) {
 	fc.Advance(2 * time.Second)
 	time.Sleep(50 * time.Millisecond)
 
-	if count := atomic.LoadInt32(&executions); count != 1 {
+	if count := executions.Load(); count != 1 {
 		t.Errorf("expected 1 execution, got %d", count)
 	}
 }
@@ -2686,9 +2684,9 @@ func TestAddOnceJob(t *testing.T) {
 	fc := NewFakeClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
 	c := New(WithClock(fc), WithParser(secondParser))
 
-	var executions int32
+	var executions atomic.Int32
 	job := FuncJob(func() {
-		atomic.AddInt32(&executions, 1)
+		executions.Add(1)
 	})
 
 	id, err := c.AddOnceJob("* * * * * *", job)
@@ -2707,7 +2705,7 @@ func TestAddOnceJob(t *testing.T) {
 		t.Error("AddOnceJob entry should be removed after execution")
 	}
 
-	if count := atomic.LoadInt32(&executions); count != 1 {
+	if count := executions.Load(); count != 1 {
 		t.Errorf("expected 1 execution, got %d", count)
 	}
 }
@@ -2717,9 +2715,9 @@ func TestScheduleOnceJob(t *testing.T) {
 	fc := NewFakeClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
 	c := New(WithClock(fc))
 
-	var executions int32
+	var executions atomic.Int32
 	job := FuncJob(func() {
-		atomic.AddInt32(&executions, 1)
+		executions.Add(1)
 	})
 
 	id, err := c.ScheduleOnceJob(Every(time.Second), job)
@@ -2741,7 +2739,7 @@ func TestScheduleOnceJob(t *testing.T) {
 	fc.Advance(3 * time.Second)
 	time.Sleep(50 * time.Millisecond)
 
-	if count := atomic.LoadInt32(&executions); count != 1 {
+	if count := executions.Load(); count != 1 {
 		t.Errorf("expected 1 execution, got %d", count)
 	}
 }
@@ -2860,9 +2858,9 @@ func TestRunOnce_RemoveBeforeExecution(t *testing.T) {
 	fc := NewFakeClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
 	c := New(WithClock(fc), WithParser(secondParser))
 
-	var executions int32
+	var executions atomic.Int32
 	id, _ := c.AddOnceFunc("* * * * * *", func() {
-		atomic.AddInt32(&executions, 1)
+		executions.Add(1)
 	})
 
 	c.Start()
@@ -2875,7 +2873,7 @@ func TestRunOnce_RemoveBeforeExecution(t *testing.T) {
 	fc.Advance(time.Second)
 	time.Sleep(50 * time.Millisecond)
 
-	if count := atomic.LoadInt32(&executions); count != 0 {
+	if count := executions.Load(); count != 0 {
 		t.Errorf("removed run-once job should not execute, got %d executions", count)
 	}
 }
@@ -2886,16 +2884,16 @@ func TestRunOnce_EntryCountDecrements(t *testing.T) {
 	c := New(WithClock(fc), WithParser(secondParser))
 
 	// Use atomic counter since both jobs fire at same time
-	var execCount int32
+	var execCount atomic.Int32
 	executed := make(chan struct{}, 2) // Buffered for 2 jobs
 
 	// Add 3 entries: 2 run-once, 1 regular
 	c.AddOnceFunc("* * * * * *", func() {
-		atomic.AddInt32(&execCount, 1)
+		execCount.Add(1)
 		executed <- struct{}{}
 	})
 	c.AddOnceFunc("* * * * * *", func() {
-		atomic.AddInt32(&execCount, 1)
+		execCount.Add(1)
 		executed <- struct{}{}
 	})
 	c.AddFunc("* * * * * *", func() {})
@@ -2912,7 +2910,7 @@ func TestRunOnce_EntryCountDecrements(t *testing.T) {
 	fc.Advance(time.Second)
 
 	// Wait for both run-once jobs with timeout
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		select {
 		case <-executed:
 		case <-time.After(time.Second):
@@ -2927,7 +2925,7 @@ func TestRunOnce_EntryCountDecrements(t *testing.T) {
 	}
 
 	// Verify both run-once jobs executed
-	if got := atomic.LoadInt32(&execCount); got != 2 {
+	if got := execCount.Load(); got != 2 {
 		t.Errorf("expected 2 run-once executions, got %d", got)
 	}
 }
@@ -3318,8 +3316,8 @@ func TestUpdateBeforeStart(t *testing.T) {
 			c := New(WithClock(clock), WithParser(secondParser))
 			defer c.Stop()
 
-			var runs int32
-			id, err := c.AddFunc("* * * * * *", func() { atomic.AddInt32(&runs, 1) })
+			var runs atomic.Int32
+			id, err := c.AddFunc("* * * * * *", func() { runs.Add(1) })
 			if err != nil {
 				t.Fatalf("add failed: %v", err)
 			}
@@ -3336,7 +3334,7 @@ func TestUpdateBeforeStart(t *testing.T) {
 			// Advance 4 seconds - should NOT trigger (schedule is every 5s)
 			clock.Advance(4 * time.Second)
 			time.Sleep(10 * time.Millisecond)
-			if got := atomic.LoadInt32(&runs); got != 0 {
+			if got := runs.Load(); got != 0 {
 				t.Errorf("expected 0 runs after 4s, got %d", got)
 			}
 
@@ -3344,7 +3342,7 @@ func TestUpdateBeforeStart(t *testing.T) {
 			clock.BlockUntil(1)
 			clock.Advance(1 * time.Second)
 			time.Sleep(10 * time.Millisecond)
-			if got := atomic.LoadInt32(&runs); got != 1 {
+			if got := runs.Load(); got != 1 {
 				t.Errorf("expected 1 run after 5s, got %d", got)
 			}
 		})
@@ -3943,9 +3941,9 @@ func TestRunAlreadyRunning(t *testing.T) {
 	fc := NewFakeClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
 	c := New(WithClock(fc))
 
-	var runs int32
+	var runs atomic.Int32
 	_, err := c.AddFunc("@every 1h", func() {
-		atomic.AddInt32(&runs, 1)
+		runs.Add(1)
 	})
 	if err != nil {
 		t.Fatalf("AddFunc returned error: %v", err)
@@ -4757,8 +4755,8 @@ func TestPauseEntryBeforeRunning(t *testing.T) {
 	c := New(WithClock(clock), WithParser(secondParser))
 	defer c.Stop()
 
-	var runs int32
-	id, err := c.AddFunc("* * * * * *", func() { atomic.AddInt32(&runs, 1) })
+	var runs atomic.Int32
+	id, err := c.AddFunc("* * * * * *", func() { runs.Add(1) })
 	if err != nil {
 		t.Fatalf("add failed: %v", err)
 	}
@@ -4773,7 +4771,7 @@ func TestPauseEntryBeforeRunning(t *testing.T) {
 	clock.Advance(time.Second)
 	time.Sleep(10 * time.Millisecond)
 
-	if n := atomic.LoadInt32(&runs); n != 0 {
+	if n := runs.Load(); n != 0 {
 		t.Errorf("expected 0 runs while paused, got %d", n)
 	}
 }
@@ -4784,8 +4782,8 @@ func TestPauseEntryWhileRunning(t *testing.T) {
 	c := New(WithClock(clock), WithParser(secondParser))
 	defer c.Stop()
 
-	var runs int32
-	id, err := c.AddFunc("* * * * * *", func() { atomic.AddInt32(&runs, 1) })
+	var runs atomic.Int32
+	id, err := c.AddFunc("* * * * * *", func() { runs.Add(1) })
 	if err != nil {
 		t.Fatalf("add failed: %v", err)
 	}
@@ -4795,7 +4793,7 @@ func TestPauseEntryWhileRunning(t *testing.T) {
 	clock.Advance(time.Second)
 	time.Sleep(10 * time.Millisecond)
 
-	if n := atomic.LoadInt32(&runs); n != 1 {
+	if n := runs.Load(); n != 1 {
 		t.Fatalf("expected 1 run before pause, got %d", n)
 	}
 
@@ -4808,7 +4806,7 @@ func TestPauseEntryWhileRunning(t *testing.T) {
 	clock.Advance(time.Second)
 	time.Sleep(10 * time.Millisecond)
 
-	if n := atomic.LoadInt32(&runs); n != 1 {
+	if n := runs.Load(); n != 1 {
 		t.Errorf("expected still 1 run after pausing, got %d", n)
 	}
 }
@@ -4819,8 +4817,8 @@ func TestResumeEntry(t *testing.T) {
 	c := New(WithClock(clock), WithParser(secondParser))
 	defer c.Stop()
 
-	var runs int32
-	id, err := c.AddFunc("* * * * * *", func() { atomic.AddInt32(&runs, 1) })
+	var runs atomic.Int32
+	id, err := c.AddFunc("* * * * * *", func() { runs.Add(1) })
 	if err != nil {
 		t.Fatalf("add failed: %v", err)
 	}
@@ -4836,7 +4834,7 @@ func TestResumeEntry(t *testing.T) {
 	clock.Advance(time.Second)
 	time.Sleep(10 * time.Millisecond)
 
-	if n := atomic.LoadInt32(&runs); n != 0 {
+	if n := runs.Load(); n != 0 {
 		t.Fatalf("expected 0 runs while paused, got %d", n)
 	}
 
@@ -4849,7 +4847,7 @@ func TestResumeEntry(t *testing.T) {
 	clock.Advance(time.Second)
 	time.Sleep(10 * time.Millisecond)
 
-	if n := atomic.LoadInt32(&runs); n != 1 {
+	if n := runs.Load(); n != 1 {
 		t.Errorf("expected 1 run after resume, got %d", n)
 	}
 }
@@ -4860,8 +4858,8 @@ func TestPauseEntryByName(t *testing.T) {
 	c := New(WithClock(clock), WithParser(secondParser))
 	defer c.Stop()
 
-	var runs int32
-	_, err := c.AddFunc("* * * * * *", func() { atomic.AddInt32(&runs, 1) }, WithName("my-job"))
+	var runs atomic.Int32
+	_, err := c.AddFunc("* * * * * *", func() { runs.Add(1) }, WithName("my-job"))
 	if err != nil {
 		t.Fatalf("add failed: %v", err)
 	}
@@ -4871,7 +4869,7 @@ func TestPauseEntryByName(t *testing.T) {
 	clock.Advance(time.Second)
 	time.Sleep(10 * time.Millisecond)
 
-	if n := atomic.LoadInt32(&runs); n != 1 {
+	if n := runs.Load(); n != 1 {
 		t.Fatalf("expected 1 run before pause, got %d", n)
 	}
 
@@ -4883,7 +4881,7 @@ func TestPauseEntryByName(t *testing.T) {
 	clock.Advance(time.Second)
 	time.Sleep(10 * time.Millisecond)
 
-	if n := atomic.LoadInt32(&runs); n != 1 {
+	if n := runs.Load(); n != 1 {
 		t.Errorf("expected still 1 run after pause by name, got %d", n)
 	}
 }
@@ -4894,8 +4892,8 @@ func TestResumeEntryByName(t *testing.T) {
 	c := New(WithClock(clock), WithParser(secondParser))
 	defer c.Stop()
 
-	var runs int32
-	_, err := c.AddFunc("* * * * * *", func() { atomic.AddInt32(&runs, 1) }, WithName("my-job"))
+	var runs atomic.Int32
+	_, err := c.AddFunc("* * * * * *", func() { runs.Add(1) }, WithName("my-job"))
 	if err != nil {
 		t.Fatalf("add failed: %v", err)
 	}
@@ -4910,7 +4908,7 @@ func TestResumeEntryByName(t *testing.T) {
 	clock.Advance(time.Second)
 	time.Sleep(10 * time.Millisecond)
 
-	if n := atomic.LoadInt32(&runs); n != 0 {
+	if n := runs.Load(); n != 0 {
 		t.Fatalf("expected 0 runs while paused, got %d", n)
 	}
 
@@ -4922,7 +4920,7 @@ func TestResumeEntryByName(t *testing.T) {
 	clock.Advance(time.Second)
 	time.Sleep(10 * time.Millisecond)
 
-	if n := atomic.LoadInt32(&runs); n != 1 {
+	if n := runs.Load(); n != 1 {
 		t.Errorf("expected 1 run after resume by name, got %d", n)
 	}
 }
@@ -5000,21 +4998,21 @@ func TestPausedEntryKeepsSchedule(t *testing.T) {
 	c := New(WithClock(clock), WithParser(secondParser))
 	defer c.Stop()
 
-	var runs int32
-	id, _ := c.AddFunc("* * * * * *", func() { atomic.AddInt32(&runs, 1) })
+	var runs atomic.Int32
+	id, _ := c.AddFunc("* * * * * *", func() { runs.Add(1) })
 	c.Start()
 	clock.BlockUntil(1)
 
 	c.PauseEntry(id)
 
 	// Advance 5 seconds while paused
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		clock.Advance(time.Second)
 		time.Sleep(5 * time.Millisecond)
 		clock.BlockUntil(1)
 	}
 
-	if n := atomic.LoadInt32(&runs); n != 0 {
+	if n := runs.Load(); n != 0 {
 		t.Fatalf("expected 0 runs while paused, got %d", n)
 	}
 
@@ -5024,7 +5022,7 @@ func TestPausedEntryKeepsSchedule(t *testing.T) {
 	clock.Advance(time.Second)
 	time.Sleep(10 * time.Millisecond)
 
-	if n := atomic.LoadInt32(&runs); n != 1 {
+	if n := runs.Load(); n != 1 {
 		t.Errorf("expected exactly 1 run after resume (no catch-up), got %d", n)
 	}
 }
@@ -5035,8 +5033,8 @@ func TestWithPausedOption(t *testing.T) {
 	c := New(WithClock(clock), WithParser(secondParser))
 	defer c.Stop()
 
-	var runs int32
-	id, _ := c.AddFunc("* * * * * *", func() { atomic.AddInt32(&runs, 1) }, WithPaused())
+	var runs atomic.Int32
+	id, _ := c.AddFunc("* * * * * *", func() { runs.Add(1) }, WithPaused())
 
 	if !c.IsEntryPaused(id) {
 		t.Fatal("entry should start paused with WithPaused option")
@@ -5047,7 +5045,7 @@ func TestWithPausedOption(t *testing.T) {
 	clock.Advance(time.Second)
 	time.Sleep(10 * time.Millisecond)
 
-	if n := atomic.LoadInt32(&runs); n != 0 {
+	if n := runs.Load(); n != 0 {
 		t.Fatalf("expected 0 runs while paused via WithPaused, got %d", n)
 	}
 
@@ -5056,7 +5054,7 @@ func TestWithPausedOption(t *testing.T) {
 	clock.Advance(time.Second)
 	time.Sleep(10 * time.Millisecond)
 
-	if n := atomic.LoadInt32(&runs); n != 1 {
+	if n := runs.Load(); n != 1 {
 		t.Errorf("expected 1 run after resuming WithPaused entry, got %d", n)
 	}
 }
@@ -5378,9 +5376,9 @@ func TestDSTFallBack_SchedulerDedup(t *testing.T) {
 
 	c := New(WithClock(clock), WithLocation(loc))
 
-	var runs int32
+	var runs atomic.Int32
 	c.AddFunc("30 1 * * *", func() {
-		atomic.AddInt32(&runs, 1)
+		runs.Add(1)
 	})
 
 	c.Start()
@@ -5392,7 +5390,7 @@ func TestDSTFallBack_SchedulerDedup(t *testing.T) {
 	clock.Advance(1 * time.Minute)
 	time.Sleep(20 * time.Millisecond)
 
-	if got := atomic.LoadInt32(&runs); got != 1 {
+	if got := runs.Load(); got != 1 {
 		t.Fatalf("expected 1 run after first occurrence, got %d", got)
 	}
 
@@ -5402,7 +5400,7 @@ func TestDSTFallBack_SchedulerDedup(t *testing.T) {
 	clock.Advance(2 * time.Hour)
 	time.Sleep(20 * time.Millisecond)
 
-	if got := atomic.LoadInt32(&runs); got != 1 {
+	if got := runs.Load(); got != 1 {
 		t.Errorf("expected exactly 1 run (DST dedup), got %d", got)
 	}
 }
@@ -5423,9 +5421,9 @@ func TestDSTFallBack_ConstantDelay(t *testing.T) {
 
 	c := New(WithClock(clock), WithLocation(loc))
 
-	var runs int32
+	var runs atomic.Int32
 	c.AddFunc("@every 30m", func() {
-		atomic.AddInt32(&runs, 1)
+		runs.Add(1)
 	})
 
 	c.Start()
@@ -5440,7 +5438,7 @@ func TestDSTFallBack_ConstantDelay(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	if got := atomic.LoadInt32(&runs); got < 5 {
+	if got := runs.Load(); got < 5 {
 		t.Errorf("expected @every 30m to fire at least 5 times in 3 hours, got %d", got)
 	}
 }
@@ -5461,9 +5459,9 @@ func TestDSTFallBack_PerScheduleTZ(t *testing.T) {
 
 	c := New(WithClock(clock), WithLocation(time.UTC))
 
-	var runs int32
+	var runs atomic.Int32
 	c.AddFunc("TZ=America/New_York 30 1 * * *", func() {
-		atomic.AddInt32(&runs, 1)
+		runs.Add(1)
 	})
 
 	c.Start()
@@ -5475,7 +5473,7 @@ func TestDSTFallBack_PerScheduleTZ(t *testing.T) {
 	clock.Advance(1 * time.Minute)
 	time.Sleep(20 * time.Millisecond)
 
-	if got := atomic.LoadInt32(&runs); got != 1 {
+	if got := runs.Load(); got != 1 {
 		t.Fatalf("expected 1 run after first occurrence, got %d", got)
 	}
 
@@ -5485,7 +5483,7 @@ func TestDSTFallBack_PerScheduleTZ(t *testing.T) {
 	clock.Advance(2 * time.Hour)
 	time.Sleep(20 * time.Millisecond)
 
-	if got := atomic.LoadInt32(&runs); got != 1 {
+	if got := runs.Load(); got != 1 {
 		t.Errorf("expected exactly 1 run with per-schedule TZ dedup, got %d", got)
 	}
 }
@@ -5520,9 +5518,9 @@ func TestDSTFallBack_ScheduleExhaustedAfterSkip(t *testing.T) {
 
 	c := New(WithClock(clock), WithLocation(loc))
 
-	var runs int32
+	var runs atomic.Int32
 	c.Schedule(sched, FuncJob(func() {
-		atomic.AddInt32(&runs, 1)
+		runs.Add(1)
 	}))
 
 	c.Start()
@@ -5534,7 +5532,7 @@ func TestDSTFallBack_ScheduleExhaustedAfterSkip(t *testing.T) {
 	clock.Advance(1 * time.Minute)
 	time.Sleep(20 * time.Millisecond)
 
-	if got := atomic.LoadInt32(&runs); got != 1 {
+	if got := runs.Load(); got != 1 {
 		t.Fatalf("expected 1 run, got %d", got)
 	}
 
@@ -5545,7 +5543,7 @@ func TestDSTFallBack_ScheduleExhaustedAfterSkip(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 
 	// Job must not have fired again.
-	if got := atomic.LoadInt32(&runs); got != 1 {
+	if got := runs.Load(); got != 1 {
 		t.Errorf("expected exactly 1 run after schedule exhaustion, got %d", got)
 	}
 
@@ -5726,9 +5724,9 @@ func TestDrainAndUpsertCreatesWhenAbsent(t *testing.T) {
 	c.Start()
 	defer c.Stop()
 
-	var runs int32
+	var runs atomic.Int32
 	id, err := c.DrainAndUpsertJob("* * * * * *", FuncJob(func() {
-		atomic.AddInt32(&runs, 1)
+		runs.Add(1)
 	}), WithName("fresh"))
 	if err != nil {
 		t.Fatalf("DrainAndUpsertJob failed: %v", err)
@@ -5746,7 +5744,7 @@ func TestDrainAndUpsertCreatesWhenAbsent(t *testing.T) {
 	clock.BlockUntil(1)
 	clock.Advance(time.Second)
 	deadline := time.After(2 * time.Second)
-	for atomic.LoadInt32(&runs) == 0 {
+	for runs.Load() == 0 {
 		select {
 		case <-deadline:
 			t.Fatal("created job did not run")
@@ -5865,10 +5863,10 @@ func TestDrainAndUpsertSchedulerStopped(t *testing.T) {
 		t.Errorf("expected preserved ID, got %v != %v", id1, id2)
 	}
 
-	var runs int32
+	var runs atomic.Int32
 	// Re-point to a counting job, still stopped, then start and confirm it fires.
 	if _, err := c.DrainAndUpsertJob("* * * * * *", FuncJob(func() {
-		atomic.AddInt32(&runs, 1)
+		runs.Add(1)
 	}), WithName("stopped")); err != nil {
 		t.Fatalf("second DrainAndUpsertJob failed: %v", err)
 	}
@@ -5877,7 +5875,7 @@ func TestDrainAndUpsertSchedulerStopped(t *testing.T) {
 	clock.BlockUntil(1)
 	clock.Advance(time.Second)
 	deadline := time.After(2 * time.Second)
-	for atomic.LoadInt32(&runs) == 0 {
+	for runs.Load() == 0 {
 		select {
 		case <-deadline:
 			t.Fatal("job did not fire after Start")

@@ -13,27 +13,27 @@ import (
 )
 
 func TestRetryWithBackoff_SuccessOnFirstAttempt(t *testing.T) {
-	var attempts int32
+	var attempts atomic.Int32
 
 	wrapped := RetryWithBackoff(DiscardLogger, 3, 10*time.Millisecond, time.Second, 2.0)(
 		FuncJob(func() {
-			atomic.AddInt32(&attempts, 1)
+			attempts.Add(1)
 		}),
 	)
 
 	wrapped.Run()
 
-	if got := atomic.LoadInt32(&attempts); got != 1 {
+	if got := attempts.Load(); got != 1 {
 		t.Errorf("expected 1 attempt, got %d", got)
 	}
 }
 
 func TestRetryWithBackoff_SuccessOnRetry(t *testing.T) {
-	var attempts int32
+	var attempts atomic.Int32
 
 	wrapped := RetryWithBackoff(DiscardLogger, 3, 10*time.Millisecond, time.Second, 2.0)(
 		FuncJob(func() {
-			count := atomic.AddInt32(&attempts, 1)
+			count := attempts.Add(1)
 			if count < 3 {
 				panic("transient failure")
 			}
@@ -42,17 +42,17 @@ func TestRetryWithBackoff_SuccessOnRetry(t *testing.T) {
 
 	wrapped.Run()
 
-	if got := atomic.LoadInt32(&attempts); got != 3 {
+	if got := attempts.Load(); got != 3 {
 		t.Errorf("expected 3 attempts, got %d", got)
 	}
 }
 
 func TestRetryWithBackoff_ExhaustsRetries(t *testing.T) {
-	var attempts int32
+	var attempts atomic.Int32
 
 	wrapped := RetryWithBackoff(DiscardLogger, 3, 1*time.Millisecond, time.Second, 2.0)(
 		FuncJob(func() {
-			atomic.AddInt32(&attempts, 1)
+			attempts.Add(1)
 			panic("always fails")
 		}),
 	)
@@ -71,11 +71,11 @@ func TestRetryWithBackoff_ExhaustsRetries(t *testing.T) {
 }
 
 func TestRetryWithBackoff_RetriesExhausted_AttemptCount(t *testing.T) {
-	var attempts int32
+	var attempts atomic.Int32
 
 	wrapped := RetryWithBackoff(DiscardLogger, 3, 1*time.Millisecond, time.Second, 2.0)(
 		FuncJob(func() {
-			atomic.AddInt32(&attempts, 1)
+			attempts.Add(1)
 			panic("always fails")
 		}),
 	)
@@ -86,7 +86,7 @@ func TestRetryWithBackoff_RetriesExhausted_AttemptCount(t *testing.T) {
 	}()
 
 	// maxRetries=3 means 4 total attempts (1 initial + 3 retries)
-	if got := atomic.LoadInt32(&attempts); got != 4 {
+	if got := attempts.Load(); got != 4 {
 		t.Errorf("expected 4 attempts (1 initial + 3 retries), got %d", got)
 	}
 }
@@ -165,12 +165,12 @@ func TestRetryWithBackoff_MaxDelayRespected(t *testing.T) {
 }
 
 func TestRetryWithBackoff_UnlimitedRetries(t *testing.T) {
-	var attempts int32
+	var attempts atomic.Int32
 
 	// maxRetries=-1 means unlimited retries (explicit opt-in)
 	wrapped := RetryWithBackoff(DiscardLogger, -1, 1*time.Millisecond, 5*time.Millisecond, 2.0)(
 		FuncJob(func() {
-			count := atomic.AddInt32(&attempts, 1)
+			count := attempts.Add(1)
 			if count < 20 {
 				panic("keep trying")
 			}
@@ -179,18 +179,18 @@ func TestRetryWithBackoff_UnlimitedRetries(t *testing.T) {
 
 	wrapped.Run()
 
-	if got := atomic.LoadInt32(&attempts); got != 20 {
+	if got := attempts.Load(); got != 20 {
 		t.Errorf("expected 20 attempts, got %d", got)
 	}
 }
 
 func TestRetryWithBackoff_NoRetries(t *testing.T) {
-	var attempts int32
+	var attempts atomic.Int32
 
 	// maxRetries=0 means no retries (safe default) - execute once and fail
 	wrapped := RetryWithBackoff(DiscardLogger, 0, 1*time.Millisecond, 5*time.Millisecond, 2.0)(
 		FuncJob(func() {
-			atomic.AddInt32(&attempts, 1)
+			attempts.Add(1)
 			panic("fail immediately")
 		}),
 	)
@@ -204,42 +204,42 @@ func TestRetryWithBackoff_NoRetries(t *testing.T) {
 	wrapped.Run()
 
 	// Should have executed exactly once (no retries)
-	if got := atomic.LoadInt32(&attempts); got != 1 {
+	if got := attempts.Load(); got != 1 {
 		t.Errorf("expected 1 attempt with maxRetries=0, got %d", got)
 	}
 }
 
 func TestCircuitBreaker_NormalOperation(t *testing.T) {
-	var executions int32
+	var executions atomic.Int32
 
 	wrapped := CircuitBreaker(DiscardLogger, 3, time.Minute)(
 		FuncJob(func() {
-			atomic.AddInt32(&executions, 1)
+			executions.Add(1)
 		}),
 	)
 
 	// Multiple successful executions
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		wrapped.Run()
 	}
 
-	if got := atomic.LoadInt32(&executions); got != 5 {
+	if got := executions.Load(); got != 5 {
 		t.Errorf("expected 5 executions, got %d", got)
 	}
 }
 
 func TestCircuitBreaker_OpensAfterThreshold(t *testing.T) {
-	var executions int32
+	var executions atomic.Int32
 
 	wrapped := CircuitBreaker(DiscardLogger, 3, time.Hour)(
 		FuncJob(func() {
-			atomic.AddInt32(&executions, 1)
+			executions.Add(1)
 			panic("always fails")
 		}),
 	)
 
 	// Fail 3 times to open circuit
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		func() {
 			defer func() { recover() }()
 			wrapped.Run()
@@ -252,20 +252,20 @@ func TestCircuitBreaker_OpensAfterThreshold(t *testing.T) {
 	wrapped.Run()
 
 	// Should only have 3 executions (before circuit opened)
-	if got := atomic.LoadInt32(&executions); got != 3 {
+	if got := executions.Load(); got != 3 {
 		t.Errorf("expected 3 executions (circuit should be open), got %d", got)
 	}
 }
 
 func TestCircuitBreaker_HalfOpenRecovery(t *testing.T) {
-	var executions int32
+	var executions atomic.Int32
 	var shouldFail bool
 	var mu sync.Mutex
 
 	cooldown := 100 * time.Millisecond
 	wrapped := CircuitBreaker(DiscardLogger, 2, cooldown)(
 		FuncJob(func() {
-			atomic.AddInt32(&executions, 1)
+			executions.Add(1)
 			mu.Lock()
 			fail := shouldFail
 			mu.Unlock()
@@ -281,7 +281,7 @@ func TestCircuitBreaker_HalfOpenRecovery(t *testing.T) {
 	mu.Unlock()
 
 	// Fail twice to open circuit
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		func() {
 			defer func() { recover() }()
 			wrapped.Run()
@@ -307,24 +307,24 @@ func TestCircuitBreaker_HalfOpenRecovery(t *testing.T) {
 	wrapped.Run()
 
 	// Expected: 2 (initial failures) + 1 (half-open recovery) + 2 (after close) = 5
-	if got := atomic.LoadInt32(&executions); got != 5 {
+	if got := executions.Load(); got != 5 {
 		t.Errorf("expected 5 executions, got %d", got)
 	}
 }
 
 func TestCircuitBreaker_HalfOpenFailure(t *testing.T) {
-	var executions int32
+	var executions atomic.Int32
 
 	cooldown := 100 * time.Millisecond
 	wrapped := CircuitBreaker(DiscardLogger, 2, cooldown)(
 		FuncJob(func() {
-			atomic.AddInt32(&executions, 1)
+			executions.Add(1)
 			panic("always fails")
 		}),
 	)
 
 	// Fail twice to open circuit
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		func() {
 			defer func() { recover() }()
 			wrapped.Run()
@@ -347,21 +347,21 @@ func TestCircuitBreaker_HalfOpenFailure(t *testing.T) {
 	wrapped.Run() // Should be skipped
 
 	// Expected: 2 (initial) + 1 (half-open attempt) = 3
-	if got := atomic.LoadInt32(&executions); got != 3 {
+	if got := executions.Load(); got != 3 {
 		t.Errorf("expected 3 executions, got %d", got)
 	}
 }
 
 func TestCircuitBreaker_SuccessResetsFailures(t *testing.T) {
-	var executions int32
-	var failCount int32
+	var executions atomic.Int32
+	var failCount atomic.Int32
 	var mu sync.Mutex
 
 	wrapped := CircuitBreaker(DiscardLogger, 3, time.Hour)(
 		FuncJob(func() {
-			atomic.AddInt32(&executions, 1)
+			executions.Add(1)
 			mu.Lock()
-			count := atomic.AddInt32(&failCount, 1)
+			count := failCount.Add(1)
 			mu.Unlock()
 			if count == 2 || count == 5 {
 				// Fail on 2nd and 5th execution
@@ -371,7 +371,7 @@ func TestCircuitBreaker_SuccessResetsFailures(t *testing.T) {
 	)
 
 	// Execute with some failures
-	for i := 0; i < 6; i++ {
+	for range 6 {
 		func() {
 			defer func() { recover() }()
 			wrapped.Run()
@@ -379,39 +379,37 @@ func TestCircuitBreaker_SuccessResetsFailures(t *testing.T) {
 	}
 
 	// All executions should happen because failures are reset by successes
-	if got := atomic.LoadInt32(&executions); got != 6 {
+	if got := executions.Load(); got != 6 {
 		t.Errorf("expected 6 executions, got %d", got)
 	}
 }
 
 func TestCircuitBreaker_ConcurrentSafe(t *testing.T) {
-	var executions int32
+	var executions atomic.Int32
 
 	wrapped := CircuitBreaker(DiscardLogger, 5, time.Millisecond)(
 		FuncJob(func() {
-			atomic.AddInt32(&executions, 1)
+			executions.Add(1)
 		}),
 	)
 
 	var wg sync.WaitGroup
-	for i := 0; i < 100; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 100 {
+		wg.Go(func() {
 			wrapped.Run()
-		}()
+		})
 	}
 	wg.Wait()
 
 	// All should execute since no failures
-	if got := atomic.LoadInt32(&executions); got != 100 {
+	if got := executions.Load(); got != 100 {
 		t.Errorf("expected 100 executions, got %d", got)
 	}
 }
 
 func TestRetryWithBackoff_IntegrationWithCron(t *testing.T) {
 	clock := NewFakeClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
-	var executions int32
+	var executions atomic.Int32
 
 	// Chain order: Recover is outermost (catches final re-panics),
 	// RetryWithBackoff is innermost (sees panics from job, retries).
@@ -424,7 +422,7 @@ func TestRetryWithBackoff_IntegrationWithCron(t *testing.T) {
 	)
 
 	c.AddFunc("@every 1h", func() {
-		count := atomic.AddInt32(&executions, 1)
+		count := executions.Add(1)
 		if count < 3 {
 			panic("transient failure")
 		}
@@ -438,14 +436,14 @@ func TestRetryWithBackoff_IntegrationWithCron(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Should have 3 executions (2 retries + 1 success)
-	if got := atomic.LoadInt32(&executions); got != 3 {
+	if got := executions.Load(); got != 3 {
 		t.Errorf("expected 3 executions, got %d", got)
 	}
 }
 
 func TestCircuitBreaker_IntegrationWithCron(t *testing.T) {
 	clock := NewFakeClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
-	var executions int32
+	var executions atomic.Int32
 
 	// Chain order: Recover is outermost (catches re-panics from circuit breaker),
 	// CircuitBreaker is innermost (sees panics from job, tracks failures).
@@ -458,7 +456,7 @@ func TestCircuitBreaker_IntegrationWithCron(t *testing.T) {
 	)
 
 	c.AddFunc("@every 1h", func() {
-		atomic.AddInt32(&executions, 1)
+		executions.Add(1)
 		panic("always fails")
 	})
 
@@ -467,13 +465,13 @@ func TestCircuitBreaker_IntegrationWithCron(t *testing.T) {
 
 	// Trigger job multiple times
 	time.Sleep(50 * time.Millisecond)
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		clock.Advance(time.Hour)
 		time.Sleep(50 * time.Millisecond)
 	}
 
 	// Should have 2 executions before circuit opens
-	if got := atomic.LoadInt32(&executions); got != 2 {
+	if got := executions.Load(); got != 2 {
 		t.Errorf("expected 2 executions (circuit should open), got %d", got)
 	}
 }
@@ -482,18 +480,18 @@ func TestCircuitBreaker_IntegrationWithCron(t *testing.T) {
 // This kills CONDITIONALS_BOUNDARY mutation where `>= threshold` could become `> threshold`.
 // When failures == threshold exactly, isHalfOpen should return true.
 func TestCircuitBreaker_BoundaryThresholdExact(t *testing.T) {
-	var executions int32
+	var executions atomic.Int32
 	threshold := 2 // Use small threshold for clarity
 
 	wrapped := CircuitBreaker(DiscardLogger, threshold, time.Hour)(
 		FuncJob(func() {
-			atomic.AddInt32(&executions, 1)
+			executions.Add(1)
 			panic("always fails")
 		}),
 	)
 
 	// Fail exactly `threshold` times (2 times)
-	for i := 0; i < threshold; i++ {
+	for range threshold {
 		func() {
 			defer func() { recover() }()
 			wrapped.Run()
@@ -505,12 +503,12 @@ func TestCircuitBreaker_BoundaryThresholdExact(t *testing.T) {
 	// With mutation >= → >: isHalfOpen would return false (2 > 2 is false)
 	// and circuit would incorrectly allow execution
 
-	execsBefore := atomic.LoadInt32(&executions)
+	execsBefore := executions.Load()
 
 	// This run should be SKIPPED if circuit is correctly open
 	wrapped.Run()
 
-	execsAfter := atomic.LoadInt32(&executions)
+	execsAfter := executions.Load()
 
 	// If circuit is correctly open, executions should NOT increase
 	if execsAfter != execsBefore {
@@ -529,7 +527,7 @@ func TestCircuitBreaker_BoundaryThresholdExact(t *testing.T) {
 // This kills CONDITIONALS_BOUNDARY mutation where `>= threshold` could become `> threshold`.
 // When failures == threshold, wasOpen should return true on successful reset.
 func TestCircuitBreaker_ResetOnSuccessBoundary(t *testing.T) {
-	var executions int32
+	var executions atomic.Int32
 	var shouldFail atomic.Bool
 	threshold := 2
 	cooldown := 50 * time.Millisecond
@@ -538,7 +536,7 @@ func TestCircuitBreaker_ResetOnSuccessBoundary(t *testing.T) {
 
 	wrapped := CircuitBreaker(DiscardLogger, threshold, cooldown)(
 		FuncJob(func() {
-			atomic.AddInt32(&executions, 1)
+			executions.Add(1)
 			if shouldFail.Load() {
 				panic("controlled failure")
 			}
@@ -546,7 +544,7 @@ func TestCircuitBreaker_ResetOnSuccessBoundary(t *testing.T) {
 	)
 
 	// Fail exactly threshold times to open circuit
-	for i := 0; i < threshold; i++ {
+	for range threshold {
 		func() {
 			defer func() { recover() }()
 			wrapped.Run()
@@ -560,12 +558,12 @@ func TestCircuitBreaker_ResetOnSuccessBoundary(t *testing.T) {
 	// Set up to succeed
 	shouldFail.Store(false)
 
-	execsBefore := atomic.LoadInt32(&executions)
+	execsBefore := executions.Load()
 
 	// Execute in half-open state - should succeed and reset circuit
 	wrapped.Run()
 
-	execsAfter := atomic.LoadInt32(&executions)
+	execsAfter := executions.Load()
 
 	// Execution should have happened (half-open allows one attempt)
 	if execsAfter != execsBefore+1 {
@@ -576,7 +574,7 @@ func TestCircuitBreaker_ResetOnSuccessBoundary(t *testing.T) {
 	// Now circuit should be closed, run again to verify
 	wrapped.Run()
 
-	execsFinal := atomic.LoadInt32(&executions)
+	execsFinal := executions.Load()
 	if execsFinal != execsAfter+1 {
 		t.Errorf("circuit should be closed after successful reset: expected %d, got %d",
 			execsAfter+1, execsFinal)
@@ -586,19 +584,19 @@ func TestCircuitBreaker_ResetOnSuccessBoundary(t *testing.T) {
 // TestCircuitBreaker_IsOpenBoundary tests retry.go:259 (isOpen) at exact threshold.
 // Combined with cooldown to verify open state detection at boundary.
 func TestCircuitBreaker_IsOpenBoundary(t *testing.T) {
-	var executions int32
+	var executions atomic.Int32
 	threshold := 3
 	cooldown := 100 * time.Millisecond
 
 	wrapped := CircuitBreaker(DiscardLogger, threshold, cooldown)(
 		FuncJob(func() {
-			atomic.AddInt32(&executions, 1)
+			executions.Add(1)
 			panic("always fails")
 		}),
 	)
 
 	// Fail exactly threshold times
-	for i := 0; i < threshold; i++ {
+	for range threshold {
 		func() {
 			defer func() { recover() }()
 			wrapped.Run()
@@ -606,14 +604,14 @@ func TestCircuitBreaker_IsOpenBoundary(t *testing.T) {
 	}
 
 	// Verify exactly threshold executions happened
-	if got := atomic.LoadInt32(&executions); got != int32(threshold) {
+	if got := executions.Load(); got != int32(threshold) {
 		t.Fatalf("expected %d executions, got %d", threshold, got)
 	}
 
 	// Circuit should be open - next call should be skipped (within cooldown)
 	wrapped.Run()
 
-	if got := atomic.LoadInt32(&executions); got != int32(threshold) {
+	if got := executions.Load(); got != int32(threshold) {
 		t.Errorf("circuit should be open at exact threshold, executions should stay at %d, got %d",
 			threshold, got)
 	}
@@ -627,7 +625,7 @@ func TestCircuitBreaker_IsOpenBoundary(t *testing.T) {
 	}()
 
 	// Should have one more execution (half-open attempt)
-	if got := atomic.LoadInt32(&executions); got != int32(threshold)+1 {
+	if got := executions.Load(); got != int32(threshold)+1 {
 		t.Errorf("half-open state should allow execution, expected %d, got %d",
 			threshold+1, got)
 	}
@@ -728,28 +726,28 @@ func TestPanicWithStackAlias(t *testing.T) {
 // --- RetryOnError tests ---
 
 func TestRetryOnError_SuccessOnFirstAttempt(t *testing.T) {
-	var attempts int32
+	var attempts atomic.Int32
 
 	wrapped := RetryOnError(DiscardLogger, 3, 10*time.Millisecond, time.Second, 2.0)(
 		FuncErrorJob(func() error {
-			atomic.AddInt32(&attempts, 1)
+			attempts.Add(1)
 			return nil
 		}),
 	)
 
 	wrapped.Run()
 
-	if got := atomic.LoadInt32(&attempts); got != 1 {
+	if got := attempts.Load(); got != 1 {
 		t.Errorf("expected 1 attempt, got %d", got)
 	}
 }
 
 func TestRetryOnError_SuccessOnRetry(t *testing.T) {
-	var attempts int32
+	var attempts atomic.Int32
 
 	wrapped := RetryOnError(DiscardLogger, 3, 10*time.Millisecond, time.Second, 2.0)(
 		FuncErrorJob(func() error {
-			count := atomic.AddInt32(&attempts, 1)
+			count := attempts.Add(1)
 			if count < 3 {
 				return errors.New("transient failure")
 			}
@@ -759,17 +757,17 @@ func TestRetryOnError_SuccessOnRetry(t *testing.T) {
 
 	wrapped.Run()
 
-	if got := atomic.LoadInt32(&attempts); got != 3 {
+	if got := attempts.Load(); got != 3 {
 		t.Errorf("expected 3 attempts, got %d", got)
 	}
 }
 
 func TestRetryOnError_ExhaustsRetries(t *testing.T) {
-	var attempts int32
+	var attempts atomic.Int32
 
 	wrapped := RetryOnError(DiscardLogger, 3, 1*time.Millisecond, time.Second, 2.0)(
 		FuncErrorJob(func() error {
-			atomic.AddInt32(&attempts, 1)
+			attempts.Add(1)
 			return errors.New("always fails")
 		}),
 	)
@@ -793,17 +791,17 @@ func TestRetryOnError_ExhaustsRetries(t *testing.T) {
 	}
 
 	// maxRetries=3 means 4 total attempts (1 initial + 3 retries)
-	if got := atomic.LoadInt32(&attempts); got != 4 {
+	if got := attempts.Load(); got != 4 {
 		t.Errorf("expected 4 attempts (1 initial + 3 retries), got %d", got)
 	}
 }
 
 func TestRetryOnError_NoRetries(t *testing.T) {
-	var attempts int32
+	var attempts atomic.Int32
 
 	wrapped := RetryOnError(DiscardLogger, 0, 1*time.Millisecond, 5*time.Millisecond, 2.0)(
 		FuncErrorJob(func() error {
-			atomic.AddInt32(&attempts, 1)
+			attempts.Add(1)
 			return errors.New("fail immediately")
 		}),
 	)
@@ -814,17 +812,17 @@ func TestRetryOnError_NoRetries(t *testing.T) {
 		wrapped.Run()
 	}()
 
-	if got := atomic.LoadInt32(&attempts); got != 1 {
+	if got := attempts.Load(); got != 1 {
 		t.Errorf("expected 1 attempt with maxRetries=0, got %d", got)
 	}
 }
 
 func TestRetryOnError_UnlimitedRetries(t *testing.T) {
-	var attempts int32
+	var attempts atomic.Int32
 
 	wrapped := RetryOnError(DiscardLogger, -1, 1*time.Millisecond, 5*time.Millisecond, 2.0)(
 		FuncErrorJob(func() error {
-			count := atomic.AddInt32(&attempts, 1)
+			count := attempts.Add(1)
 			if count < 20 {
 				return errors.New("keep trying")
 			}
@@ -834,24 +832,24 @@ func TestRetryOnError_UnlimitedRetries(t *testing.T) {
 
 	wrapped.Run()
 
-	if got := atomic.LoadInt32(&attempts); got != 20 {
+	if got := attempts.Load(); got != 20 {
 		t.Errorf("expected 20 attempts, got %d", got)
 	}
 }
 
 func TestRetryOnError_PassesThroughRegularJob(t *testing.T) {
-	var attempts int32
+	var attempts atomic.Int32
 
 	// Regular FuncJob doesn't implement ErrorJob
 	regularJob := FuncJob(func() {
-		atomic.AddInt32(&attempts, 1)
+		attempts.Add(1)
 	})
 
 	wrapped := RetryOnError(DiscardLogger, 3, 10*time.Millisecond, time.Second, 2.0)(regularJob)
 
 	wrapped.Run()
 
-	if got := atomic.LoadInt32(&attempts); got != 1 {
+	if got := attempts.Load(); got != 1 {
 		t.Errorf("expected 1 attempt (pass-through), got %d", got)
 	}
 }
@@ -926,7 +924,7 @@ func TestRetryOnError_MaxDelayRespected(t *testing.T) {
 
 func TestRetryOnError_IntegrationWithCron(t *testing.T) {
 	clock := NewFakeClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
-	var executions int32
+	var executions atomic.Int32
 
 	c := New(
 		WithClock(clock),
@@ -937,7 +935,7 @@ func TestRetryOnError_IntegrationWithCron(t *testing.T) {
 	)
 
 	c.AddJob("@every 1h", FuncErrorJob(func() error {
-		count := atomic.AddInt32(&executions, 1)
+		count := executions.Add(1)
 		if count < 3 {
 			return errors.New("transient failure")
 		}
@@ -952,7 +950,7 @@ func TestRetryOnError_IntegrationWithCron(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Should have 3 executions (2 retries + 1 success)
-	if got := atomic.LoadInt32(&executions); got != 3 {
+	if got := executions.Load(); got != 3 {
 		t.Errorf("expected 3 executions, got %d", got)
 	}
 }
@@ -961,8 +959,8 @@ func TestRetryOnError_ChainWithRecover(t *testing.T) {
 	// RetryOnError should compose with Recover for mixed job types.
 	// ErrorJob gets error-based retry; if Run() is called on a FuncErrorJob
 	// that returns an error, it panics, which Recover catches.
-	var errorJobAttempts int32
-	var regularJobAttempts int32
+	var errorJobAttempts atomic.Int32
+	var regularJobAttempts atomic.Int32
 
 	chain := NewChain(
 		Recover(DiscardLogger),
@@ -971,7 +969,7 @@ func TestRetryOnError_ChainWithRecover(t *testing.T) {
 
 	// ErrorJob: gets error-based retry
 	errorJob := chain.Then(FuncErrorJob(func() error {
-		count := atomic.AddInt32(&errorJobAttempts, 1)
+		count := errorJobAttempts.Add(1)
 		if count < 2 {
 			return errors.New("transient")
 		}
@@ -979,18 +977,18 @@ func TestRetryOnError_ChainWithRecover(t *testing.T) {
 	}))
 	errorJob.Run()
 
-	if got := atomic.LoadInt32(&errorJobAttempts); got != 2 {
+	if got := errorJobAttempts.Load(); got != 2 {
 		t.Errorf("ErrorJob: expected 2 attempts, got %d", got)
 	}
 
 	// Regular Job: passes through RetryOnError, Recover catches panic
 	regularJob := chain.Then(FuncJob(func() {
-		atomic.AddInt32(&regularJobAttempts, 1)
+		regularJobAttempts.Add(1)
 		panic("regular job failure")
 	}))
 	regularJob.Run() // Recover catches the panic
 
-	if got := atomic.LoadInt32(&regularJobAttempts); got != 1 {
+	if got := regularJobAttempts.Load(); got != 1 {
 		t.Errorf("Regular Job: expected 1 attempt (no retry), got %d", got)
 	}
 }

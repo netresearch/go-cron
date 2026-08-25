@@ -946,12 +946,12 @@ func TestWorkflow_ConcurrentExecutions(t *testing.T) {
 	c.Start()
 	defer c.Stop()
 
-	var count int32
+	var count atomic.Int32
 	c.AddFunc("@triggered", func() {
-		atomic.AddInt32(&count, 1)
+		count.Add(1)
 	}, WithName("a"))
 	c.AddFunc("@triggered", func() {
-		atomic.AddInt32(&count, 1)
+		count.Add(1)
 	}, WithName("b"))
 	_ = c.AddDependencyByName("b", "a", OnSuccess)
 
@@ -962,10 +962,10 @@ func TestWorkflow_ConcurrentExecutions(t *testing.T) {
 
 	// Wait for all jobs (5 * 2 = 10 jobs).
 	deadline := time.After(5 * time.Second)
-	for atomic.LoadInt32(&count) < 10 {
+	for count.Load() < 10 {
 		select {
 		case <-deadline:
-			t.Fatalf("timeout: only %d/10 jobs ran", atomic.LoadInt32(&count))
+			t.Fatalf("timeout: only %d/10 jobs ran", count.Load())
 		default:
 			time.Sleep(10 * time.Millisecond)
 		}

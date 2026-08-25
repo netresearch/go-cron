@@ -399,9 +399,9 @@ func TestYearFieldConcurrent(t *testing.T) {
 	}
 
 	done := make(chan bool)
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		go func() {
-			for j := 0; j < 100; j++ {
+			for range 100 {
 				from := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 				next := schedule.Next(from)
 				if next.IsZero() {
@@ -416,7 +416,7 @@ func TestYearFieldConcurrent(t *testing.T) {
 		}()
 	}
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		<-done
 	}
 }

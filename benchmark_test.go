@@ -138,7 +138,7 @@ func benchmarkCronWithJobs(b *testing.B, numJobs int) {
 	c := New()
 	job := FuncJob(func() {})
 
-	for i := 0; i < numJobs; i++ {
+	for range numJobs {
 		c.AddJob("* * * * *", job)
 	}
 

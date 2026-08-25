@@ -95,7 +95,7 @@ func TestWithCapacity_BulkAdditions(t *testing.T) {
 		initialPtr := &c.entries
 
 		// Add entries up to capacity
-		for i := 0; i < capacity; i++ {
+		for i := range capacity {
 			_, err := c.AddFunc("@every 1h", func() {})
 			if err != nil {
 				t.Fatalf("failed to add entry %d: %v", i, err)
@@ -149,7 +149,7 @@ func BenchmarkWithCapacity_BulkAdd(b *testing.B) {
 	b.Run("without_capacity", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			c := New()
-			for j := 0; j < numEntries; j++ {
+			for range numEntries {
 				c.AddFunc("@every 1h", func() {})
 			}
 		}
@@ -158,7 +158,7 @@ func BenchmarkWithCapacity_BulkAdd(b *testing.B) {
 	b.Run("with_capacity", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			c := New(WithCapacity(numEntries))
-			for j := 0; j < numEntries; j++ {
+			for range numEntries {
 				c.AddFunc("@every 1h", func() {})
 			}
 		}
@@ -173,7 +173,7 @@ func BenchmarkWithCapacity_MapOperations(b *testing.B) {
 			b.Run("with_capacity", func(b *testing.B) {
 				for i := 0; i < b.N; i++ {
 					c := New(WithCapacity(size))
-					for j := 0; j < size; j++ {
+					for range size {
 						c.AddFunc("@every 1h", func() {})
 					}
 					// Access all entries
@@ -184,7 +184,7 @@ func BenchmarkWithCapacity_MapOperations(b *testing.B) {
 			b.Run("without_capacity", func(b *testing.B) {
 				for i := 0; i < b.N; i++ {
 					c := New()
-					for j := 0; j < size; j++ {
+					for range size {
 						c.AddFunc("@every 1h", func() {})
 					}
 					// Access all entries

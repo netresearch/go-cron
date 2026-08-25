@@ -289,7 +289,7 @@ func TestMissedMaxRunsLimit(t *testing.T) {
 	now := time.Date(2026, 1, 18, 12, 0, 0, 0, time.UTC)
 	clock := NewFakeClock(now)
 
-	var calls int64
+	var calls atomic.Int64
 
 	c := New(
 		WithClock(clock),
@@ -300,7 +300,7 @@ func TestMissedMaxRunsLimit(t *testing.T) {
 	// Should only run 100 times (capped)
 	lastRun := now.Add(-200 * time.Minute)
 	_, err := c.AddFunc("0 * * * * *", func() {
-		atomic.AddInt64(&calls, 1)
+		calls.Add(1)
 	},
 		WithPrev(lastRun),
 		WithMissedPolicy(MissedRunAll),
@@ -315,7 +315,7 @@ func TestMissedMaxRunsLimit(t *testing.T) {
 	// Wait for catch-up to run
 	time.Sleep(200 * time.Millisecond)
 
-	count := atomic.LoadInt64(&calls)
+	count := calls.Load()
 	if count > maxMissedRuns {
 		t.Errorf("MissedRunAll should be capped at %d, got %d calls", maxMissedRuns, count)
 	}

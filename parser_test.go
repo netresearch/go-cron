@@ -249,7 +249,7 @@ func TestWraparoundScheduleNextTime(t *testing.T) {
 
 		// Continue to verify the wraparound
 		times := []time.Time{next}
-		for i := 0; i < 4; i++ {
+		for range 4 {
 			next = sched.Next(next)
 			times = append(times, next)
 		}
@@ -283,7 +283,7 @@ func TestWraparoundScheduleNextTime(t *testing.T) {
 
 		// Continue through the year boundary
 		times := []time.Time{next}
-		for i := 0; i < 3; i++ {
+		for range 3 {
 			next = sched.Next(next)
 			times = append(times, next)
 		}
@@ -322,7 +322,7 @@ func TestWraparoundScheduleNextTime(t *testing.T) {
 
 		// Continue through the weekend
 		times := []time.Time{next}
-		for i := 0; i < 3; i++ {
+		for range 3 {
 			next = sched.Next(next)
 			times = append(times, next)
 		}
@@ -970,14 +970,14 @@ func TestParserWithCache(t *testing.T) {
 		specs := []string{"0 * * * *", "30 * * * *", "@hourly", "@daily"}
 
 		done := make(chan bool, 100)
-		for i := 0; i < 100; i++ {
+		for i := range 100 {
 			go func(idx int) {
 				_, _ = parser.Parse(specs[idx%len(specs)])
 				done <- true
 			}(i)
 		}
 
-		for i := 0; i < 100; i++ {
+		for range 100 {
 			<-done
 		}
 	})
