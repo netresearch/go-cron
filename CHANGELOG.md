@@ -14,10 +14,14 @@ Originally based on [robfig/cron](https://github.com/robfig/cron).
 
 ## [0.16.0] - 2026-08-26
 
+### Added
+- Optional job priority: decides execution order when multiple jobs fire at the same instant. Contributed by [@manu52697] ([PR#399])
+
 ### Changed
 - **BREAKING**: minimum supported Go version raised from 1.25 to 1.26 (Go release policy: two most recent releases, now 1.26 + 1.27); toolchain updated to go1.27.0 ([PR#402])
 
 ### Documentation
+- How to verify a release (checksums, Cosign signatures, SLSA provenance) is now documented. Contributed by [@manu52697] ([PR#393])
 - Every surface that declared the old floor now says Go 1.26+ (package godoc, README, FAQ, MIGRATION checklist, PROJECT_INDEX, AGENTS); the stale pre-go-check required-checks list in BRANCH_PROTECTION.md was rewritten to match the live ruleset ([PR#402])
 
 ### Internal
@@ -625,6 +629,9 @@ This fork includes all features from robfig/cron v3 plus:
 [Unreleased]: https://github.com/netresearch/go-cron/compare/v0.16.0...HEAD
 [0.16.0]: https://github.com/netresearch/go-cron/compare/v0.15.1...v0.16.0
 [PR#402]: https://github.com/netresearch/go-cron/pull/402
+[PR#399]: https://github.com/netresearch/go-cron/pull/399
+[PR#393]: https://github.com/netresearch/go-cron/pull/393
+[@manu52697]: https://github.com/manu52697
 [0.15.1]: https://github.com/netresearch/go-cron/compare/v0.15.0...v0.15.1
 [0.15.0]: https://github.com/netresearch/go-cron/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/netresearch/go-cron/compare/v0.13.4...v0.14.0
