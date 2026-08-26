@@ -9,11 +9,19 @@ Originally based on [robfig/cron](https://github.com/robfig/cron).
 
 ## [Unreleased]
 
-### Changed
-- **BREAKING**: minimum supported Go version raised from 1.25 to 1.26 (Go release policy: two most recent releases, now 1.26 + 1.27); toolchain updated to go1.27.0
-
 ### Planned for v2
 - Context-aware Job interface with graceful shutdown support
+
+## [0.16.0] - 2026-08-26
+
+### Changed
+- **BREAKING**: minimum supported Go version raised from 1.25 to 1.26 (Go release policy: two most recent releases, now 1.26 + 1.27); toolchain updated to go1.27.0 ([PR#402])
+
+### Documentation
+- Every surface that declared the old floor now says Go 1.26+ (package godoc, README, FAQ, MIGRATION checklist, PROJECT_INDEX, AGENTS); the stale pre-go-check required-checks list in BRANCH_PROTECTION.md was rewritten to match the live ruleset ([PR#402])
+
+### Internal
+- Test files modernized via `go fix` (`for range n`, `wg.Go`, `any`, `atomic.Int32/Int64`, `slices.Contains`); no library code or public API changed ([PR#402])
 
 ## [0.15.1] - 2026-07-28
 
@@ -614,7 +622,9 @@ This fork includes all features from robfig/cron v3 plus:
    _, err := cron.ParseStandard("*/60 * * * *") // Error: step (60) must be less than range size (60)
    ```
 
-[Unreleased]: https://github.com/netresearch/go-cron/compare/v0.15.1...HEAD
+[Unreleased]: https://github.com/netresearch/go-cron/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/netresearch/go-cron/compare/v0.15.1...v0.16.0
+[PR#402]: https://github.com/netresearch/go-cron/pull/402
 [0.15.1]: https://github.com/netresearch/go-cron/compare/v0.15.0...v0.15.1
 [0.15.0]: https://github.com/netresearch/go-cron/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/netresearch/go-cron/compare/v0.13.4...v0.14.0
