@@ -4,12 +4,23 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to (re)release (e.g. v0.16.0); defaults to the triggering ref"
+        required: false
+        type: string
+        default: ""
 
 permissions: {}
 
 jobs:
   create:
     uses: netresearch/.github/.github/workflows/golib-create-release.yml@main
+    with:
+      tag: ${{ inputs.tag || '' }}
+      # Publish directly, like the app repos' release-go-app.yml — one shared
+      # behavior across the Go estate instead of drafts awaiting manual publish.
+      draft: false
     permissions:
       contents: write
       id-token: write
