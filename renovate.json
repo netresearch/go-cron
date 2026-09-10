@@ -6,6 +6,7 @@
     ":semanticCommitTypeAll(chore)",
     "group:allNonMajor"
   ],
+  "forkProcessing": "enabled",
   "labels": ["dependencies"],
   "prHourlyLimit": 2,
   "prConcurrentLimit": 5,
