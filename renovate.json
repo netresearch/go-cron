@@ -16,6 +16,13 @@
   },
   "packageRules": [
     {
+      "description": "The go directive is this library's floor and stays on the oldest supported line; only the toolchain directive follows the newest patch. The global rangeStrategy=bump above otherwise applies to the go directive too: #407 rewrote `go 1.26` + `toolchain go1.27.0` into `go 1.27.1`, which forces every importer onto that patch and made the gosec job fail without a message, because the gosec image ships Go 1.27.0 and refuses a newer go line under GOTOOLCHAIN=local.",
+      "matchManagers": ["gomod"],
+      "matchDepNames": ["go"],
+      "matchDepTypes": ["golang"],
+      "enabled": false
+    },
+    {
       "matchManagers": ["gomod"],
       "matchUpdateTypes": ["minor", "patch"],
       "automerge": true
