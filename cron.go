@@ -86,7 +86,7 @@ type Cron struct {
 	clock       Clock
 	hooks       *ObservabilityHooks
 	maxEntries  int                // 0 means unlimited
-	entryCount  int64              // atomic counter for race-free limit checking
+	entryCount  atomic.Int64       // atomic counter for race-free limit checking
 	baseCtx     context.Context    // base context for all jobs
 	cancelCtx   context.CancelFunc // cancels baseCtx when Stop() is called
 
@@ -910,7 +910,7 @@ func (c *Cron) scheduleJob(schedule Schedule, cmd Job, opts ...JobOption) (Entry
 	defer func() {
 		if countIncremented {
 			// Error path - decrement the count we incremented
-			atomic.AddInt64(&c.entryCount, -1)
+			c.entryCount.Add(-1)
 		}
 	}()
 
@@ -2157,11 +2157,11 @@ func (c *Cron) tryIncrementEntryCount() bool {
 		return true // unlimited
 	}
 	for {
-		current := atomic.LoadInt64(&c.entryCount)
+		current := c.entryCount.Load()
 		if int(current) >= c.maxEntries {
 			return false
 		}
-		if atomic.CompareAndSwapInt64(&c.entryCount, current, current+1) {
+		if c.entryCount.CompareAndSwap(current, current+1) {
 			return true
 		}
 		// CAS failed, another goroutine modified count - retry
@@ -2200,7 +2200,7 @@ func (c *Cron) removeEntry(id EntryID) {
 	if entry.Name != "" {
 		delete(c.nameIndex, entry.Name)
 	}
-	atomic.AddInt64(&c.entryCount, -1)
+	c.entryCount.Add(-1)
 
 	// Clean up workflow dependency edges for removed entry.
 	if deps, ok := c.entryDeps[id]; ok {

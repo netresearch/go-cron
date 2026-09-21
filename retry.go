@@ -163,13 +163,13 @@ func (h *CircuitBreakerHandle) State() CircuitBreakerState {
 
 // Failures returns the current consecutive failure count.
 func (h *CircuitBreakerHandle) Failures() int64 {
-	return atomic.LoadInt64(&h.state.failures)
+	return h.state.failures.Load()
 }
 
 // LastFailure returns the time of the last recorded failure.
 // Returns the zero time if no failures have been recorded.
 func (h *CircuitBreakerHandle) LastFailure() time.Time {
-	nano := atomic.LoadInt64(&h.state.lastFailNano)
+	nano := h.state.lastFailNano.Load()
 	if nano == 0 {
 		return time.Time{}
 	}
@@ -179,8 +179,8 @@ func (h *CircuitBreakerHandle) LastFailure() time.Time {
 // CooldownEnds returns when the current cooldown period expires.
 // Returns the zero time if the circuit is not open.
 func (h *CircuitBreakerHandle) CooldownEnds() time.Time {
-	nano := atomic.LoadInt64(&h.state.lastFailNano)
-	failures := atomic.LoadInt64(&h.state.failures)
+	nano := h.state.lastFailNano.Load()
+	failures := h.state.failures.Load()
 	if nano == 0 || failures < int64(h.threshold) {
 		return time.Time{}
 	}
@@ -530,15 +530,15 @@ func RetryOnError(logger Logger, maxRetries int, initialDelay, maxDelay time.Dur
 //
 // circuitState holds the shared state for a circuit breaker.
 type circuitState struct {
-	failures     int64      // atomic: current consecutive failure count
-	lastFailNano int64      // atomic: unix nano of last failure
-	mu           sync.Mutex // only for state transitions
+	failures     atomic.Int64 // atomic: current consecutive failure count
+	lastFailNano atomic.Int64 // atomic: unix nano of last failure
+	mu           sync.Mutex   // only for state transitions
 }
 
 // isOpen returns true if the circuit is open (in cooldown period).
 func (s *circuitState) isOpen(threshold int, cooldown time.Duration) (bool, time.Duration) {
-	currentFailures := int(atomic.LoadInt64(&s.failures))
-	lastFail := atomic.LoadInt64(&s.lastFailNano)
+	currentFailures := int(s.failures.Load())
+	lastFail := s.lastFailNano.Load()
 	timeSinceLastFail := time.Since(time.Unix(0, lastFail))
 
 	if currentFailures >= threshold && timeSinceLastFail < cooldown {
@@ -549,14 +549,14 @@ func (s *circuitState) isOpen(threshold int, cooldown time.Duration) (bool, time
 
 // isHalfOpen returns true if the circuit is in half-open state (ready to attempt recovery).
 func (s *circuitState) isHalfOpen(threshold int) bool {
-	return int(atomic.LoadInt64(&s.failures)) >= threshold
+	return int(s.failures.Load()) >= threshold
 }
 
 // recordFailure increments the failure counter and returns the new count.
 func (s *circuitState) recordFailure() int64 {
 	s.mu.Lock()
-	newFailures := atomic.AddInt64(&s.failures, 1)
-	atomic.StoreInt64(&s.lastFailNano, time.Now().UnixNano())
+	newFailures := s.failures.Add(1)
+	s.lastFailNano.Store(time.Now().UnixNano())
 	s.mu.Unlock()
 	return newFailures
 }
@@ -564,8 +564,8 @@ func (s *circuitState) recordFailure() int64 {
 // resetOnSuccess resets the circuit if successful, returning true if it was previously open.
 func (s *circuitState) resetOnSuccess(threshold int) bool {
 	s.mu.Lock()
-	wasOpen := atomic.LoadInt64(&s.failures) >= int64(threshold)
-	atomic.StoreInt64(&s.failures, 0)
+	wasOpen := s.failures.Load() >= int64(threshold)
+	s.failures.Store(0)
 	s.mu.Unlock()
 	return wasOpen
 }
@@ -650,7 +650,7 @@ func circuitBreakerImpl(logger Logger, threshold int, cooldown time.Duration, op
 			// Check if circuit is open
 			if open, remaining := state.isOpen(threshold, cooldown); open {
 				logger.Info("circuit breaker open",
-					"failures", atomic.LoadInt64(&state.failures),
+					"failures", state.failures.Load(),
 					"cooldown_remaining", remaining.Round(time.Second))
 				return
 			}
@@ -664,7 +664,7 @@ func circuitBreakerImpl(logger Logger, threshold int, cooldown time.Duration, op
 				if cfg.callback != nil {
 					cfg.callback(CircuitBreakerEvent{
 						OldState: CircuitOpen, NewState: CircuitHalfOpen,
-						Failures: atomic.LoadInt64(&state.failures),
+						Failures: state.failures.Load(),
 					})
 				}
 			}

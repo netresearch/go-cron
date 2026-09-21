@@ -258,7 +258,7 @@ func TestWithMaxEntries_LimitOne(t *testing.T) {
 
 // TestEntryCountDecrementOnError verifies that entry count is correctly decremented
 // when an error occurs after incrementing. This kills mutations at cron.go:370
-// where `atomic.AddInt64(&c.entryCount, -1)` could be changed to +1.
+// where `c.entryCount.Add(-1)` could be changed to +1.
 func TestEntryCountDecrementOnError(t *testing.T) {
 	c := New(WithMaxEntries(2))
 

@@ -1181,9 +1181,9 @@ func TestCircuitState_IsOpenCooldownRemaining(t *testing.T) {
 	state := &circuitState{}
 	cooldown := time.Second
 
-	atomic.StoreInt64(&state.failures, 1)
+	state.failures.Store(1)
 	// Set last failure to 200ms ago
-	atomic.StoreInt64(&state.lastFailNano, time.Now().Add(-200*time.Millisecond).UnixNano())
+	state.lastFailNano.Store(time.Now().Add(-200 * time.Millisecond).UnixNano())
 
 	open, remaining := state.isOpen(1, cooldown)
 	if !open {

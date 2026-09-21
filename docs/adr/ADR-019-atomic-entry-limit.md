@@ -39,21 +39,21 @@ Use atomic Compare-And-Swap (CAS) for lock-free entry count limiting:
 ```go
 type Cron struct {
     maxEntries int    // 0 means unlimited
-    entryCount int64  // Atomic counter
+    entryCount atomic.Int64  // Atomic counter
 }
 
 func (c *Cron) tryIncrementEntryCount() bool {
     if c.maxEntries == 0 {
-        atomic.AddInt64(&c.entryCount, 1)
+        c.entryCount.Add(1)
         return true
     }
 
     for {
-        current := atomic.LoadInt64(&c.entryCount)
+        current := c.entryCount.Load()
         if int(current) >= c.maxEntries {
             return false
         }
-        if atomic.CompareAndSwapInt64(&c.entryCount, current, current+1) {
+        if c.entryCount.CompareAndSwap(current, current+1) {
             return true
         }
         // CAS failed, retry
@@ -61,7 +61,7 @@ func (c *Cron) tryIncrementEntryCount() bool {
 }
 
 func (c *Cron) decrementEntryCount() {
-    atomic.AddInt64(&c.entryCount, -1)
+    c.entryCount.Add(-1)
 }
 ```
 
