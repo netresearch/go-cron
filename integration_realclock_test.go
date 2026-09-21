@@ -121,7 +121,7 @@ func TestIntegrationStartStopNoGoroutineLeak(t *testing.T) {
 		stableFor int
 		after     int
 	)
-	for i := 0; i < maxSamples; i++ {
+	for range maxSamples {
 		time.Sleep(sampleDelay)
 		after = runtime.NumGoroutine()
 		if after <= baseline+slack {

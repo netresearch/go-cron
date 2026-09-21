@@ -26,11 +26,11 @@ func TestConcurrentAddRemove(t *testing.T) {
 	var addedIDs sync.Map // Store IDs for removal
 
 	// Spawn adders
-	for i := 0; i < goroutines; i++ {
+	for i := range goroutines {
 		wg.Add(1)
 		go func(workerID int) {
 			defer wg.Done()
-			for j := 0; j < opsPerGoroutine; j++ {
+			for range opsPerGoroutine {
 				id, err := c.AddFunc("* * * * *", func() {})
 				if err != nil {
 					// May fail due to timing, that's ok
@@ -42,15 +42,13 @@ func TestConcurrentAddRemove(t *testing.T) {
 	}
 
 	// Spawn removers (they try to remove entries that may or may not exist)
-	for i := 0; i < goroutines/2; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for j := 0; j < opsPerGoroutine; j++ {
+	for range goroutines / 2 {
+		wg.Go(func() {
+			for j := range opsPerGoroutine {
 				// Try to remove a random ID - some will be valid, some won't
 				c.Remove(EntryID(j + 1))
 			}
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -77,11 +75,9 @@ func TestConcurrentEntriesAccess(t *testing.T) {
 	var wg sync.WaitGroup
 
 	// Spawn entry readers
-	for i := 0; i < goroutines; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for j := 0; j < iterations; j++ {
+	for range goroutines {
+		wg.Go(func() {
+			for range iterations {
 				entries := c.Entries()
 				// Just access the entries to ensure no race
 				_ = len(entries)
@@ -90,26 +86,24 @@ func TestConcurrentEntriesAccess(t *testing.T) {
 					_ = e.Next
 				}
 			}
-		}()
+		})
 	}
 
 	// Spawn adders
-	for i := 0; i < goroutines/2; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for j := 0; j < iterations; j++ {
+	for range goroutines / 2 {
+		wg.Go(func() {
+			for range iterations {
 				c.AddFunc("* * * * *", func() {})
 			}
-		}()
+		})
 	}
 
 	// Spawn removers
-	for i := 0; i < goroutines/2; i++ {
+	for i := range goroutines / 2 {
 		wg.Add(1)
 		go func(base int) {
 			defer wg.Done()
-			for j := 0; j < iterations; j++ {
+			for j := range iterations {
 				c.Remove(EntryID(base*iterations + j))
 			}
 		}(i)
@@ -124,7 +118,7 @@ func TestConcurrentEntryLookup(t *testing.T) {
 
 	// Pre-add some entries
 	var ids []EntryID
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		id, _ := c.AddFunc("* * * * *", func() {})
 		ids = append(ids, id)
 	}
@@ -135,29 +129,25 @@ func TestConcurrentEntryLookup(t *testing.T) {
 	var wg sync.WaitGroup
 
 	// Spawn entry lookers
-	for i := 0; i < 20; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for j := 0; j < 100; j++ {
+	for range 20 {
+		wg.Go(func() {
+			for range 100 {
 				for _, id := range ids {
 					entry := c.Entry(id)
 					// Entry may or may not be valid (could have been removed)
 					_ = entry.Valid()
 				}
 			}
-		}()
+		})
 	}
 
 	// Spawn removers
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for _, id := range ids {
 			c.Remove(id)
 			time.Sleep(time.Millisecond)
 		}
-	}()
+	})
 
 	wg.Wait()
 }
@@ -172,7 +162,7 @@ func TestHighFrequencyAdditions(t *testing.T) {
 	const count = 1000
 	start := time.Now()
 
-	for i := 0; i < count; i++ {
+	for i := range count {
 		_, err := c.AddFunc("* * * * *", func() {})
 		if err != nil {
 			t.Errorf("failed to add entry %d: %v", i, err)
@@ -214,11 +204,11 @@ func TestSlowScheduleNext(t *testing.T) {
 	clock := NewFakeClock(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
 	c := New(WithClock(clock))
 
-	var normalJobRuns int32
+	var normalJobRuns atomic.Int32
 
 	// Add a normal job
 	c.AddFunc("@every 1h", func() {
-		atomic.AddInt32(&normalJobRuns, 1)
+		normalJobRuns.Add(1)
 	})
 
 	// Add a job with a slow schedule (simulates expensive computation)
@@ -236,7 +226,7 @@ func TestSlowScheduleNext(t *testing.T) {
 	time.Sleep(150 * time.Millisecond)
 
 	// Normal job should have run
-	if runs := atomic.LoadInt32(&normalJobRuns); runs < 1 {
+	if runs := normalJobRuns.Load(); runs < 1 {
 		t.Errorf("expected normal job to run at least once, got %d runs", runs)
 	}
 }
@@ -266,7 +256,7 @@ func TestSchedulerRecoveryAfterPanic(t *testing.T) {
 	defer c.Stop()
 
 	// Trigger multiple runs
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		time.Sleep(50 * time.Millisecond)
 		clock.Advance(time.Hour)
 		time.Sleep(100 * time.Millisecond)
@@ -292,17 +282,15 @@ func TestMaxEntriesUnderConcurrentLoad(t *testing.T) {
 	var successCount, failCount int32
 
 	// Spawn many goroutines trying to add entries
-	for i := 0; i < 200; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 200 {
+		wg.Go(func() {
 			_, err := c.AddFunc("* * * * *", func() {})
 			if err != nil {
 				atomic.AddInt32(&failCount, 1)
 			} else {
 				atomic.AddInt32(&successCount, 1)
 			}
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -335,9 +323,9 @@ func TestDST_USEastern_SpringForward(t *testing.T) {
 
 	c := New(WithClock(clock), WithLocation(loc))
 
-	var runs int32
+	var runs atomic.Int32
 	c.AddFunc("30 2 * * *", func() { // 2:30 AM
-		atomic.AddInt32(&runs, 1)
+		runs.Add(1)
 	})
 
 	c.Start()
@@ -350,7 +338,7 @@ func TestDST_USEastern_SpringForward(t *testing.T) {
 
 	// The job may or may not run depending on DST handling
 	// What's important is the scheduler didn't crash
-	t.Logf("Job ran %d times through DST spring forward", atomic.LoadInt32(&runs))
+	t.Logf("Job ran %d times through DST spring forward", runs.Load())
 }
 
 // TestDST_USEastern_FallBack tests US Eastern fall back (1st Sunday of November).
@@ -367,9 +355,9 @@ func TestDST_USEastern_FallBack(t *testing.T) {
 
 	c := New(WithClock(clock), WithLocation(loc))
 
-	var runs int32
+	var runs atomic.Int32
 	c.AddFunc("30 1 * * *", func() { // 1:30 AM - occurs twice during fall back
-		atomic.AddInt32(&runs, 1)
+		runs.Add(1)
 	})
 
 	c.Start()
@@ -381,7 +369,7 @@ func TestDST_USEastern_FallBack(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Job must run exactly once — isDSTFallBackDuplicate prevents the second occurrence.
-	if runs := atomic.LoadInt32(&runs); runs != 1 {
+	if runs := runs.Load(); runs != 1 {
 		t.Errorf("expected job to run exactly once during fall back, got %d", runs)
 	}
 }
@@ -401,22 +389,22 @@ func TestDST_USEastern_FallBack_MinuteByMinute(t *testing.T) {
 
 	c := New(WithClock(clock), WithLocation(loc))
 
-	var runs int32
+	var runs atomic.Int32
 	c.AddFunc("30 1 * * *", func() {
-		atomic.AddInt32(&runs, 1)
+		runs.Add(1)
 	})
 
 	c.Start()
 	defer c.Stop()
 
 	// Advance minute-by-minute through the fall-back transition (~3 hours)
-	for i := 0; i < 180; i++ {
+	for range 180 {
 		time.Sleep(2 * time.Millisecond)
 		clock.Advance(1 * time.Minute)
 	}
 	time.Sleep(50 * time.Millisecond)
 
-	if got := atomic.LoadInt32(&runs); got != 1 {
+	if got := runs.Load(); got != 1 {
 		t.Errorf("expected job to run exactly once during fall back, got %d", got)
 	}
 }
@@ -434,9 +422,9 @@ func TestDST_Europe_London(t *testing.T) {
 
 	c := New(WithClock(clock), WithLocation(loc))
 
-	var runs int32
+	var runs atomic.Int32
 	c.AddFunc("30 0 * * *", func() { // 00:30 - should run before transition
-		atomic.AddInt32(&runs, 1)
+		runs.Add(1)
 	})
 
 	c.Start()
@@ -446,7 +434,7 @@ func TestDST_Europe_London(t *testing.T) {
 	clock.Advance(2 * time.Hour)
 	time.Sleep(100 * time.Millisecond)
 
-	t.Logf("Job ran %d times through Europe/London spring forward", atomic.LoadInt32(&runs))
+	t.Logf("Job ran %d times through Europe/London spring forward", runs.Load())
 }
 
 // TestDST_Australia_Sydney tests Australia/Sydney DST (opposite hemisphere).
@@ -463,9 +451,9 @@ func TestDST_Australia_Sydney(t *testing.T) {
 
 	c := New(WithClock(clock), WithLocation(loc))
 
-	var runs int32
+	var runs atomic.Int32
 	c.AddFunc("30 2 * * *", func() { // 2:30 AM - skipped hour
-		atomic.AddInt32(&runs, 1)
+		runs.Add(1)
 	})
 
 	c.Start()
@@ -475,7 +463,7 @@ func TestDST_Australia_Sydney(t *testing.T) {
 	clock.Advance(2 * time.Hour)
 	time.Sleep(100 * time.Millisecond)
 
-	t.Logf("Job ran %d times through Australia/Sydney spring forward", atomic.LoadInt32(&runs))
+	t.Logf("Job ran %d times through Australia/Sydney spring forward", runs.Load())
 }
 
 // Benchmarks for scale testing
@@ -485,7 +473,7 @@ func BenchmarkAddWithManyEntries(b *testing.B) {
 	for _, count := range []int{100, 1000, 10000} {
 		b.Run(fmt.Sprintf("existing_%d", count), func(b *testing.B) {
 			c := New()
-			for i := 0; i < count; i++ {
+			for range count {
 				c.AddFunc("* * * * *", func() {})
 			}
 			b.ResetTimer()
@@ -501,7 +489,7 @@ func BenchmarkEntriesWithManyEntries(b *testing.B) {
 	for _, count := range []int{100, 1000, 10000} {
 		b.Run(fmt.Sprintf("entries_%d", count), func(b *testing.B) {
 			c := New()
-			for i := 0; i < count; i++ {
+			for range count {
 				c.AddFunc("* * * * *", func() {})
 			}
 			b.ResetTimer()
@@ -518,7 +506,7 @@ func BenchmarkEntryLookupWithManyEntries(b *testing.B) {
 		b.Run(fmt.Sprintf("entries_%d", count), func(b *testing.B) {
 			c := New()
 			var ids []EntryID
-			for i := 0; i < count; i++ {
+			for range count {
 				id, _ := c.AddFunc("* * * * *", func() {})
 				ids = append(ids, id)
 			}
@@ -540,7 +528,7 @@ func BenchmarkRemoveWithManyEntries(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				c := New()
 				var ids []EntryID
-				for j := 0; j < count; j++ {
+				for range count {
 					id, _ := c.AddFunc("* * * * *", func() {})
 					ids = append(ids, id)
 				}
@@ -573,7 +561,7 @@ func BenchmarkMemoryUsage(b *testing.B) {
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {
 				c := New()
-				for j := 0; j < count; j++ {
+				for range count {
 					c.AddFunc("* * * * *", func() {})
 				}
 				// Force GC to get accurate memory stats
