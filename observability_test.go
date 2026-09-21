@@ -374,11 +374,12 @@ func BenchmarkObservabilityHooks_Overhead(b *testing.B) {
 
 	h := &hooks
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	i := 0
+	for b.Loop() {
 		h.callOnJobStart(EntryID(i), FuncJob(func() {}), time.Now())
 		h.callOnJobComplete(EntryID(i), FuncJob(func() {}), time.Second, nil)
 		h.callOnSchedule(EntryID(i), FuncJob(func() {}), time.Now())
+		i++
 	}
 }
 
@@ -386,10 +387,11 @@ func BenchmarkObservabilityHooks_NilOverhead(b *testing.B) {
 	// Benchmark the overhead when hooks are nil
 	var h *ObservabilityHooks
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	i := 0
+	for b.Loop() {
 		h.callOnJobStart(EntryID(i), FuncJob(func() {}), time.Now())
 		h.callOnJobComplete(EntryID(i), FuncJob(func() {}), time.Second, nil)
 		h.callOnSchedule(EntryID(i), FuncJob(func() {}), time.Now())
+		i++
 	}
 }
