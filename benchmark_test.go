@@ -18,13 +18,14 @@ func BenchmarkParseStandard(b *testing.B) {
 		"30 4 1,15 * *",
 	}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	i := 0
+	for b.Loop() {
 		spec := specs[i%len(specs)]
 		_, err := ParseStandard(spec)
 		if err != nil {
 			b.Fatal(err)
 		}
+		i++
 	}
 }
 
@@ -36,13 +37,14 @@ func BenchmarkParseWithTimezone(b *testing.B) {
 		"TZ=Asia/Tokyo 0 0 * * *",
 	}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	i := 0
+	for b.Loop() {
 		spec := specs[i%len(specs)]
 		_, err := ParseStandard(spec)
 		if err != nil {
 			b.Fatal(err)
 		}
+		i++
 	}
 }
 
@@ -58,13 +60,14 @@ func BenchmarkParseDescriptor(b *testing.B) {
 		"@every 1h30m",
 	}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	i := 0
+	for b.Loop() {
 		spec := specs[i%len(specs)]
 		_, err := ParseStandard(spec)
 		if err != nil {
 			b.Fatal(err)
 		}
+		i++
 	}
 }
 
@@ -73,8 +76,7 @@ func BenchmarkNext(b *testing.B) {
 	schedule, _ := ParseStandard("*/5 * * * *")
 	now := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		schedule.Next(now)
 	}
 }
@@ -84,8 +86,7 @@ func BenchmarkNextComplex(b *testing.B) {
 	schedule, _ := ParseStandard("15,45 9-17 1,15 1-6 1-5")
 	now := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		schedule.Next(now)
 	}
 }
@@ -95,8 +96,7 @@ func BenchmarkNextWithTimezone(b *testing.B) {
 	schedule, _ := ParseStandard("CRON_TZ=America/New_York 0 9 * * *")
 	now := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		schedule.Next(now)
 	}
 }
@@ -106,8 +106,7 @@ func BenchmarkAddJob(b *testing.B) {
 	c := New()
 	job := FuncJob(func() {})
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		c.AddJob("* * * * *", job)
 	}
 }
@@ -142,8 +141,7 @@ func benchmarkCronWithJobs(b *testing.B, numJobs int) {
 		c.AddJob("* * * * *", job)
 	}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		c.Entries()
 	}
 }
@@ -154,8 +152,7 @@ func BenchmarkChainWrappers(b *testing.B) {
 	chain := NewChain(Recover(DiscardLogger))
 	wrapped := chain.Then(job)
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		wrapped.Run()
 	}
 }

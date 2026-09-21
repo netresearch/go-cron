@@ -227,9 +227,8 @@ func TestHeapIndices(t *testing.T) {
 
 func BenchmarkHeapPush(b *testing.B) {
 	now := time.Now()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		h := &entryHeap{}
 		heap.Init(h)
 		for j := range 1000 {
@@ -258,11 +257,12 @@ func BenchmarkHeapPopPush(b *testing.B) {
 		heap.Push(h, e)
 	}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	i := 0
+	for b.Loop() {
 		e := heap.Pop(h).(*Entry)
 		e.Next = now.Add(time.Duration(1000+i) * time.Second)
 		heap.Push(h, e)
+		i++
 	}
 }
 
@@ -283,11 +283,12 @@ func BenchmarkHeapUpdate(b *testing.B) {
 		heap.Push(h, e)
 	}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	i := 0
+	for b.Loop() {
 		e := entries[i%1000]
 		e.Next = now.Add(time.Duration(i) * time.Millisecond)
 		h.Update(e)
+		i++
 	}
 }
 
@@ -551,8 +552,8 @@ func BenchmarkRemoveAtWithIndex(b *testing.B) {
 		index[e.ID] = e
 	}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	i := 0
+	for b.Loop() {
 		// Remove and re-add to keep heap size constant
 		targetID := EntryID((i % size) + 1)
 		if entry, ok := index[targetID]; ok {
@@ -566,6 +567,7 @@ func BenchmarkRemoveAtWithIndex(b *testing.B) {
 		}
 		heap.Push(h, e)
 		index[e.ID] = e
+		i++
 	}
 }
 

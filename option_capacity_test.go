@@ -147,7 +147,7 @@ func BenchmarkWithCapacity_BulkAdd(b *testing.B) {
 	numEntries := 1000
 
 	b.Run("without_capacity", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			c := New()
 			for range numEntries {
 				c.AddFunc("@every 1h", func() {})
@@ -156,7 +156,7 @@ func BenchmarkWithCapacity_BulkAdd(b *testing.B) {
 	})
 
 	b.Run("with_capacity", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			c := New(WithCapacity(numEntries))
 			for range numEntries {
 				c.AddFunc("@every 1h", func() {})
@@ -171,7 +171,7 @@ func BenchmarkWithCapacity_MapOperations(b *testing.B) {
 	for _, size := range []int{100, 500, 1000} {
 		b.Run(fmt.Sprintf("size_%d", size), func(b *testing.B) {
 			b.Run("with_capacity", func(b *testing.B) {
-				for i := 0; i < b.N; i++ {
+				for b.Loop() {
 					c := New(WithCapacity(size))
 					for range size {
 						c.AddFunc("@every 1h", func() {})
@@ -182,7 +182,7 @@ func BenchmarkWithCapacity_MapOperations(b *testing.B) {
 			})
 
 			b.Run("without_capacity", func(b *testing.B) {
-				for i := 0; i < b.N; i++ {
+				for b.Loop() {
 					c := New()
 					for range size {
 						c.AddFunc("@every 1h", func() {})

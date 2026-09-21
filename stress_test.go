@@ -476,8 +476,7 @@ func BenchmarkAddWithManyEntries(b *testing.B) {
 			for range count {
 				c.AddFunc("* * * * *", func() {})
 			}
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				c.AddFunc("* * * * *", func() {})
 			}
 		})
@@ -492,8 +491,7 @@ func BenchmarkEntriesWithManyEntries(b *testing.B) {
 			for range count {
 				c.AddFunc("* * * * *", func() {})
 			}
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				c.Entries()
 			}
 		})
@@ -512,8 +510,7 @@ func BenchmarkEntryLookupWithManyEntries(b *testing.B) {
 			}
 			// Lookup middle entry
 			targetID := ids[len(ids)/2]
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				c.Entry(targetID)
 			}
 		})
@@ -559,7 +556,7 @@ func BenchmarkMemoryUsage(b *testing.B) {
 	for _, count := range []int{1000, 10000, 100000} {
 		b.Run(fmt.Sprintf("entries_%d", count), func(b *testing.B) {
 			b.ReportAllocs()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				c := New()
 				for range count {
 					c.AddFunc("* * * * *", func() {})
@@ -576,8 +573,7 @@ func BenchmarkScheduleNextCalculation(b *testing.B) {
 	schedule, _ := ParseStandard("15 4 * * *")
 	now := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		schedule.Next(now)
 	}
 }
@@ -588,8 +584,7 @@ func BenchmarkComplexScheduleNext(b *testing.B) {
 	schedule, _ := NewParser(Minute | Hour | Dom | Month | Dow).Parse("*/15 9-17 * 1-6 1-5")
 	now := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		schedule.Next(now)
 	}
 }
