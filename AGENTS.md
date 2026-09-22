@@ -275,7 +275,7 @@ func TestSchedule(t *testing.T) {
 - Never log user-provided cron expressions without sanitization
 - `Recover()` wrapper should be default for production use
 - Timezone names are user-controlled input - validate with `time.LoadLocation`
-- CI runs: govulncheck, gosec, CodeQL, gitleaks, trivy
+- CI runs: govulncheck, gosec, CodeQL, betterleaks, trivy
 
 ## When stuck
 
