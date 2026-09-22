@@ -36,6 +36,8 @@
   "version_tags_justification": "Every release is tagged in git: https://github.com/netresearch/go-cron/tags",
   "version_unique_status": "Met",
   "version_unique_justification": "Each release has its own version number, recorded as a git tag, for example v0.16.1: https://github.com/netresearch/go-cron/tags",
+  "vulnerability_report_private_status": "Met",
+  "vulnerability_report_private_justification": "Private reports go through GitHub private vulnerability reporting, which is enabled and described in https://github.com/netresearch/go-cron/blob/main/SECURITY.md: https://github.com/netresearch/go-cron/security/advisories/new",
   "vulnerability_report_process_status": "Met",
   "vulnerability_report_process_justification": "The vulnerability reporting process is published in https://github.com/netresearch/go-cron/blob/main/SECURITY.md"
 }
