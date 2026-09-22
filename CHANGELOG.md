@@ -12,6 +12,44 @@ Originally based on [robfig/cron](https://github.com/robfig/cron).
 ### Planned for v2
 - Context-aware Job interface with graceful shutdown support
 
+## [0.16.1] - 2026-09-22
+
+Maintenance release. The public API is unchanged, the minimum Go version stays
+at 1.26, and no scheduling behaviour differs from 0.16.0.
+
+### Changed
+- Toolchain updated to go1.27.1. Only the `toolchain` directive moved; the `go`
+  directive stays at 1.26, so importers are unaffected ([PR#410])
+
+### Internal
+- Library code modernized via `go fix`: `entryCount` in `cron.go` and the circuit
+  breaker's `failures` and `lastFailNano` in `retry.go` are now `atomic.Int64`
+  instead of plain `int64` reached through `atomic.LoadInt64(&x)`. Same memory
+  semantics; the atomic types additionally carry their own 64-bit alignment, so
+  those fields no longer depend on their position in the struct to stay correct
+  on 32-bit platforms. The CAS loop ADR-019 requires is unchanged ([PR#411])
+- Test files modernized via `go fix`, this time including the ones behind
+  `//go:build integration`, which a run without the tag never sees: `for range n`,
+  `wg.Go`, and further `atomic.Int32/Int64` conversions ([PR#411])
+- Benchmarks converted from `for i := 0; i < b.N; i++` to `for b.Loop()`
+  (Go 1.24), which manages the timer itself and keeps the loop body's values
+  alive. One benchmark keeps `b.N`: it stops the timer around its per-iteration
+  setup, and b.Loop requires a running timer at each call ([PR#412])
+
+### Documentation
+- The 0.16.0 entry credits the changes its release cut had missed ([PR#404])
+- ADR-019's example code shows the `atomic.Int64` spelling the tree now uses; the
+  decision it records is unchanged ([PR#411])
+
+### CI
+- Releases are published directly instead of being drafted first ([PR#405])
+- Renovate processes this fork again, and no longer proposes raising the `go`
+  directive — that line is the library floor, and a bump would force every
+  importer up. Only the `toolchain` directive follows the newest patch
+  ([PR#406], [PR#410])
+- The Dependabot configuration is removed; Renovate is the only updater
+  ([PR#409])
+
 ## [0.16.0] - 2026-08-26
 
 ### Added
@@ -626,7 +664,15 @@ This fork includes all features from robfig/cron v3 plus:
    _, err := cron.ParseStandard("*/60 * * * *") // Error: step (60) must be less than range size (60)
    ```
 
-[Unreleased]: https://github.com/netresearch/go-cron/compare/v0.16.0...HEAD
+[Unreleased]: https://github.com/netresearch/go-cron/compare/v0.16.1...HEAD
+[0.16.1]: https://github.com/netresearch/go-cron/compare/v0.16.0...v0.16.1
+[PR#404]: https://github.com/netresearch/go-cron/pull/404
+[PR#405]: https://github.com/netresearch/go-cron/pull/405
+[PR#406]: https://github.com/netresearch/go-cron/pull/406
+[PR#409]: https://github.com/netresearch/go-cron/pull/409
+[PR#410]: https://github.com/netresearch/go-cron/pull/410
+[PR#411]: https://github.com/netresearch/go-cron/pull/411
+[PR#412]: https://github.com/netresearch/go-cron/pull/412
 [0.16.0]: https://github.com/netresearch/go-cron/compare/v0.15.1...v0.16.0
 [PR#402]: https://github.com/netresearch/go-cron/pull/402
 [PR#399]: https://github.com/netresearch/go-cron/pull/399
