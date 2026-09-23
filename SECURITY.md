@@ -47,7 +47,7 @@ This project employs several security practices:
 - **CodeQL**: Static analysis for security vulnerabilities
 - **govulncheck**: Go vulnerability database checking
 - **gosec**: Go security checker
-- **gitleaks**: Secret detection in commits
+- **betterleaks**: Secret detection in commits
 - **Trivy**: Filesystem vulnerability scanning
 - **Dependabot**: Dependency vulnerability alerts
 
