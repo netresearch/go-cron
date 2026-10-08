@@ -39,6 +39,7 @@ const (
 	DomL                                   // Allow L syntax in DOM (e.g., L for last day, L-3 for 3rd last day)
 	DomW                                   // Allow W syntax in DOM (e.g., 15W for nearest weekday, LW for last weekday)
 	DowOrDom                               // Use legacy OR logic for DOW/DOM (default: AND)
+	StepWildcard                           // With DowOrDom, a stepped star (*/2) in DOM or DOW still counts as a wildcard, as in Vixie cron
 )
 
 // Extended is a convenience flag that enables all extended cron syntax options:
@@ -496,6 +497,13 @@ func (p Parser) parse(spec string) (Schedule, error) {
 		return nil, dowErr
 	}
 
+	// Vixie cron marks a day field as unrestricted whenever it starts with '*',
+	// step or not, so "0 0 */2 * 1" is odd days that are also Mondays.
+	if p.options&StepWildcard != 0 {
+		dayofmonth |= wildcardBit(fields[3])
+		dayofweek |= wildcardBit(fields[5])
+	}
+
 	// Parse year field if Year or YearOptional option is enabled
 	var yearSet map[int]struct{} // nil = wildcard (any year)
 	if (p.options&Year > 0 || p.options&YearOptional > 0) && yearField != "" {
@@ -523,6 +531,14 @@ func (p Parser) parse(spec string) (Schedule, error) {
 		DowConstraints: dowConstraints,
 		DowOrDom:       p.options&DowOrDom > 0,
 	}, nil
+}
+
+// wildcardBit returns starBit if field starts with a wildcard ('*' or '?').
+func wildcardBit(field string) uint64 {
+	if strings.HasPrefix(field, "*") || strings.HasPrefix(field, "?") {
+		return starBit
+	}
+	return 0
 }
 
 // parseDomField parses the day-of-month field, handling extended L/W syntax if enabled.

@@ -158,6 +158,13 @@ With DowOrDom enabled, the schedule matches if either field matches (OR logic):
 
 	0 0 15 * FRI      - 15th of month OR any Friday (legacy behavior)
 
+DowOrDom treats a stepped wildcard (*\/2) as restricted, as robfig/cron did.
+Vixie cron treats any field starting with * as a wildcard. Add StepWildcard
+for that behavior:
+
+	0 0 *\/2 * MON     - odd days that are also Mondays (StepWildcard)
+	0 0 *\/2 * MON     - odd days OR any Monday (DowOrDom alone)
+
 # Extended Syntax (Optional)
 
 The following extended syntax is available when enabled via parser options.
