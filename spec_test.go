@@ -746,6 +746,48 @@ func TestDayMatchesORMode(t *testing.T) {
 	}
 }
 
+// TestStepWildcard verifies that StepWildcard keeps a stepped star in
+// a day field unrestricted, so DowOrDom ANDs the two day fields as Vixie cron does.
+func TestStepWildcard(t *testing.T) {
+	vixie := NewParser(Minute | Hour | Dom | Month | Dow | DowOrDom | StepWildcard)
+	legacy := NewParser(Minute | Hour | Dom | Month | Dow | DowOrDom)
+
+	tests := []struct {
+		name   string
+		spec   string
+		time   string
+		vixie  bool
+		legacy bool
+	}{
+		{"stepped DOM, odd Monday", "0 0 */2 * Mon", "Mon Aug 3 00:00 2026", true, true},
+		{"stepped DOM, odd Wednesday", "0 0 */2 * Mon", "Wed Aug 5 00:00 2026", false, true},
+		{"stepped DOM, even Monday", "0 0 */2 * Mon", "Mon Aug 10 00:00 2026", false, true},
+		{"question mark alias", "0 0 ?/2 * Mon", "Wed Aug 5 00:00 2026", false, true},
+		{"stepped DOW, first of month on Tuesday", "0 0 1 * */2", "Tue Sep 1 00:00 2026", true, true},
+		{"stepped DOW, Tuesday that is not the first", "0 0 1 * */2", "Tue Aug 4 00:00 2026", false, true},
+		{"both restricted still ORs", "0 0 15 * Sun", "Sun Aug 2 00:00 2026", true, true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, p := range []struct {
+				name   string
+				parser Parser
+				want   bool
+			}{{"StepWildcard", vixie, tc.vixie}, {"DowOrDom only", legacy, tc.legacy}} {
+				sched, err := p.parser.Parse(tc.spec)
+				if err != nil {
+					t.Fatal(err)
+				}
+				tm := getTime(tc.time)
+				if got := sched.Next(tm.Add(-time.Second)).Equal(tm); got != p.want {
+					t.Errorf("%s: spec %q at %s: got match=%v, want %v", p.name, tc.spec, tc.time, got, p.want)
+				}
+			}
+		})
+	}
+}
+
 // TestDowOrDomParseOption verifies the DowOrDom ParseOption is correctly applied.
 func TestDowOrDomParseOption(t *testing.T) {
 	// Default parser (AND mode)
