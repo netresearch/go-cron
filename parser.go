@@ -39,6 +39,7 @@ const (
 	DomL                                   // Allow L syntax in DOM (e.g., L for last day, L-3 for 3rd last day)
 	DomW                                   // Allow W syntax in DOM (e.g., 15W for nearest weekday, LW for last weekday)
 	DowOrDom                               // Use legacy OR logic for DOW/DOM (default: AND)
+	LenientSteps                           // Accept steps at or above the range size (e.g. */60), as robfig/cron did
 )
 
 // Extended is a convenience flag that enables all extended cron syntax options:
@@ -468,7 +469,7 @@ func (p Parser) parse(spec string) (Schedule, error) {
 			return 0
 		}
 		var bits uint64
-		bits, err = getFieldWithHash(fieldExpr, r, p.hashKey, hashEnabled)
+		bits, err = getFieldWithHash(fieldExpr, p.fieldBounds(r), p.hashKey, hashEnabled)
 		return bits
 	}
 
@@ -525,6 +526,12 @@ func (p Parser) parse(spec string) (Schedule, error) {
 	}, nil
 }
 
+// fieldBounds returns r with the parser's per-field options applied.
+func (p Parser) fieldBounds(r bounds) bounds {
+	r.lenientSteps = p.options&LenientSteps != 0
+	return r
+}
+
 // parseDomField parses the day-of-month field, handling extended L/W syntax if enabled.
 func (p Parser) parseDomField(fieldStr string, hashEnabled bool) (uint64, []DomConstraint, error) {
 	allowL := p.options&DomL != 0
@@ -534,11 +541,11 @@ func (p Parser) parseDomField(fieldStr string, hashEnabled bool) (uint64, []DomC
 
 	switch {
 	case (allowL || allowW) && hasSpecial:
-		return getDomFieldWithConstraints(fieldStr, dom, allowL, allowW, p.hashKey, hashEnabled)
+		return getDomFieldWithConstraints(fieldStr, p.fieldBounds(dom), allowL, allowW, p.hashKey, hashEnabled)
 	case hasSpecial:
 		return 0, nil, errors.New("extended day-of-month syntax requires DomL option (for L, L-n) or DomW option (for nW, LW) to be enabled")
 	default:
-		bits, err := getFieldWithHash(fieldStr, dom, p.hashKey, hashEnabled)
+		bits, err := getFieldWithHash(fieldStr, p.fieldBounds(dom), p.hashKey, hashEnabled)
 		return bits, nil, err
 	}
 }
@@ -551,12 +558,12 @@ func (p Parser) parseDowField(fieldStr string, hashEnabled bool) (uint64, []DowC
 
 	switch {
 	case (allowNth || allowLast) && hasHash:
-		bits, constraints, err := getDowFieldWithConstraints(fieldStr, dow, allowNth, allowLast, p.hashKey, hashEnabled)
+		bits, constraints, err := getDowFieldWithConstraints(fieldStr, p.fieldBounds(dow), allowNth, allowLast, p.hashKey, hashEnabled)
 		return NormalizeDOW(bits), constraints, err
 	case hasHash:
 		return 0, nil, errors.New("#n/#L syntax requires DowNth or DowLast option to be enabled")
 	default:
-		bits, err := getFieldWithHash(fieldStr, dow, p.hashKey, hashEnabled)
+		bits, err := getFieldWithHash(fieldStr, p.fieldBounds(dow), p.hashKey, hashEnabled)
 		return NormalizeDOW(bits), nil, err
 	}
 }
@@ -1176,7 +1183,7 @@ func validateRangeParams(start, end, step uint, r bounds, expr string) error {
 	} else {
 		rangeSize = end - start + 1
 	}
-	if step > 1 && step >= rangeSize {
+	if step > 1 && step >= rangeSize && !r.lenientSteps {
 		return fmt.Errorf("step (%d) must be less than range size (%d): %q", step, rangeSize, expr)
 	}
 	return nil
