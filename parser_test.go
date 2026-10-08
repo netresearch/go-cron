@@ -2394,3 +2394,39 @@ func TestMustParseInt_Zero(t *testing.T) {
 		t.Errorf("mustParseInt(\"0\") = %d, want 0", val)
 	}
 }
+
+// TestStrictDays verifies that StrictDays rejects specs whose day of month
+// never occurs in the selected months, and leaves satisfiable ones alone.
+func TestStrictDays(t *testing.T) {
+	const fields = Minute | Hour | Dom | Month | Dow
+
+	tests := []struct {
+		name    string
+		spec    string
+		options ParseOption
+		wantErr bool
+	}{
+		{"Feb 30", "0 0 30 2 *", 0, true},
+		{"Apr 31", "0 0 31 4 *", 0, true},
+		{"days 30-31 in February", "0 0 30,31 FEB *", 0, true},
+		{"restricted DOW is ANDed", "0 0 30 2 MON", 0, true},
+		{"DOW wildcard under DowOrDom", "0 0 30 2 *", DowOrDom, true},
+		{"Feb 29 may occur", "0 0 29 2 *", 0, false},
+		{"Feb 30 or Mar 30", "0 0 30 2,3 *", 0, false},
+		{"restricted DOW is ORed under DowOrDom", "0 0 30 2 MON", DowOrDom, false},
+		{"wildcard DOM", "0 0 * 2 *", 0, false},
+		{"last day of February", "0 0 L 2 *", DomL, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := NewParser(fields | tt.options).Parse(tt.spec); err != nil {
+				t.Fatalf("Parse(%q) without StrictDays: %v", tt.spec, err)
+			}
+			_, err := NewParser(fields | tt.options | StrictDays).Parse(tt.spec)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Parse(%q) with StrictDays: err = %v, wantErr %v", tt.spec, err, tt.wantErr)
+			}
+		})
+	}
+}
