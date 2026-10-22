@@ -148,7 +148,8 @@ c.AddFunc("0 0 1 NOV-FEB *", winterJob)
 ```
 
 Supported fields: seconds, minutes, hours, day-of-month, day-of-week, month.
-Non-existent days (e.g., Feb 31) are simply skipped.
+Non-existent days (e.g., Feb 31) are simply skipped. Add the `StrictDays` parse
+option to reject a spec whose day of month never occurs, such as `0 0 30 2 *`.
 
 ### Seconds Field (Optional)
 
