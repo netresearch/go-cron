@@ -38,6 +38,11 @@ type SpecSchedule struct {
 	// with all other cron fields. When true, the schedule matches if either
 	// DOM or DOW matches (OR logic), for robfig/cron compatibility.
 	DowOrDom bool
+
+	// DSTSkip disables ISC cron behavior for DST spring-forward transitions.
+	// When false (default), a job scheduled in the skipped hour runs right after
+	// the transition. When true, that occurrence is skipped, matching robfig/cron.
+	DSTSkip bool
 }
 
 // DomConstraintType identifies the type of day-of-month constraint.
@@ -72,6 +77,7 @@ type bounds struct {
 	min, max   uint
 	names      map[string]uint
 	wraparound bool // whether this field supports wraparound ranges (e.g., 22-2 for hours)
+	largeStep  bool // whether steps >= the range size are allowed (e.g., */60 for minutes)
 }
 
 // YearBase is the minimum valid year for the Year field.
@@ -87,11 +93,11 @@ const YearMax = 1<<31 - 1 // 2147483647
 // The bounds for each field.
 // Fields with wraparound=true support ranges where start > end (e.g., 22-2 for hours).
 var (
-	seconds = bounds{0, 59, nil, true}              // cyclic: supports wraparound
-	minutes = bounds{0, 59, nil, true}              // cyclic: supports wraparound
-	hours   = bounds{0, 23, nil, true}              // cyclic: supports wraparound
-	dom     = bounds{1, 31, nil, true}              // cyclic: supports wraparound (non-existent days skipped)
-	years   = bounds{YearBase, YearMax, nil, false} // non-cyclic: no wraparound
+	seconds = bounds{0, 59, nil, true, false}              // cyclic: supports wraparound
+	minutes = bounds{0, 59, nil, true, false}              // cyclic: supports wraparound
+	hours   = bounds{0, 23, nil, true, false}              // cyclic: supports wraparound
+	dom     = bounds{1, 31, nil, true, false}              // cyclic: supports wraparound (non-existent days skipped)
+	years   = bounds{YearBase, YearMax, nil, false, false} // non-cyclic: no wraparound
 	months  = bounds{1, 12, map[string]uint{
 		"jan": 1,
 		"feb": 2,
@@ -105,7 +111,7 @@ var (
 		"oct": 10,
 		"nov": 11,
 		"dec": 12,
-	}, true} // cyclic: supports wraparound (e.g., NOV-FEB)
+	}, true, false} // cyclic: supports wraparound (e.g., NOV-FEB)
 	dow = bounds{0, 7, map[string]uint{
 		"sun": 0,
 		"mon": 1,
@@ -114,7 +120,7 @@ var (
 		"thu": 4,
 		"fri": 5,
 		"sat": 6,
-	}, true} // cyclic: supports wraparound (e.g., FRI-MON)
+	}, true, false} // cyclic: supports wraparound (e.g., FRI-MON)
 )
 
 const (
@@ -444,7 +450,7 @@ WRAP:
 		prev := t
 		t = t.Add(1 * time.Hour)
 		// ISC cron behavior for DST spring-forward.
-		if checkHourDSTSkip(prev, t, s.Hour) {
+		if !s.DSTSkip && checkHourDSTSkip(prev, t, s.Hour) {
 			break
 		}
 

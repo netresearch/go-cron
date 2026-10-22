@@ -60,7 +60,7 @@ func TestRange(t *testing.T) {
 	}
 
 	for _, c := range ranges {
-		actual, err := getRange(c.expr, bounds{c.min, c.max, nil, false})
+		actual, err := getRange(c.expr, bounds{c.min, c.max, nil, false, false})
 		if len(c.err) != 0 && (err == nil || !strings.Contains(err.Error(), c.err)) {
 			t.Errorf("%s => expected %v, got %v", c.expr, c.err, err)
 		}
@@ -86,7 +86,7 @@ func TestField(t *testing.T) {
 	}
 
 	for _, c := range fields {
-		actual, _ := getField(c.expr, bounds{c.min, c.max, nil, false})
+		actual, _ := getField(c.expr, bounds{c.min, c.max, nil, false, false})
 		if actual != c.expected {
 			t.Errorf("%s => expected %d, got %d", c.expr, c.expected, actual)
 		}
@@ -758,7 +758,7 @@ func TestStandardSpecSchedule(t *testing.T) {
 	}{
 		{
 			expr:     "5 * * * *",
-			expected: &SpecSchedule{1 << seconds.min, 1 << 5, all(hours), all(dom), all(months), allDowNormalized(), nil, time.Local, 0, nil, nil, false},
+			expected: &SpecSchedule{1 << seconds.min, 1 << 5, all(hours), all(dom), all(months), allDowNormalized(), nil, time.Local, 0, nil, nil, false, false},
 		},
 		{
 			expr:     "@every 5m",
@@ -990,15 +990,15 @@ func allDowNormalized() uint64 {
 }
 
 func every5min(loc *time.Location) *SpecSchedule {
-	return &SpecSchedule{1 << 0, 1 << 5, all(hours), all(dom), all(months), allDowNormalized(), nil, loc, 0, nil, nil, false}
+	return &SpecSchedule{1 << 0, 1 << 5, all(hours), all(dom), all(months), allDowNormalized(), nil, loc, 0, nil, nil, false, false}
 }
 
 func every5min5s(loc *time.Location) *SpecSchedule {
-	return &SpecSchedule{1 << 5, 1 << 5, all(hours), all(dom), all(months), allDowNormalized(), nil, loc, 0, nil, nil, false}
+	return &SpecSchedule{1 << 5, 1 << 5, all(hours), all(dom), all(months), allDowNormalized(), nil, loc, 0, nil, nil, false, false}
 }
 
 func midnight(loc *time.Location) *SpecSchedule {
-	return &SpecSchedule{1, 1, 1, all(dom), all(months), allDowNormalized(), nil, loc, 0, nil, nil, false}
+	return &SpecSchedule{1, 1, 1, all(dom), all(months), allDowNormalized(), nil, loc, 0, nil, nil, false, false}
 }
 
 func annual(loc *time.Location) *SpecSchedule {

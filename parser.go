@@ -39,6 +39,9 @@ const (
 	DomL                                   // Allow L syntax in DOM (e.g., L for last day, L-3 for 3rd last day)
 	DomW                                   // Allow W syntax in DOM (e.g., 15W for nearest weekday, LW for last weekday)
 	DowOrDom                               // Use legacy OR logic for DOW/DOM (default: AND)
+	LargeStep                              // Allow steps >= the range size (e.g., */60 for minutes), as robfig/cron does
+	EveryRoundUp                           // Round @every durations below the minimum up instead of rejecting them
+	DSTSkip                                // Skip times in a DST spring-forward gap instead of running right after it
 )
 
 // Extended is a convenience flag that enables all extended cron syntax options:
@@ -49,6 +52,18 @@ const (
 //	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor | cron.Extended)
 //	// Now supports: FRI#3 (3rd Friday), MON#L (last Monday), L (last day), 15W (nearest weekday)
 const Extended = DowNth | DowLast | DomL | DomW
+
+// RobfigCompat is a convenience flag that enables all options needed to
+// accept and schedule specs exactly like robfig/cron/v3: DowOrDom, LargeStep,
+// EveryRoundUp, and DSTSkip. Use it when go-cron must agree with another
+// system that still uses robfig/cron, such as the Kubernetes CronJob controller.
+//
+// Example:
+//
+//	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor | cron.RobfigCompat)
+//	// Now "*/60 * * * *" parses, "0 0 13 * FRI" means "13th OR any Friday",
+//	// "@every 500ms" rounds up to 1s, and a 02:30 job is skipped on spring-forward days.
+const RobfigCompat = DowOrDom | LargeStep | EveryRoundUp | DSTSkip
 
 var places = []ParseOption{
 	Second,
@@ -430,7 +445,7 @@ func (p Parser) parse(spec string) (Schedule, error) {
 		if p.options&Descriptor == 0 {
 			return nil, fmt.Errorf("parser does not accept descriptors: %q", spec)
 		}
-		return parseDescriptor(spec, loc, p.minEveryInterval, p.maxSearchYears)
+		return p.parseDescriptor(spec, loc)
 	}
 
 	// Split on whitespace.
@@ -468,7 +483,7 @@ func (p Parser) parse(spec string) (Schedule, error) {
 			return 0
 		}
 		var bits uint64
-		bits, err = getFieldWithHash(fieldExpr, r, p.hashKey, hashEnabled)
+		bits, err = getFieldWithHash(fieldExpr, p.fieldBounds(r), p.hashKey, hashEnabled)
 		return bits
 	}
 
@@ -522,7 +537,14 @@ func (p Parser) parse(spec string) (Schedule, error) {
 		DomConstraints: domConstraints,
 		DowConstraints: dowConstraints,
 		DowOrDom:       p.options&DowOrDom > 0,
+		DSTSkip:        p.options&DSTSkip > 0,
 	}, nil
+}
+
+// fieldBounds returns r adjusted for the parser options that relax range validation.
+func (p Parser) fieldBounds(r bounds) bounds {
+	r.largeStep = p.options&LargeStep > 0
+	return r
 }
 
 // parseDomField parses the day-of-month field, handling extended L/W syntax if enabled.
@@ -534,11 +556,11 @@ func (p Parser) parseDomField(fieldStr string, hashEnabled bool) (uint64, []DomC
 
 	switch {
 	case (allowL || allowW) && hasSpecial:
-		return getDomFieldWithConstraints(fieldStr, dom, allowL, allowW, p.hashKey, hashEnabled)
+		return getDomFieldWithConstraints(fieldStr, p.fieldBounds(dom), allowL, allowW, p.hashKey, hashEnabled)
 	case hasSpecial:
 		return 0, nil, errors.New("extended day-of-month syntax requires DomL option (for L, L-n) or DomW option (for nW, LW) to be enabled")
 	default:
-		bits, err := getFieldWithHash(fieldStr, dom, p.hashKey, hashEnabled)
+		bits, err := getFieldWithHash(fieldStr, p.fieldBounds(dom), p.hashKey, hashEnabled)
 		return bits, nil, err
 	}
 }
@@ -551,12 +573,12 @@ func (p Parser) parseDowField(fieldStr string, hashEnabled bool) (uint64, []DowC
 
 	switch {
 	case (allowNth || allowLast) && hasHash:
-		bits, constraints, err := getDowFieldWithConstraints(fieldStr, dow, allowNth, allowLast, p.hashKey, hashEnabled)
+		bits, constraints, err := getDowFieldWithConstraints(fieldStr, p.fieldBounds(dow), allowNth, allowLast, p.hashKey, hashEnabled)
 		return NormalizeDOW(bits), constraints, err
 	case hasHash:
 		return 0, nil, errors.New("#n/#L syntax requires DowNth or DowLast option to be enabled")
 	default:
-		bits, err := getFieldWithHash(fieldStr, dow, p.hashKey, hashEnabled)
+		bits, err := getFieldWithHash(fieldStr, p.fieldBounds(dow), p.hashKey, hashEnabled)
 		return NormalizeDOW(bits), nil, err
 	}
 }
@@ -1176,7 +1198,7 @@ func validateRangeParams(start, end, step uint, r bounds, expr string) error {
 	} else {
 		rangeSize = end - start + 1
 	}
-	if step > 1 && step >= rangeSize {
+	if step > 1 && step >= rangeSize && !r.largeStep {
 		return fmt.Errorf("step (%d) must be less than range size (%d): %q", step, rangeSize, expr)
 	}
 	return nil
@@ -1504,7 +1526,19 @@ const (
 	descriptorNone      = "@none"
 )
 
-func parseDescriptor(descriptor string, loc *time.Location, minEveryInterval time.Duration, maxSearchYears int) (Schedule, error) {
+// parseDescriptor returns a predefined schedule for the expression, applying
+// the parser options that affect descriptors, or error if none matches.
+func (p Parser) parseDescriptor(descriptor string, loc *time.Location) (Schedule, error) {
+	schedule, err := parseDescriptorSchedule(descriptor, loc, p.minEveryInterval, p.maxSearchYears, p.options&EveryRoundUp > 0)
+	if spec, ok := schedule.(*SpecSchedule); ok {
+		spec.DSTSkip = p.options&DSTSkip > 0
+	}
+	return schedule, err
+}
+
+// parseDescriptorSchedule returns a predefined schedule for the expression, or error if none matches.
+// If everyRoundUp is set, @every durations below minEveryInterval are rounded up instead of rejected.
+func parseDescriptorSchedule(descriptor string, loc *time.Location, minEveryInterval time.Duration, maxSearchYears int, everyRoundUp bool) (Schedule, error) {
 	// Normalize DOW bits so that both Sunday=0 and Sunday=7 are handled consistently
 	allDow := NormalizeDOW(all(dow))
 	switch descriptor {
@@ -1527,7 +1561,7 @@ func parseDescriptor(descriptor string, loc *time.Location, minEveryInterval tim
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse duration %q: %w", descriptor, err)
 		}
-		if minEveryInterval > 0 && duration < minEveryInterval {
+		if minEveryInterval > 0 && duration < minEveryInterval && !everyRoundUp {
 			return nil, fmt.Errorf("@every duration must be at least %v: %q", minEveryInterval, descriptor)
 		}
 		return EveryWithMin(duration, minEveryInterval), nil
