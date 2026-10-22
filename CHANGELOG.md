@@ -9,6 +9,14 @@ Originally based on [robfig/cron](https://github.com/robfig/cron).
 
 ## [Unreleased]
 
+### Added
+- `RobfigCompat` parser option that parses and schedules specs exactly like
+  robfig/cron v3. It combines `DowOrDom` with three new options that can also
+  be used on their own: `LargeStep` accepts steps >= the range size (e.g.
+  `*/60`), `EveryRoundUp` rounds `@every` durations below the minimum up
+  instead of rejecting them, and `DSTSkip` skips times in a DST spring-forward
+  gap instead of running right after it. Defaults are unchanged.
+
 ### Planned for v2
 - Context-aware Job interface with graceful shutdown support
 

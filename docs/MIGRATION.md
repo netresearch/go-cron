@@ -39,6 +39,20 @@ The API is 100% compatible with robfig/cron v3 — no code changes required for 
 
 ## Behavioral Differences
 
+> [!TIP]
+> If your schedules must behave exactly like robfig/cron v3, for example because
+> another system that uses robfig/cron (such as the Kubernetes CronJob controller)
+> validates or runs the same specs, use the `RobfigCompat` parser option. It turns on
+> `DowOrDom`, `LargeStep`, `EveryRoundUp` and `DSTSkip`, which undo the DOM/DOW,
+> step validation, `@every` minimum and DST spring-forward differences below:
+>
+> ```go
+> parser := cron.NewParser(
+>     cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor | cron.RobfigCompat,
+> )
+> c := cron.New(cron.WithParser(parser))
+> ```
+
 While the API is compatible, there are knowingly accepted behavior changes that fix bugs or improve reliability. These changes may affect your application if you were (knowingly or unknowingly) depending on the original behavior.
 
 ### Bug Fixes That Change Behavior
