@@ -171,6 +171,14 @@ _, err := c.AddFunc("*/60 * * * *", myFunc)
 // err: "step (60) must be less than range size (60)"
 ```
 
+To keep the robfig/cron behavior, where such a step selects only the start of
+the range, add the `LenientSteps` parse option:
+
+```go
+parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.LenientSteps)
+c := cron.New(cron.WithParser(parser))
+```
+
 #### Minimum @every Duration
 
 **Before (robfig/cron):**

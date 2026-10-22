@@ -60,7 +60,7 @@ func TestRange(t *testing.T) {
 	}
 
 	for _, c := range ranges {
-		actual, err := getRange(c.expr, bounds{c.min, c.max, nil, false})
+		actual, err := getRange(c.expr, bounds{c.min, c.max, nil, false, false})
 		if len(c.err) != 0 && (err == nil || !strings.Contains(err.Error(), c.err)) {
 			t.Errorf("%s => expected %v, got %v", c.expr, c.err, err)
 		}
@@ -86,7 +86,7 @@ func TestField(t *testing.T) {
 	}
 
 	for _, c := range fields {
-		actual, _ := getField(c.expr, bounds{c.min, c.max, nil, false})
+		actual, _ := getField(c.expr, bounds{c.min, c.max, nil, false, false})
 		if actual != c.expected {
 			t.Errorf("%s => expected %d, got %d", c.expr, c.expected, actual)
 		}
@@ -2392,5 +2392,41 @@ func TestMustParseInt_Zero(t *testing.T) {
 	}
 	if val != 0 {
 		t.Errorf("mustParseInt(\"0\") = %d, want 0", val)
+	}
+}
+
+// TestLenientSteps verifies that the LenientSteps option accepts steps at or
+// above the range size and selects only the range start, as robfig/cron did.
+func TestLenientSteps(t *testing.T) {
+	strict := NewParser(Minute | Hour | Dom | Month | Dow)
+	lenient := NewParser(Minute | Hour | Dom | Month | Dow | LenientSteps)
+
+	tests := []struct {
+		name  string
+		spec  string
+		field func(*SpecSchedule) uint64
+		want  uint64
+	}{
+		{"star step equal to range", "*/60 * * * *", func(s *SpecSchedule) uint64 { return s.Minute }, 1 << 0},
+		{"star step above range", "*/100 * * * *", func(s *SpecSchedule) uint64 { return s.Minute }, 1 << 0},
+		{"range step above range", "0 0-5/10 * * *", func(s *SpecSchedule) uint64 { return s.Hour }, 1 << 0},
+		{"wraparound range", "0 22-2/30 * * *", func(s *SpecSchedule) uint64 { return s.Hour }, 1 << 22},
+		{"Sunday as 7 with a step", "0 0 * * 7/2", func(s *SpecSchedule) uint64 { return s.Dow }, 1 << 0},
+		{"stepped 7 in a list", "0 0 * * 1,7/3", func(s *SpecSchedule) uint64 { return s.Dow }, 1<<0 | 1<<1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := strict.Parse(tt.spec); err == nil {
+				t.Fatalf("default parser accepted %q, want a step size error", tt.spec)
+			}
+			sched, err := lenient.Parse(tt.spec)
+			if err != nil {
+				t.Fatalf("Parse(%q) with LenientSteps: %v", tt.spec, err)
+			}
+			if got := tt.field(sched.(*SpecSchedule)); got != tt.want {
+				t.Errorf("Parse(%q) bits = %b, want %b", tt.spec, got, tt.want)
+			}
+		})
 	}
 }
