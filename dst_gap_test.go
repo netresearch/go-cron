@@ -846,3 +846,16 @@ func TestNextDateStart(t *testing.T) {
 		})
 	}
 }
+
+// TestDateChangeAfterGivesUp covers the end of dateChangeAfter's walk. No
+// zone needs more than a few steps, but a date more than 64 midnights away
+// must still give a time after the start, so the caller's search moves on.
+func TestDateChangeAfterGivesUp(t *testing.T) {
+	start := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	want := time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC)
+	got := dateChangeAfter(want, start)
+	last := time.Date(2026, 3, 6, 0, 0, 1, 0, time.UTC) // 64 midnights and one second
+	if !got.Equal(last) {
+		t.Errorf("dateChangeAfter(%v, %v) = %v, want %v", want, start, got, last)
+	}
+}
