@@ -969,7 +969,7 @@ func TestNearestWeekday_LastDayCalculation(t *testing.T) {
 	// For February 2024 (leap year, 29 days), targetDay=30 should return -1.
 	// Mutant uses month-1 to calculate lastDay, getting December's 31 days,
 	// which would NOT return -1 for targetDay=30.
-	got := nearestWeekday(2024, time.February, 30, time.UTC)
+	got := nearestWeekday(2024, time.February, 30)
 	if got != -1 {
 		t.Errorf("nearestWeekday(2024, Feb, 30) = %d, want -1 (day exceeds month)", got)
 	}
@@ -979,9 +979,58 @@ func TestLastWeekdayOfMonth_Saturday(t *testing.T) {
 	// Kills ARITHMETIC_BASE mutation at spec.go:212 where (lastDay - 1) → (lastDay + 1)
 	// August 2024 ends on Saturday (Aug 31). Last weekday = Friday Aug 30.
 	// Mutant: lastDay + 1 = 32 (wrong).
-	got := lastWeekdayOfMonth(2024, time.August, time.UTC)
+	got := lastWeekdayOfMonth(2024, time.August)
 	if got != 30 {
 		t.Errorf("lastWeekdayOfMonth(2024, August) = %d, want 30 (Friday)", got)
+	}
+}
+
+// TestLastDaySkippedMidnight pins the month length as a calendar fact
+// (issue #462). Atlantic/Azores springs forward at 00:00 on 2024-03-31, the
+// last day of March; time.Date resolves that midnight to 23:00 on the 30th,
+// and a month length taken from it was one day short. LW and nW took the
+// month length from noon in the zone, which fails where a zone skips the
+// whole last day. Asia/Beirut skips the same midnight with a positive offset
+// and was never affected.
+func TestLastDaySkippedMidnight(t *testing.T) {
+	p := NewParser(Second | Minute | Hour | Dom | Month | Dow | Year | DomL | DomW | DowLast | DowNth)
+	tests := []struct {
+		spec string
+		want time.Time // UTC
+	}{
+		{"TZ=Atlantic/Azores 0 0 12 L 3 * *", time.Date(2024, 3, 31, 12, 0, 0, 0, time.UTC)},
+		{"TZ=Atlantic/Azores 0 0 12 * 3 0#L *", time.Date(2024, 3, 31, 12, 0, 0, 0, time.UTC)},
+		{"TZ=Atlantic/Azores 0 0 12 L-1 3 * *", time.Date(2024, 3, 30, 13, 0, 0, 0, time.UTC)},
+		// Control: the last Saturday stays the 30th.
+		{"TZ=Atlantic/Azores 0 0 12 * 3 6#L *", time.Date(2024, 3, 30, 13, 0, 0, 0, time.UTC)},
+		// The skipped midnight itself runs at the end of the gap (ADR-016).
+		{"TZ=Atlantic/Azores 0 0 0 L 3 * *", time.Date(2024, 3, 31, 1, 0, 0, 0, time.UTC)},
+		{"TZ=Atlantic/Azores 0 0 12 L 3 * 2019", time.Date(2019, 3, 31, 12, 0, 0, 0, time.UTC)},
+		{"TZ=Atlantic/Azores 0 0 12 L 3 * 2030", time.Date(2030, 3, 31, 12, 0, 0, 0, time.UTC)},
+		{"TZ=America/Scoresbysund 0 0 12 L 3 * 2019", time.Date(2019, 3, 31, 12, 0, 0, 0, time.UTC)},
+		// Pacific/Kiritimati skips all of 1994-12-31 (-10 -> +14); the month
+		// still has 31 days, so LW is Friday the 30th and 15W exists.
+		{"TZ=Pacific/Kiritimati 0 0 12 LW 12 * 1994", time.Date(1994, 12, 30, 22, 0, 0, 0, time.UTC)},
+		{"TZ=Pacific/Kiritimati 0 0 12 15W 12 * 1994", time.Date(1994, 12, 15, 22, 0, 0, 0, time.UTC)},
+		// Control: positive offset, unchanged.
+		{"TZ=Asia/Beirut 0 0 12 L 3 * *", time.Date(2024, 3, 31, 9, 0, 0, 0, time.UTC)},
+		{"TZ=Asia/Beirut 0 0 12 * 3 0#L *", time.Date(2024, 3, 31, 9, 0, 0, 0, time.UTC)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.spec, func(t *testing.T) {
+			s, err := p.Parse(tt.spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := s.Next(time.Date(tt.want.Year(), 1, 10, 0, 0, 0, 0, time.UTC))
+			if !got.Equal(tt.want) {
+				t.Errorf("Next = %s, want %s", got.UTC(), tt.want)
+			}
+			// Prev from just after the run finds the same run.
+			if prev := s.(*SpecSchedule).Prev(tt.want.Add(time.Minute)); !prev.Equal(tt.want) {
+				t.Errorf("Prev = %s, want %s", prev.UTC(), tt.want)
+			}
+		})
 	}
 }
 

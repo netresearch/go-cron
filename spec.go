@@ -154,10 +154,23 @@ func NormalizeDOW(bits uint64) uint64 {
 	return bits
 }
 
-// lastDayOfMonth returns the last day of the month for the given time.
+// daysIn returns the number of days in the month. It is a calendar fact and
+// is computed in UTC: in a zone that skips the month's last midnight (or the
+// whole last day), time.Date resolves that midnight into the day before and
+// would report a month one day short (Atlantic/Azores, 2024-03-31).
+func daysIn(year int, month time.Month) int {
+	return time.Date(year, month+1, 0, 0, 0, 0, 0, time.UTC).Day()
+}
+
+// weekdayOf returns the weekday of the calendar date year-month-day,
+// independent of any zone (a zone may skip the date entirely).
+func weekdayOf(year int, month time.Month, day int) time.Weekday {
+	return time.Date(year, month, day, 0, 0, 0, 0, time.UTC).Weekday()
+}
+
+// lastDayOfMonth returns the last day of the month of t's wall date.
 func lastDayOfMonth(t time.Time) int {
-	// Go to first day of next month, then back one day
-	return time.Date(t.Year(), t.Month()+1, 0, 0, 0, 0, 0, t.Location()).Day()
+	return daysIn(t.Year(), t.Month())
 }
 
 // weekdayOccurrence returns which occurrence (1-5) of the weekday this date
@@ -180,10 +193,10 @@ func isLastOccurrence(t time.Time) bool {
 // If Sunday, returns Monday (or Friday if that would go to next month).
 // If targetDay exceeds the month's length, returns -1 (no match).
 // Use LW syntax instead if you want "last weekday of month" semantics.
-func nearestWeekday(year int, month time.Month, targetDay int, loc *time.Location) int {
+func nearestWeekday(year int, month time.Month, targetDay int) int {
 	// Calculate lastDay BEFORE creating time with targetDay to avoid Go's date normalization.
 	// Go's time.Date(2024, Feb, 31) normalizes to March 2, corrupting the month context.
-	lastDay := time.Date(year, month+1, 0, 12, 0, 0, 0, loc).Day()
+	lastDay := daysIn(year, month)
 
 	// If targetDay doesn't exist in this month, return -1 (no match).
 	// For "last weekday" semantics, use LW instead of 31W.
@@ -191,10 +204,7 @@ func nearestWeekday(year int, month time.Month, targetDay int, loc *time.Locatio
 		return -1
 	}
 
-	t := time.Date(year, month, targetDay, 12, 0, 0, 0, loc)
-
-	wd := t.Weekday()
-	switch wd {
+	switch weekdayOf(year, month, targetDay) {
 	case time.Saturday:
 		// Try Friday first
 		if targetDay > 1 {
@@ -215,11 +225,9 @@ func nearestWeekday(year int, month time.Month, targetDay int, loc *time.Locatio
 }
 
 // lastWeekdayOfMonth returns the day of month that is the last weekday (Mon-Fri).
-func lastWeekdayOfMonth(year int, month time.Month, loc *time.Location) int {
-	lastDay := time.Date(year, month+1, 0, 12, 0, 0, 0, loc).Day()
-	t := time.Date(year, month, lastDay, 12, 0, 0, 0, loc)
-	wd := t.Weekday()
-	switch wd {
+func lastWeekdayOfMonth(year int, month time.Month) int {
+	lastDay := daysIn(year, month)
+	switch weekdayOf(year, month, lastDay) {
 	case time.Saturday:
 		return lastDay - 1
 	case time.Sunday:
@@ -243,11 +251,11 @@ func domConstraintMatches(constraints []DomConstraint, t time.Time) bool {
 				return true
 			}
 		case DomLastWeekday:
-			if day == lastWeekdayOfMonth(t.Year(), t.Month(), t.Location()) {
+			if day == lastWeekdayOfMonth(t.Year(), t.Month()) {
 				return true
 			}
 		case DomNearestWeekday:
-			if day == nearestWeekday(t.Year(), t.Month(), c.N, t.Location()) {
+			if day == nearestWeekday(t.Year(), t.Month(), c.N) {
 				return true
 			}
 		}
