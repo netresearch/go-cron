@@ -442,8 +442,7 @@ func TestHashWraparoundExpressions(t *testing.T) {
 		}
 		spec := sched.(*SpecSchedule)
 
-		// Should have exactly one bit set in the wraparound range (before normalization: 5,6,7,0,1)
-		// After normalization: 5,6,0,1 (7 becomes 0)
+		// Should have one bit set in the wraparound range 5,6,0,1 (H counts Sunday once)
 		validDow := uint64(1<<5 | 1<<6 | 1<<0 | 1<<1)
 		normalizedDow := NormalizeDOW(spec.Dow)
 		if normalizedDow&validDow == 0 {

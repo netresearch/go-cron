@@ -1254,22 +1254,8 @@ func parseRangeBounds(lowAndHigh []string, r bounds) (start, end uint, extra uin
 // validateRangeParams validates the parsed range parameters.
 // Uses r.wraparound to determine if start > end is allowed for cyclic fields.
 func validateRangeParams(start, end, step uint, r bounds, expr string) error {
-	if start < r.min {
-		return fmt.Errorf("beginning of range (%d) below minimum (%d): %q", start, r.min, expr)
-	}
-	// A wraparound range (start > end) needs both ends checked against both
-	// bounds: 61-1 would otherwise pass and underflow the range size below.
-	if start > r.max {
-		return fmt.Errorf("beginning of range (%d) above maximum (%d): %q", start, r.max, expr)
-	}
-	if end < r.min {
-		return fmt.Errorf("end of range (%d) below minimum (%d): %q", end, r.min, expr)
-	}
-	if end > r.max {
-		return fmt.Errorf("end of range (%d) above maximum (%d): %q", end, r.max, expr)
-	}
-	if start > end && !r.wraparound {
-		return fmt.Errorf("beginning of range (%d) beyond end of range (%d): %q", start, end, expr)
+	if err := validateRangeBounds(start, end, r, expr); err != nil {
+		return err
 	}
 	if step == 0 {
 		return fmt.Errorf("step of range must be a positive number: %q", expr)
@@ -1284,6 +1270,29 @@ func validateRangeParams(start, end, step uint, r bounds, expr string) error {
 	}
 	if step > 1 && step >= rangeSize && !r.lenientSteps {
 		return fmt.Errorf("step (%d) must be less than range size (%d): %q", step, rangeSize, expr)
+	}
+	return nil
+}
+
+// validateRangeBounds checks both ends of a range against both field bounds
+// and rejects start > end unless the field wraps around. A wraparound range
+// (start > end) needs every check: 61-1 would otherwise pass and underflow
+// the range size. Plain ranges and H(min-max) share it.
+func validateRangeBounds(start, end uint, r bounds, expr string) error {
+	if start < r.min {
+		return fmt.Errorf("beginning of range (%d) below minimum (%d): %q", start, r.min, expr)
+	}
+	if start > r.max {
+		return fmt.Errorf("beginning of range (%d) above maximum (%d): %q", start, r.max, expr)
+	}
+	if end < r.min {
+		return fmt.Errorf("end of range (%d) below minimum (%d): %q", end, r.min, expr)
+	}
+	if end > r.max {
+		return fmt.Errorf("end of range (%d) above maximum (%d): %q", end, r.max, expr)
+	}
+	if start > end && !r.wraparound {
+		return fmt.Errorf("beginning of range (%d) beyond end of range (%d): %q", start, end, expr)
 	}
 	return nil
 }
@@ -1342,9 +1351,14 @@ func getRange(expr string, r bounds) (uint64, error) {
 //
 // Supported formats:
 //   - H: hash within field bounds
-//   - H/N: every N steps starting from hash offset
+//   - H/N: every N steps starting from hash offset (H/1: every value)
 //   - H(min-max): hash within explicit range
 //   - H(min-max)/N: every N steps within explicit range starting from hash offset
+//
+// In the day-of-week field H chooses each of the seven days equally often:
+// steps walk the days 0-6 (dowCycle), and a single value that hashed to a
+// second Sunday is re-drawn (dowHashSunday7). A step at or above the range
+// size selects one value of the range.
 func getRangeWithHash(expr string, r bounds, hashKey string, hashEnabled bool) (uint64, error) {
 	// Check for H expression
 	if !strings.HasPrefix(expr, "H") {
@@ -1385,20 +1399,14 @@ func getRangeWithHash(expr string, r bounds, hashKey string, hashEnabled bool) (
 		return 0, fmt.Errorf("invalid H expression syntax: %q", expr)
 	}
 
-	// Validate bounds
-	if start < r.min {
-		return 0, fmt.Errorf("range start (%d) below minimum (%d): %q", start, r.min, expr)
-	}
-	if end > r.max {
-		return 0, fmt.Errorf("range end (%d) above maximum (%d): %q", end, r.max, expr)
-	}
-	if start > end && !r.wraparound {
-		return 0, fmt.Errorf("range start (%d) beyond end (%d): %q", start, end, expr)
+	if err := validateRangeBounds(start, end, r, expr); err != nil {
+		return 0, err
 	}
 
 	// Parse step if present
 	var step uint = 1
-	if len(rangeAndStep) == 2 {
+	hasStep := len(rangeAndStep) == 2
+	if hasStep {
 		var err error
 		step, err = mustParseInt(rangeAndStep[1])
 		if err != nil {
@@ -1411,29 +1419,63 @@ func getRangeWithHash(expr string, r bounds, hashKey string, hashEnabled bool) (
 		return 0, fmt.Errorf("too many slashes: %q", expr)
 	}
 
-	// Calculate effective range size (accounting for wraparound)
-	var rangeSize uint
-	if start > end {
-		// Wraparound: [start..max] + [min..end]
-		rangeSize = (r.max - start + 1) + (end - r.min + 1)
-	} else {
-		rangeSize = end - start + 1
-	}
-
 	// Compute hash-based offset
 	hashValue := computeHash(hashKey)
 
-	if step > 1 {
-		return getHashStepBits(start, end, step, r, hashValue)
+	// Any written step selects values, H/1 included: like */1 it means every
+	// value of the range.
+	if hasStep {
+		return getHashStepBits(start, end, step, r, hashValue), nil
 	}
 
 	// Simple H: hash selects a single value within the range
-	return getHashSingleBit(start, end, rangeSize, r, hashValue)
+	return getHashSingleBit(start, end, r, hashValue), nil
+}
+
+// isDowBounds reports whether r are the day-of-week bounds, the only field
+// whose range is 0-7.
+func isDowBounds(r bounds) bool {
+	return r.min == dow.min && r.max == dow.max
+}
+
+// dowCycle maps a day-of-week range onto the seven distinct days. The field
+// accepts 0-7 with 0 and 7 both meaning Sunday, so walking 0-7 visits Sunday
+// twice: a step through a range such as 5-1 would count it as two days. On
+// the cycle 0-6 a 7 is read as Sunday (0), and 0-7 as the whole week. Ranges
+// of other fields are returned unchanged.
+func dowCycle(start, end uint, r bounds) (newStart, newEnd uint, newBounds bounds) {
+	if !isDowBounds(r) {
+		return start, end, r
+	}
+	if start == 0 && end == 7 {
+		end = 6
+	}
+	r.max = 6
+	return start % 7, end % 7, r
+}
+
+// cyclicRangeSize returns the number of values from start to end, wrapping
+// past r.max when start > end.
+func cyclicRangeSize(start, end uint, r bounds) uint {
+	if start > end {
+		// Wraparound: [start..max] + [min..end]
+		return (r.max - start + 1) + (end - r.min + 1)
+	}
+	return end - start + 1
 }
 
 // getHashStepBits generates bits for H/step expression with optional wraparound.
-func getHashStepBits(start, end, step uint, r bounds, hashValue uint64) (uint64, error) {
+// In the day-of-week field it steps through the seven distinct days (dowCycle).
+func getHashStepBits(start, end, step uint, r bounds, hashValue uint64) uint64 {
+	start, end, r = dowCycle(start, end, r)
+	rangeSize := cyclicRangeSize(start, end, r)
 	stepOffset := uint(hashValue % uint64(step))
+	if stepOffset >= rangeSize {
+		// A step above the range size leaves offsets past the end of the
+		// range. Those keys get a value from the rest of the hash, which keeps
+		// the choice uniform and every other key's value unchanged.
+		stepOffset = uint(hashValue / uint64(step) % uint64(rangeSize))
+	}
 	firstValue := start + stepOffset
 
 	// Handle wraparound case
@@ -1448,7 +1490,7 @@ func getHashStepBits(start, end, step uint, r bounds, hashValue uint64) (uint64,
 			}
 			bits |= 1 << val
 		}
-		return bits, nil
+		return bits
 	}
 
 	// Normal case: generate values from firstValue to end with step
@@ -1456,24 +1498,41 @@ func getHashStepBits(start, end, step uint, r bounds, hashValue uint64) (uint64,
 	for v := firstValue; v <= end; v += step {
 		bits |= 1 << v
 	}
-	return bits, nil
+	return bits
 }
 
 // getHashSingleBit generates a single bit for simple H expression with optional wraparound.
-func getHashSingleBit(start, end, rangeSize uint, r bounds, hashValue uint64) (uint64, error) {
-	hashOffset := uint(hashValue % uint64(rangeSize))
-
-	// Handle wraparound case
-	if start > end {
-		fieldSize := r.max - r.min + 1
-		val := start + hashOffset
-		if val > r.max {
-			val = (val-r.min)%fieldSize + r.min
-		}
-		return 1 << val, nil
+func getHashSingleBit(start, end uint, r bounds, hashValue uint64) uint64 {
+	rangeSize := cyclicRangeSize(start, end, r)
+	fieldSize := r.max - r.min + 1
+	val := start + uint(hashValue%uint64(rangeSize))
+	if val > r.max {
+		// Wraparound past the field maximum
+		val = (val-r.min)%fieldSize + r.min
 	}
+	if val == 7 && isDowBounds(r) {
+		val = dowHashSunday7(start, end, rangeSize, hashValue)
+	}
+	return 1 << val
+}
 
-	return 1 << (start + hashOffset), nil
+// dowHashSunday7 resolves a day-of-week H that hashed to 7. When the range
+// also holds 0 (0-7, or any range wrapping past Saturday), 7 is a second
+// Sunday, and keeping it would choose Sunday twice as often. Keys that land on
+// it are spread over the range's distinct days with the rest of the hash, so
+// every day gets the same share and all other keys keep their day. When 7 is
+// the range's only Sunday it is returned as 0.
+func dowHashSunday7(start, end, rangeSize uint, hashValue uint64) uint {
+	if start <= end && start != 0 {
+		return 0
+	}
+	// Position of 7 in the walk start, start+1, ... (mod 8); skip it.
+	pos7 := (7 - start) % 8
+	j := uint(hashValue / uint64(rangeSize) % uint64(rangeSize-1))
+	if j >= pos7 {
+		j++
+	}
+	return (start + j) % 8
 }
 
 // parseIntOrName returns the (possibly-named) integer contained in expr.
@@ -1553,13 +1612,24 @@ func getBits(low, high, step uint) uint64 {
 }
 
 // getWraparoundBits generates bits for a wraparound range where start > end.
-// For example, 22-2 with bounds 0-23 generates bits for [22,23,0,1,2].
+// For example, 22-2 with bounds 0-23 generates bits for [22,23,0,1,2], and
+// 5-1/2 in the day-of-week field Fri and Sun.
 //
 // Algorithm (based on Quartz scheduler):
 //  1. Extend end by rangeSize to create virtual contiguous range
 //  2. Iterate from start to extendedEnd with step
 //  3. Normalize values back to valid range using modulo
 func getWraparoundBits(start, end, step uint, r bounds) uint64 {
+	// A day-of-week step walks the seven distinct days, so Sunday (0 and 7)
+	// counts once; 7-2/2 becomes 0-2/2. Without a step the bits are the same
+	// either way once NormalizeDOW folds 7 into 0.
+	if step > 1 {
+		start, end, r = dowCycle(start, end, r)
+		if start <= end {
+			return getBits(start, end, step)
+		}
+	}
+
 	var bits uint64
 	rangeSize := r.max - r.min + 1
 
