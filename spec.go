@@ -294,6 +294,12 @@ func advanceMinute(t time.Time, minuteBits uint64, added bool) (time.Time, bool,
 			t = t.Add(1 * time.Minute)
 		}
 		minute = t.Minute()
+		// A whole-minute step from second 0 of the old zone's wall clock can
+		// pass a change that is not on such a second (Asia/Dili 1912: 00:22:20
+		// LMT -> 00:00 +08); resume at the change, where the new hour starts.
+		if !change.IsZero() && t.After(change) {
+			return change, added, true
+		}
 		// A new hour starts at minute 0, or at a zone change: 01:59 -> 02:30
 		// across a 30-minute gap, 03:44 -> 02:45 in Pacific/Chatham.
 		if minute == 0 || (!change.IsZero() && !t.Before(change)) {
@@ -317,6 +323,20 @@ func nextMinuteStart(t time.Time) time.Time {
 // before t's minute, stepping by the wall clock as nextMinuteStart does.
 func prevMinuteEnd(t time.Time) time.Time {
 	return t.Add(-time.Duration(t.Second()+1)*time.Second - time.Duration(t.Nanosecond()))
+}
+
+// subMinuteFallBack reports whether the zone period of t started with a
+// fall-back shorter than a minute. Only such a fall-back keeps a step back
+// inside one wall-clock minute; a longer one wraps, and a date change
+// (America/Juneau 1867, -24 h) must not be treated as one.
+func subMinuteFallBack(t time.Time) bool {
+	start, _ := t.ZoneBounds()
+	if start.IsZero() {
+		return false
+	}
+	_, before := start.Add(-time.Nanosecond).Zone()
+	_, after := start.Zone()
+	return before > after && before-after < 60
 }
 
 // lastBeforeZone returns the last second before the zone period of from
@@ -783,8 +803,15 @@ func retreatMinute(t time.Time, minuteBits uint64, added bool) (time.Time, bool,
 		} else {
 			t = t.Add(-1 * time.Minute)
 		}
+		wrapped := func() bool { return t.Minute() > cur || t.Hour() != hour }
+		// A step back across a fall-back shorter than a minute stays in the
+		// same wall-clock minute but moves its second (Asia/Jerusalem 1879,
+		// 14 s); resume at the last second before the zone that was left.
+		if !wrapped() && subMinuteFallBack(from) {
+			t = lastBeforeZone(from, t)
+		}
 		// A 45-minute DST gap moves from 03:45 to 02:44, not to minute 59.
-		if t.Minute() > cur || t.Hour() != hour {
+		if wrapped() {
 			return lastBeforeZone(from, t), added, true // wrap
 		}
 	}

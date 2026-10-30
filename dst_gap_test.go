@@ -747,3 +747,47 @@ func TestPrevAcrossDateGoingBack(t *testing.T) {
 		})
 	}
 }
+
+// TestNextPrevTransitionsOffMinute covers zone changes that do not fall on a
+// whole wall-clock minute. Next must not step past such a change (Asia/Dili,
+// 1912-01-01 00:22:20 LMT -> 00:00 +08). Prev must keep the wall-clock second
+// across a fall-back shorter than a minute (Asia/Jerusalem 1879, 14 s), and a
+// date change is no such fall-back (America/Juneau and America/Adak 1867,
+// -24 h). Times are given in UTC; the expected values come from a
+// second-by-second search over the wall clock.
+func TestNextPrevTransitionsOffMinute(t *testing.T) {
+	utc := func(y int, mo time.Month, d, h, mi, s int) time.Time {
+		return time.Date(y, mo, d, h, mi, s, 0, time.UTC)
+	}
+	tests := []struct {
+		zone, spec string
+		next       bool
+		from, want time.Time
+	}{
+		{"Asia/Dili", "9 0 * * * *", true, utc(1911, 12, 31, 15, 50, 0), utc(1911, 12, 31, 16, 0, 9)},
+		{"Asia/Dili", "9 */24 * * * *", true, utc(1911, 12, 31, 15, 50, 0), utc(1911, 12, 31, 16, 0, 9)},
+		{"Asia/Dili", "* 0 0 1 1 *", true, utc(1911, 12, 31, 15, 50, 0), utc(1911, 12, 31, 16, 0, 0)},
+		{"Asia/Jerusalem", "30,15 43,40,28 * * * *", false, utc(1879, 12, 31, 21, 39, 35), utc(1879, 12, 31, 21, 22, 36)},
+		{"Asia/Jerusalem", "47 22 * * * *", false, utc(1879, 12, 31, 21, 40, 6), utc(1879, 12, 31, 21, 1, 53)},
+		{"America/Juneau", "11-56 1 */3 * * *", false, utc(1867, 10, 19, 2, 49, 38), utc(1867, 10, 18, 23, 59, 37)},
+		{"America/Adak", "47-54/4 29-40 12 * * *", false, utc(1867, 10, 19, 3, 19, 8), utc(1867, 10, 19, 0, 27, 29)},
+	}
+	for _, tc := range tests {
+		t.Run(tc.zone+"/"+tc.spec, func(t *testing.T) {
+			loc := loadLocation(t, tc.zone)
+			sched, err := NewParser(Second | Minute | Hour | Dom | Month | Dow | DSTSkip | DowOrDom).Parse("TZ=" + tc.zone + " " + tc.spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got time.Time
+			if tc.next {
+				got = sched.Next(tc.from)
+			} else {
+				got = sched.(ScheduleWithPrev).Prev(tc.from)
+			}
+			if !got.Equal(tc.want) {
+				t.Errorf("next=%v from %v: got %v, want %v", tc.next, tc.from.In(loc), got.In(loc), tc.want.In(loc))
+			}
+		})
+	}
+}
