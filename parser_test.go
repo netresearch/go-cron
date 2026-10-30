@@ -2391,6 +2391,64 @@ func TestParserWithCacheStoresErrors(t *testing.T) {
 	}
 }
 
+// TestParserWithCacheHashKey verifies that the cache keeps the schedules of
+// different hash keys apart (#463) and still returns the cached schedule for
+// a repeated spec and key.
+func TestParserWithCacheHashKey(t *testing.T) {
+	t.Parallel()
+	base := NewParser(Minute | Hour | Dom | Month | Dow | Hash).WithCache()
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	next := func(t *testing.T, s Schedule, err error) time.Time {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s.Next(start)
+	}
+
+	// job-a selects minute 54 and job-b minute 23 (see ExampleNewParser_hash).
+	want := map[string]time.Time{
+		"job-a": time.Date(2026, 1, 1, 0, 54, 0, 0, time.UTC),
+		"job-b": time.Date(2026, 1, 1, 0, 23, 0, 0, time.UTC),
+	}
+
+	t.Run("ParseWithHashKey", func(t *testing.T) {
+		t.Parallel()
+		p := base.WithCache()
+		for _, key := range []string{"job-a", "job-b", "job-a"} {
+			s, err := p.ParseWithHashKey("H * * * *", key)
+			if got := next(t, s, err); !got.Equal(want[key]) {
+				t.Errorf("key %s: Next = %v, want %v", key, got, want[key])
+			}
+		}
+	})
+
+	t.Run("WithHashKey shares the cache", func(t *testing.T) {
+		t.Parallel()
+		p := base.WithCache()
+		for _, key := range []string{"job-a", "job-b"} {
+			s, err := p.WithHashKey(key).Parse("H * * * *")
+			if got := next(t, s, err); !got.Equal(want[key]) {
+				t.Errorf("key %s: Next = %v, want %v", key, got, want[key])
+			}
+		}
+	})
+
+	t.Run("same key is cached", func(t *testing.T) {
+		t.Parallel()
+		p := base.WithCache()
+		s1, err1 := p.ParseWithHashKey("H * * * *", "job-a")
+		s2, err2 := p.ParseWithHashKey("H * * * *", "job-a")
+		if err1 != nil || err2 != nil {
+			t.Fatalf("parse failed: %v, %v", err1, err2)
+		}
+		if s1 != s2 {
+			t.Error("expected the cached schedule for a repeated spec and key")
+		}
+	})
+}
+
 // TestWraparoundRangeOutOfBounds verifies that a range whose start lies above
 // the field maximum is rejected, wraparound or not, and with or without
 // LenientSteps. Before, 61-1 passed and 61-0/2 failed only by an underflow.

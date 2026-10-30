@@ -108,8 +108,15 @@ type Parser struct {
 	options          ParseOption
 	minEveryInterval time.Duration
 	maxSearchYears   int
-	cache            *sync.Map // optional cache: spec string -> cacheEntry
+	cache            *sync.Map // optional cache: cacheKey -> cacheEntry
 	hashKey          string    // key used for H (hash) expressions
+}
+
+// cacheKey identifies a cached parse result. The hash key is part of it
+// because the same spec with H selects different values for different keys.
+type cacheKey struct {
+	spec    string
+	hashKey string
 }
 
 // cacheEntry holds a cached parse result.
@@ -280,7 +287,7 @@ func (p Parser) WithMaxSearchYears(years int) Parser {
 
 // WithCache returns a new Parser with caching enabled for parsed schedules.
 // When caching is enabled, repeated calls to Parse with the same spec string
-// will return the cached result instead of re-parsing.
+// and the same hash key will return the cached result instead of re-parsing.
 //
 // Caching is particularly beneficial when:
 //   - The same cron expressions are parsed repeatedly
@@ -403,11 +410,11 @@ func parseTimezone(spec string) (*time.Location, string, error) {
 // It accepts crontab specs and features configured by NewParser.
 //
 // If caching is enabled via WithCache(), repeated calls with the same spec
-// will return the cached result.
+// and the same hash key will return the cached result.
 func (p Parser) Parse(spec string) (Schedule, error) {
 	// Check cache first if enabled
 	if p.cache != nil {
-		if cached, ok := p.cache.Load(spec); ok {
+		if cached, ok := p.cache.Load(cacheKey{spec: spec, hashKey: p.hashKey}); ok {
 			if entry, ok := cached.(cacheEntry); ok {
 				return entry.schedule, entry.err
 			}
@@ -418,7 +425,7 @@ func (p Parser) Parse(spec string) (Schedule, error) {
 
 	// Store in cache if enabled
 	if p.cache != nil {
-		p.cache.Store(spec, cacheEntry{schedule: schedule, err: err})
+		p.cache.Store(cacheKey{spec: spec, hashKey: p.hashKey}, cacheEntry{schedule: schedule, err: err})
 	}
 
 	return schedule, err
