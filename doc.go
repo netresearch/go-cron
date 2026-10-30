@@ -244,7 +244,7 @@ Combined Examples
 
 H spreads jobs that share a spec over the range of a field, as in Jenkins:
 instead of every job running at minute 0, each runs at a minute chosen from
-a hash (FNV-1a) of its hash key. The same key always gives the same values,
+a hash (FNV-1a) of its hash key. Two keys can still choose the same value. The same key always gives the same values,
 so the schedule is stable across restarts and hosts. Requires the Hash option
 (included in FullParser):
 
@@ -261,7 +261,8 @@ The forms, with the values they select for the keys shown (minutes field):
 The bounds of H(a-b) are numbers; names such as H(MON-FRI) are not accepted.
 H(a-b) may wrap around like a plain range, e.g. H(22-2) in the hours field.
 H/1 selects every value of its field or range, as a step of 1 does in a
-plain range. A step at or above the size of the range selects one value of
+plain range. With DowOrDom, H/1 in a day field counts as a list of values
+(like 1-31), not as a wildcard, so 0 0 H/1 * MON runs daily. A step at or above the size of the range selects one value of
 the range: H(0-5)/10 is one minute between 0 and 5 (job-a: 4).
 
 H is accepted in the seconds, minutes, hours, day-of-month, month and
