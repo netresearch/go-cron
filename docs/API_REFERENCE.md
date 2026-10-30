@@ -1165,6 +1165,8 @@ func WithPrev(t time.Time) JobOption
 
 WithPrev sets the last execution time for the job entry. This is used to
 calculate missed executions when combined with `WithMissedPolicy()`.
+Only the instant counts: catch-up times are computed in the cron location (or
+the spec's `TZ=`), so a last run time restored in UTC works as well.
 
 **Example:**
 ```go
