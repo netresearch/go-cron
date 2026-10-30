@@ -39,10 +39,15 @@ func WithClockForm(f ClockForm) DescribeOption {
 }
 
 // WithParseOptions sets the parse options the package-level DescribeSpec
-// parses with, as the options of AnalyzeSpec do. Parser.DescribeSpec ignores
-// it and uses the parser's own settings.
+// parses with, as the options of AnalyzeSpec do; several calls combine.
+// Parser.DescribeSpec ignores it and uses the parser's own settings.
 func WithParseOptions(o ParseOption) DescribeOption {
-	return func(c *describeConfig) { c.parse = []ParseOption{o} }
+	return func(c *describeConfig) {
+		if len(c.parse) == 0 {
+			c.parse = []ParseOption{0}
+		}
+		c.parse[0] |= o
+	}
 }
 
 func newDescribeConfig(opts []DescribeOption) describeConfig {
@@ -64,9 +69,10 @@ func DescribeSpec(spec string, opts ...DescribeOption) (string, error) {
 // DescribeSpec returns an English description of spec as p parses it, or the
 // parse error. The description follows the grammar in docs/DESCRIBE.md and
 // leaves out the time zone; callers show the location beside it. Anything the
-// grammar does not cover yet (day, month and year fields, H, descriptors)
-// renders literally, field by field ("minute 0, hour 9, day of month *, month
-// *, day of week 1-5"), with a nil error.
+// grammar does not cover yet renders literally, with a nil error: a spec with
+// a restricted day, month or year field, or with H, field by field ("minute
+// 0, hour 9, day of month *, month *, day of week 1-5"), and a descriptor as
+// written ("@daily").
 func (p Parser) DescribeSpec(spec string, opts ...DescribeOption) (string, error) {
 	if _, err := p.Parse(spec); err != nil {
 		return "", err
@@ -80,7 +86,7 @@ func (p Parser) DescribeSpec(spec string, opts ...DescribeOption) (string, error
 	}
 	if containsHashExpr(fields) || !isWildcard(fields[3]) || !isWildcard(fields[4]) ||
 		!isWildcard(fields[5]) || (yearField != "" && !isWildcard(yearField)) {
-		return p.describeLiteral(fields, yearField), nil
+		return p.describeLiteral(spec, fields, yearField), nil
 	}
 	return describeTime(fields, newDescribeConfig(opts).clock), nil
 }
@@ -89,16 +95,26 @@ func isWildcard(field string) bool { return field == "*" || field == "?" }
 
 var literalNames = []string{"second", "minute", "hour", "day of month", "month", "day of week"}
 
-// describeLiteral renders each field the parser reads as written.
-func (p Parser) describeLiteral(fields []string, yearField string) string {
+// describeLiteral names each field spec wrote, as written. fields and
+// yearField are spec's fields from specFields, which fill in the fields
+// spec left out.
+func (p Parser) describeLiteral(spec string, fields []string, yearField string) string {
+	// The spec parsed, so neither step can fail.
+	_, rest, _ := parseTimezone(spec)
+	tokens := strings.Fields(rest)
+	written, _, _ := p.handleYearExtraction(tokens)
+	opts, _, _ := processOptionalFlags(p.options)
+	optionalLeftOut := len(written) < countConfiguredFields(opts)
+
 	parts := make([]string, 0, len(fields)+1)
-	for i, f := range fields {
-		if i == 0 && p.options&(Second|SecondOptional) == 0 {
-			continue
+	for i, place := range places {
+		leftOut := optionalLeftOut && (place == Second && p.options&SecondOptional != 0 ||
+			place == Dow && p.options&DowOptional != 0)
+		if opts&place != 0 && !leftOut {
+			parts = append(parts, literalNames[i]+" "+fields[i])
 		}
-		parts = append(parts, literalNames[i]+" "+f)
 	}
-	if yearField != "" {
+	if len(tokens) > len(written) {
 		parts = append(parts, "year "+yearField)
 	}
 	return strings.Join(parts, ", ")
@@ -131,8 +147,8 @@ func newTimeField(text, unit, container string, r bounds, limit int) timeField {
 		it := timeItem{lo: lo, hi: hi, step: 1, star: extra != 0, ranged: len(lowAndHigh) == 2}
 		if len(rangeAndStep) == 2 {
 			it.step, _ = mustParseInt(rangeAndStep[1])
-			if len(lowAndHigh) == 1 {
-				it.hi = r.max // "N/step" means "N-max/step"
+			if len(lowAndHigh) == 1 && !it.star {
+				it.hi, it.ranged = r.max, true // "N/step" means "N-max/step"
 			}
 		}
 		f.items = append(f.items, it)
@@ -185,7 +201,7 @@ func (f timeField) nums() (text, note string) {
 		for _, it := range f.items {
 			lo, hi := strconv.Itoa(int(it.lo)), strconv.Itoa(int(it.hi))
 			switch {
-			case !it.ranged:
+			case !it.ranged || it.lo == it.hi:
 				words = append(words, lo)
 			case it.hi == it.lo+1 || (it.lo == f.r.max && it.hi == f.r.min):
 				words = append(words, lo, hi)
@@ -227,7 +243,7 @@ func (f timeField) phrase() (text, note string) {
 }
 
 func (f timeField) unitWord() string {
-	if len(f.items) == 1 && !f.items[0].ranged && len(f.vals) == 1 {
+	if len(f.vals) == 1 {
 		return f.unit
 	}
 	return f.unit + "s"

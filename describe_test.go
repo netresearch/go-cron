@@ -28,6 +28,9 @@ var describeGoldens = []struct {
 	{spec: "*/15,7 * * * *", want: "at 0, 7, 15, 30 and 45 minutes past the hour"},
 	{spec: "0-5 * * * *", want: "at 0 thru 5 minutes past the hour"},
 	{spec: "5-6 * * * *", want: "at 5 and 6 minutes past the hour"},
+	{spec: "5-5 * * * *", want: "at 5 minutes past the hour"},
+	{spec: "5/1 * * * *", want: "at 5 thru 59 minutes past the hour"},
+	{spec: "0 5/1 * * *", want: "at 0 minutes past hours 5 thru 23"},
 	{spec: "5 * * * *", want: "at 5 minutes past the hour"},
 	{spec: "1 * * * *", want: "at 1 minute past the hour"},
 	{spec: "0 * * * *", want: "on the hour"},
@@ -131,6 +134,17 @@ func TestDescribeSpecGrammar(t *testing.T) {
 	}
 }
 
+func TestWithParseOptionsCombine(t *testing.T) {
+	got, err := DescribeSpec("15 30 2 * * *",
+		WithParseOptions(Second|Minute|Hour), WithParseOptions(Dom|Month|Dow))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "at 02:30:15 every day"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
 func TestDescribeSpecParseError(t *testing.T) {
 	for _, spec := range []string{"", "61 * * * *", "* * *", "@every 1x"} {
 		if got, err := DescribeSpec(spec); err == nil {
@@ -147,6 +161,15 @@ func TestParserDescribeSpec(t *testing.T) {
 		t.Fatal(err)
 	}
 	if want := "at 02:30:15 every day"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+
+	// SecondOptional: a second that was not written is not listed.
+	got, err = FullParser().DescribeSpec("0 0 1 * *")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "minute 0, hour 0, day of month 1, month *, day of week *"; got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
 
