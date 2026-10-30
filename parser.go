@@ -1254,22 +1254,8 @@ func parseRangeBounds(lowAndHigh []string, r bounds) (start, end uint, extra uin
 // validateRangeParams validates the parsed range parameters.
 // Uses r.wraparound to determine if start > end is allowed for cyclic fields.
 func validateRangeParams(start, end, step uint, r bounds, expr string) error {
-	if start < r.min {
-		return fmt.Errorf("beginning of range (%d) below minimum (%d): %q", start, r.min, expr)
-	}
-	// A wraparound range (start > end) needs both ends checked against both
-	// bounds: 61-1 would otherwise pass and underflow the range size below.
-	if start > r.max {
-		return fmt.Errorf("beginning of range (%d) above maximum (%d): %q", start, r.max, expr)
-	}
-	if end < r.min {
-		return fmt.Errorf("end of range (%d) below minimum (%d): %q", end, r.min, expr)
-	}
-	if end > r.max {
-		return fmt.Errorf("end of range (%d) above maximum (%d): %q", end, r.max, expr)
-	}
-	if start > end && !r.wraparound {
-		return fmt.Errorf("beginning of range (%d) beyond end of range (%d): %q", start, end, expr)
+	if err := validateRangeBounds(start, end, r, expr); err != nil {
+		return err
 	}
 	if step == 0 {
 		return fmt.Errorf("step of range must be a positive number: %q", expr)
@@ -1284,6 +1270,29 @@ func validateRangeParams(start, end, step uint, r bounds, expr string) error {
 	}
 	if step > 1 && step >= rangeSize && !r.lenientSteps {
 		return fmt.Errorf("step (%d) must be less than range size (%d): %q", step, rangeSize, expr)
+	}
+	return nil
+}
+
+// validateRangeBounds checks both ends of a range against both field bounds
+// and rejects start > end unless the field wraps around. A wraparound range
+// (start > end) needs every check: 61-1 would otherwise pass and underflow
+// the range size. Plain ranges and H(min-max) share it.
+func validateRangeBounds(start, end uint, r bounds, expr string) error {
+	if start < r.min {
+		return fmt.Errorf("beginning of range (%d) below minimum (%d): %q", start, r.min, expr)
+	}
+	if start > r.max {
+		return fmt.Errorf("beginning of range (%d) above maximum (%d): %q", start, r.max, expr)
+	}
+	if end < r.min {
+		return fmt.Errorf("end of range (%d) below minimum (%d): %q", end, r.min, expr)
+	}
+	if end > r.max {
+		return fmt.Errorf("end of range (%d) above maximum (%d): %q", end, r.max, expr)
+	}
+	if start > end && !r.wraparound {
+		return fmt.Errorf("beginning of range (%d) beyond end of range (%d): %q", start, end, expr)
 	}
 	return nil
 }
@@ -1390,7 +1399,7 @@ func getRangeWithHash(expr string, r bounds, hashKey string, hashEnabled bool) (
 		return 0, fmt.Errorf("invalid H expression syntax: %q", expr)
 	}
 
-	if err := validateHashRange(start, end, r, expr); err != nil {
+	if err := validateRangeBounds(start, end, r, expr); err != nil {
 		return 0, err
 	}
 
@@ -1421,28 +1430,6 @@ func getRangeWithHash(expr string, r bounds, hashKey string, hashEnabled bool) (
 
 	// Simple H: hash selects a single value within the range
 	return getHashSingleBit(start, end, r, hashValue), nil
-}
-
-// validateHashRange checks the bounds of an H(min-max) range. Both ends are
-// checked against both field bounds: a wraparound range such as 61-0 would
-// otherwise pass, and its size would underflow.
-func validateHashRange(start, end uint, r bounds, expr string) error {
-	if start < r.min {
-		return fmt.Errorf("range start (%d) below minimum (%d): %q", start, r.min, expr)
-	}
-	if start > r.max {
-		return fmt.Errorf("range start (%d) above maximum (%d): %q", start, r.max, expr)
-	}
-	if end < r.min {
-		return fmt.Errorf("range end (%d) below minimum (%d): %q", end, r.min, expr)
-	}
-	if end > r.max {
-		return fmt.Errorf("range end (%d) above maximum (%d): %q", end, r.max, expr)
-	}
-	if start > end && !r.wraparound {
-		return fmt.Errorf("range start (%d) beyond end (%d): %q", start, end, expr)
-	}
-	return nil
 }
 
 // isDowBounds reports whether r are the day-of-week bounds, the only field

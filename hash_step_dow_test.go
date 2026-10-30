@@ -330,7 +330,7 @@ func TestHashStepAboveRangeKeepsPreviousValue(t *testing.T) {
 			if err != nil {
 				t.Fatalf("getRangeWithHash(%q, %q): %v", tt.expr, key, err)
 			}
-			if want := uint64(1) << (tt.start + offset); got != want {
+			if got != uint64(1)<<(tt.start+offset) {
 				t.Fatalf("getRangeWithHash(%q, %q) = %b, want previous value %d", tt.expr, key, got, tt.start+offset)
 			}
 		}
