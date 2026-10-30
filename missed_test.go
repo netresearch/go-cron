@@ -4,6 +4,7 @@
 package cron
 
 import (
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -828,5 +829,57 @@ func TestCalculateMissedRuns_MaxMissedRunsWarning(t *testing.T) {
 	}
 	if !warned {
 		t.Error("expected warning log when missed runs reach maxMissedRuns (100)")
+	}
+}
+
+// TestMissedRuns_PrevInOtherLocation checks that catch-up times follow the
+// cron location, whatever location the Prev given to WithPrev carries
+// (issue #447). A Prev persisted as UTC must not shift a spec without TZ=
+// to the UTC wall clock. Entry.Prev afterwards holds the last catch-up in
+// the cron location, as it does after a scheduled run.
+func TestMissedRuns_PrevInOtherLocation(t *testing.T) {
+	berlin, err := time.LoadLocation("Europe/Berlin")
+	if err != nil {
+		t.Skip("Europe/Berlin timezone not available")
+	}
+	ny, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Skip("America/New_York timezone not available")
+	}
+	lastRun := time.Date(2026, 7, 1, 9, 0, 0, 0, berlin)
+	day2, day3 := time.Date(2026, 7, 2, 9, 0, 0, 0, berlin), time.Date(2026, 7, 3, 9, 0, 0, 0, berlin)
+	for _, spec := range []string{"0 9 * * *", "TZ=Europe/Berlin 0 9 * * *"} {
+		for _, prevLoc := range []*time.Location{berlin, time.UTC, ny} {
+			for _, tc := range []struct {
+				policy MissedPolicy
+				want   []time.Time
+			}{
+				{MissedRunAll, []time.Time{day2, day3}},
+				{MissedRunOnce, []time.Time{day3}},
+			} {
+				t.Run(spec+"/"+prevLoc.String()+"/"+tc.policy.String(), func(t *testing.T) {
+					rec := &scheduledTimes{}
+					clock := NewFakeClock(time.Date(2026, 7, 3, 12, 0, 0, 0, berlin))
+					c := New(WithClock(clock), WithLocation(berlin))
+					id, err := c.AddJob(spec, rec.job(), WithPrev(lastRun.In(prevLoc)), WithMissedPolicy(tc.policy))
+					if err != nil {
+						t.Fatal(err)
+					}
+					c.Start()
+					defer c.Stop()
+					// The run loop dispatches catch-ups before it answers the
+					// entry lookup in WaitForJob, which then waits for them.
+					c.WaitForJob(id)
+					rec.mu.Lock()
+					got := slices.SortedFunc(slices.Values(rec.runs), time.Time.Compare)
+					rec.mu.Unlock()
+					equalRuns(t, got, tc.want)
+					prev := c.Entry(id).Prev
+					if !prev.Equal(day3) || prev.Location() != berlin {
+						t.Errorf("Entry.Prev = %v (%v), want %v in the cron location", prev, prev.Location(), day3)
+					}
+				})
+			}
+		}
 	}
 }

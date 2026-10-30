@@ -865,8 +865,11 @@ func (s *SpecSchedule) retreatDate(t time.Time, loc *time.Location, added bool, 
 		cur := t.Month()
 		added = true
 		// Go to the first day of the month, then back 1 second to the end of
-		// the previous month.
-		t = time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, loc)
+		// the previous month. When midnight lies in a repeated fall-back
+		// period, time.Date may pick its second copy, and one second before
+		// that is still this month (Asia/Gaza on 2004-10-01); start from the
+		// first copy.
+		t = earlierCopy(time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, loc))
 		t = t.Add(-1 * time.Second)
 		// Check for wrap to previous year
 		if t.Month() > cur {
