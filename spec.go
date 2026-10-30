@@ -285,14 +285,14 @@ func advanceMinute(t time.Time, minuteBits uint64, added bool) (time.Time, bool,
 	var change time.Time // the next zone change, looked up once it matters
 	looked := false
 	for minute := t.Minute(); !fieldMatches(minute, minuteBits); {
-		if !added {
-			added = true
-			t = t.Truncate(time.Minute)
-		}
+		added = true
 		if !looked {
+			// The first step reaches second 0; later steps keep it.
 			change, looked = zoneEndAfter(t), true
+			t = nextMinuteStart(t)
+		} else {
+			t = t.Add(1 * time.Minute)
 		}
-		t = t.Add(1 * time.Minute)
 		minute = t.Minute()
 		// A new hour starts at minute 0, or at a zone change: 01:59 -> 02:30
 		// across a 30-minute gap, 03:44 -> 02:45 in Pacific/Chatham.
@@ -301,6 +301,34 @@ func advanceMinute(t time.Time, minuteBits uint64, added bool) (time.Time, bool,
 		}
 	}
 	return t, added, false
+}
+
+// nextMinuteStart returns the start of the wall-clock minute after t's
+// minute. It steps by the wall clock: an absolute minute, as Truncate rounds
+// to, lies at another second of the wall-clock minute in a zone whose UTC
+// offset has seconds (local mean time, Africa/Monrovia until 1972 at
+// -0:44:30, a time.FixedZone), and so does the end of a gap whose length
+// has seconds (Europe/Berlin 1893: 00:00 LMT -> 00:06:32 CET).
+func nextMinuteStart(t time.Time) time.Time {
+	return t.Add(time.Minute - time.Duration(t.Second())*time.Second - time.Duration(t.Nanosecond()))
+}
+
+// prevMinuteEnd returns the last second (mm:59) of the wall-clock minute
+// before t's minute, stepping by the wall clock as nextMinuteStart does.
+func prevMinuteEnd(t time.Time) time.Time {
+	return t.Add(-time.Duration(t.Second()+1)*time.Second - time.Duration(t.Nanosecond()))
+}
+
+// lastBeforeZone returns the last second before the zone period of from
+// when a step back from that time to t crossed its start, and t otherwise. A
+// gap whose length has seconds starts mid-minute in the zone after it
+// (Europe/Berlin 1893: 00:00 LMT -> 00:06:32 CET), so a whole-minute step
+// back across it lands at 23:59:27 LMT instead of 23:59:59.
+func lastBeforeZone(from, t time.Time) time.Time {
+	if start, _ := from.ZoneBounds(); !start.IsZero() && t.Before(start) && !start.After(from) {
+		return start.Add(-time.Second)
+	}
+	return t
 }
 
 // advanceHour advances time until the hour field matches the schedule bitmask.
@@ -460,13 +488,16 @@ func laterCopy(t time.Time) time.Time {
 // and a 'wrap' flag that is true if the second rolled past 59 to 0.
 // When wrap is true, the caller must increment the minute and re-validate.
 func advanceSecond(t time.Time, secondBits uint64, added bool) (time.Time, bool, bool) {
-	for !fieldMatches(t.Second(), secondBits) {
+	for sec := t.Second(); !fieldMatches(sec, secondBits); {
 		if !added {
 			added = true
 			t = t.Truncate(time.Second)
 		}
 		t = t.Add(1 * time.Second)
-		if t.Second() == 0 {
+		// A new minute starts at second 0, or at the end of a gap whose
+		// length has seconds: 23:59:59 LMT -> 00:06:32 CET (Berlin 1893).
+		prev := sec
+		if sec = t.Second(); sec <= prev {
 			return t, added, true // wrap
 		}
 	}
@@ -743,19 +774,18 @@ func prepareTimeForPrevSchedule(t time.Time, schedLoc *time.Location) (prepared 
 // and a 'wrap' flag that is true if the minute rolled past 0 to 59.
 // When wrap is true, the caller must decrement the hour and re-validate.
 func retreatMinute(t time.Time, minuteBits uint64, added bool) (time.Time, bool, bool) {
-	for !fieldMatches(t.Minute(), minuteBits) {
-		cur, hour := t.Minute(), t.Hour()
-		if !added {
-			added = true
-			// Truncate to beginning of current minute, then go back 1 second
-			t = t.Truncate(time.Minute)
-			t = t.Add(-1 * time.Second)
+	for stepped := false; !fieldMatches(t.Minute(), minuteBits); stepped = true {
+		cur, hour, from := t.Minute(), t.Hour(), t
+		added = true
+		if !stepped {
+			// The first step reaches second 59; later steps keep it.
+			t = prevMinuteEnd(t)
 		} else {
 			t = t.Add(-1 * time.Minute)
 		}
 		// A 45-minute DST gap moves from 03:45 to 02:44, not to minute 59.
 		if t.Minute() > cur || t.Hour() != hour {
-			return t, added, true // wrap
+			return lastBeforeZone(from, t), added, true // wrap
 		}
 	}
 	return t, added, false
