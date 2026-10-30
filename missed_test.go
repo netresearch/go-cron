@@ -867,7 +867,13 @@ func TestMissedRuns_PrevInOtherLocation(t *testing.T) {
 					}
 					c.Start()
 					defer c.Stop()
-					equalRuns(t, waitScheduledTimes(rec, len(tc.want)), tc.want)
+					// The run loop dispatches catch-ups before it answers the
+					// entry lookup in WaitForJob, which then waits for them.
+					c.WaitForJob(id)
+					rec.mu.Lock()
+					got := slices.SortedFunc(slices.Values(rec.runs), time.Time.Compare)
+					rec.mu.Unlock()
+					equalRuns(t, got, tc.want)
 					prev := c.Entry(id).Prev
 					if !prev.Equal(day3) || prev.Location() != berlin {
 						t.Errorf("Entry.Prev = %v (%v), want %v in the cron location", prev, prev.Location(), day3)
@@ -876,23 +882,4 @@ func TestMissedRuns_PrevInOtherLocation(t *testing.T) {
 			}
 		}
 	}
-}
-
-// waitScheduledTimes waits until rec holds n runs, or two seconds, and
-// returns the scheduled times sorted.
-func waitScheduledTimes(rec *scheduledTimes, n int) []time.Time {
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		rec.mu.Lock()
-		got := len(rec.runs)
-		rec.mu.Unlock()
-		if got >= n || time.Now().After(deadline) {
-			break
-		}
-		time.Sleep(time.Millisecond)
-	}
-	time.Sleep(20 * time.Millisecond) // let an unexpected extra run show up
-	rec.mu.Lock()
-	defer rec.mu.Unlock()
-	return slices.SortedFunc(slices.Values(rec.runs), time.Time.Compare)
 }
