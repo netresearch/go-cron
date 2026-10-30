@@ -1054,6 +1054,92 @@ func ExampleParser_WithHashKey() {
 	// Next at minute: 16
 }
 
+// This example demonstrates H(range)/step: a hash-based offset inside the
+// range, then every step up to the end of the range.
+func ExampleNewParser_hashRangeStep() {
+	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Hash)
+
+	// Every 10 minutes within minutes 0-29, starting at a hash-based offset
+	schedule, _ := parser.ParseWithHashKey("H(0-29)/10 * * * *", "job-a")
+
+	from := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	for range 4 {
+		next := schedule.Next(from)
+		fmt.Println(next.Format("15:04"))
+		from = next
+	}
+	// Output:
+	// 00:04
+	// 00:14
+	// 00:24
+	// 01:04
+}
+
+// This example demonstrates H in the day-of-week field. H chooses one of the
+// seven days; H(1-5) chooses one of Monday to Friday.
+func ExampleNewParser_hashDayOfWeek() {
+	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Hash)
+
+	weekly, _ := parser.ParseWithHashKey("0 0 * * H", "job-a")
+	weekday, _ := parser.ParseWithHashKey("0 0 * * H(1-5)", "job-a")
+
+	from := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	fmt.Println("H:     ", weekly.Next(from).Weekday())
+	fmt.Println("H(1-5):", weekday.Next(from).Weekday())
+	// Output:
+	// H:      Saturday
+	// H(1-5): Friday
+}
+
+// This example demonstrates two step edge cases: /1 selects every value of
+// the range, like */1, and a step at or above the range size selects one value.
+func ExampleNewParser_hashStepEdgeCases() {
+	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Hash)
+
+	minutes := func(spec string) []int {
+		schedule, _ := parser.ParseWithHashKey(spec, "job-a")
+		var result []int
+		from := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC).Add(-time.Second)
+		for next := schedule.Next(from); next.Hour() == 0; next = schedule.Next(next) {
+			result = append(result, next.Minute())
+		}
+		return result
+	}
+
+	fmt.Println("H(0-5)/1: ", minutes("H(0-5)/1 * * * *"))
+	fmt.Println("H(0-5)/10:", minutes("H(0-5)/10 * * * *"))
+	// Output:
+	// H(0-5)/1:  [0 1 2 3 4 5]
+	// H(0-5)/10: [4]
+}
+
+// This example demonstrates spreading jobs on one Cron. A parser has one hash
+// key, so parse each job's spec with its own key and schedule the result.
+func ExampleCron_ScheduleJob_hashKeyPerJob() {
+	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Hash)
+	c := cron.New(cron.WithParser(parser))
+
+	for _, name := range []string{"job-a", "job-b"} {
+		schedule, err := parser.ParseWithHashKey("H * * * *", name)
+		if err != nil {
+			fmt.Println("Error:", err)
+			return
+		}
+		if _, err := c.ScheduleJob(schedule, cron.FuncJob(func() {}), cron.WithName(name)); err != nil {
+			fmt.Println("Error:", err)
+			return
+		}
+	}
+
+	from := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	for _, name := range []string{"job-a", "job-b"} {
+		fmt.Printf("%s at minute %d\n", name, c.EntryByName(name).Schedule.Next(from).Minute())
+	}
+	// Output:
+	// job-a at minute 54
+	// job-b at minute 23
+}
+
 // This example demonstrates WithRunOnce for single-execution jobs.
 // Run-once jobs execute at their scheduled time and are automatically
 // removed from the scheduler after execution.

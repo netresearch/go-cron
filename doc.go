@@ -240,6 +240,53 @@ Combined Examples
 	0 12 * * MON#L    - Noon on the last Monday of every month
 	0 12 1,15,L * *   - Noon on the 1st, 15th, and last day of every month
 
+# Hash Expressions ( H )
+
+H spreads jobs that share a spec over the range of a field, as in Jenkins:
+instead of every job running at minute 0, each runs at a minute chosen from
+a hash (FNV-1a) of its hash key. Two keys can still choose the same value. The same key always gives the same values,
+so the schedule is stable across restarts and hosts. Requires the Hash option
+(included in FullParser):
+
+	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Hash)
+	sched, err := parser.ParseWithHashKey("H * * * *", "job-a") // minute 54 of every hour
+
+The forms, with the values they select for the keys shown (minutes field):
+
+	H            - one value of the field                      (job-a: 54; job-b: 23)
+	H/15         - every 15 values, from an offset below 15    (my-job: 7, 22, 37, 52)
+	H(0-29)      - one value of the range 0-29                 (early-job: 18)
+	H(0-29)/10   - every 10 values within 0-29, from an offset (job-a: 4, 14, 24)
+
+The bounds of H(a-b) are numbers; names such as H(MON-FRI) are not accepted.
+H(a-b) may wrap around like a plain range, e.g. H(22-2) in the hours field.
+H/1 selects every value of its field or range, as a step of 1 does in a
+plain range. With DowOrDom, H/1 in a day field counts as a list of values
+(like 1-31), not as a wildcard, so 0 0 H/1 * MON runs daily. A step at or above the size of the range selects one value of
+the range: H(0-5)/10 is one minute between 0 and 5 (job-a: 4).
+
+H is accepted in the seconds, minutes, hours, day-of-month, month and
+day-of-week fields, also as an item of a list (H,30). The year field does not
+accept H. In the day-of-month field, H can choose 29-31, which short months
+lack; use H(1-28) for a day that occurs every month.
+
+In the day-of-week field, H chooses among the seven days, and Sunday counts
+once although it can be written as 0 or 7: H selects each day equally often,
+and steps walk the seven days (H/2 selects Sunday, Tuesday, Thursday and
+Saturday or Monday, Wednesday and Friday).
+
+	0 0 * * H        - midnight on one day of the week (job-a: Saturday)
+	0 0 * * H(1-5)   - midnight on one weekday         (job-a: Friday)
+
+The key comes from Parser.WithHashKey, which sets one key for every spec the
+parser reads, or from Parser.ParseWithHashKey, which sets it for one spec.
+Without a key, or without the Hash option, a spec containing H is an error.
+A Cron does not use the entry name as the key: jobs added with AddFunc and the
+same H spec on a Cron whose parser has WithHashKey all run at the same time.
+To spread several jobs, parse each spec with ParseWithHashKey and the job's
+name, and add the result with Cron.ScheduleJob. AnalyzeSpecWithHash analyzes
+a spec with H for a given key.
+
 # Predefined schedules
 
 You may use one of several pre-defined schedules in place of a cron expression.

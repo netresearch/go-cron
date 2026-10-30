@@ -1906,6 +1906,58 @@ func (p Parser) Parse(spec string) (Schedule, error)
 
 Parse returns a Schedule from a cron spec or error if invalid.
 
+#### func (Parser) WithHashKey
+
+```go
+func (p Parser) WithHashKey(key string) Parser
+```
+
+WithHashKey returns a copy of the parser that resolves `H` expressions with `key` in every spec it parses. The parser needs the `Hash` option.
+
+#### func (Parser) ParseWithHashKey
+
+```go
+func (p Parser) ParseWithHashKey(spec, hashKey string) (Schedule, error)
+```
+
+ParseWithHashKey parses one spec with `hashKey` as the hash key, replacing a key set with `WithHashKey`. An empty `hashKey` makes a spec with `H` an error.
+
+#### Hash expressions (`H`)
+
+With the `Hash` option (included in `FullParser`), a field can hold `H`, which selects values from a hash (FNV-1a) of the hash key. Jobs with the same spec and different keys are spread over the field's values, but two keys can select the same value; the same key always gives the same values. Values below are for the minutes field and the keys shown:
+
+| Form | Selects | Example |
+|------|---------|---------|
+| `H` | one value of the field | `H` with `job-a`: minute 54; with `job-b`: 23 |
+| `H/n` | every `n` values, from an offset below `n` | `H/15` with `my-job`: 7, 22, 37, 52 |
+| `H(a-b)` | one value of the range `a`–`b` | `H(0-29)` with `early-job`: 18 |
+| `H(a-b)/n` | every `n` values within `a`–`b`, from an offset | `H(0-29)/10` with `job-a`: 4, 14, 24 |
+
+- `H/1` and `H(a-b)/1` select every value, like `*/1`. With `DowOrDom`, `H/1` in a day field counts as a list of values, like `1-31`, not as a wildcard: `0 0 H/1 * MON` runs daily, `0 0 */1 * MON` on Mondays only. A step at or above the size of the range selects one value of the range: `H(0-5)/10` with `job-a` is minute 4.
+- The bounds of `H(a-b)` are numbers (`H(MON-FRI)` is an error). The range may wrap around like a plain range, e.g. `H(22-2)` in hours.
+- `H` is accepted in the seconds, minutes, hours, day-of-month, month and day-of-week fields, also in a list (`H,30`); the year field does not accept it. In day of month, `H` can choose 29–31, which short months lack; `H(1-28)` gives a day of every month.
+- In day of week, `H` chooses among the seven days and counts Sunday (0 or 7) once, so each day is chosen equally often; steps walk the seven days. `0 0 * * H` with `job-a` runs on Saturdays, `0 0 * * H(1-5)` on Fridays.
+- Without a hash key, or without the `Hash` option, a spec with `H` is an error. `ValidateSpec` therefore rejects it; use `AnalyzeSpecWithHash` or a parser with `WithHashKey`.
+
+A `Cron` does not use the entry name as the hash key. With `WithParser(parser.WithHashKey(k))`, every job added with the same `H` spec runs at the same time. To spread jobs, parse each spec with its own key and schedule the result:
+
+```go
+parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Hash)
+c := cron.New(cron.WithParser(parser))
+for _, name := range []string{"job-a", "job-b"} {
+    schedule, err := parser.ParseWithHashKey("H * * * *", name)
+    if err != nil {
+        return err
+    }
+    if _, err := c.ScheduleJob(schedule, cron.FuncJob(run), cron.WithName(name)); err != nil {
+        return err
+    }
+}
+// job-a runs at minute 54, job-b at minute 23
+```
+
+Each value above is checked by an `Example` function in `example_test.go`. The package documentation (`doc.go`, "Hash Expressions") describes the same syntax.
+
 ---
 
 ### ParseOption
@@ -2915,6 +2967,10 @@ func AnalyzeSpecWithHash(spec string, options ParseOption, hashSeed string) Spec
 
 AnalyzeSpecWithHash analyzes a cron expression containing H hash expressions.
 The seed (e.g., job name) produces deterministic, distributed scheduling times.
+`options` must include `Hash`. For a spec of five, six or seven fields,
+`Fields` holds the spec's text (`H`), not the values chosen for the seed;
+for other field counts it is empty. `NextRun` reflects the chosen values. See
+[Hash expressions](#hash-expressions-h).
 
 ### WorkflowExecutionID
 
