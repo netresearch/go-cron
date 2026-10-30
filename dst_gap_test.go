@@ -430,9 +430,9 @@ func checkAgainstOracle(t *testing.T, s *SpecSchedule, loc *time.Location, oracl
 }
 
 // TestNextPrevSecondsOffset checks a zone whose UTC offset has seconds, where
-// the minute step truncates to an absolute minute: when a time field wraps,
-// the search must keep the state of the previous pass, or every pass moves
-// the wall clock back and the search runs out (zero time).
+// the minute step truncated to an absolute minute until #451: when a time
+// field wraps, the search must keep the state of the previous pass, or every
+// pass moves the wall clock back and the search runs out (zero time).
 func TestNextPrevSecondsOffset(t *testing.T) {
 	loc := time.FixedZone("X", 30)
 	p := NewParser(Second | Minute | Hour | Dom | Month | Dow)
@@ -452,6 +452,85 @@ func TestNextPrevSecondsOffset(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestNextPrevSecondsOffsetNearest pins that Next and Prev return the
+// nearest matching time in a zone whose UTC offset has seconds (#451). The
+// minute steps started from an absolute minute, which lies at second 30 of
+// the wall-clock minute for a 30-second offset, so the search passed the
+// matching minute or hour.
+func TestNextPrevSecondsOffsetNearest(t *testing.T) {
+	p := NewParser(Second | Minute | Hour | Dom | Month | Dow)
+	tests := []struct {
+		spec       string
+		next, prev [4]int // day, hour, minute, second in October 2026
+	}{
+		{"0 */13 * * * *", [4]int{30, 12, 39, 0}, [4]int{30, 12, 26, 0}},
+		{"0 15,45 * * * *", [4]int{30, 12, 45, 0}, [4]int{30, 12, 15, 0}},
+		{"45 59 * * * *", [4]int{30, 12, 59, 45}, [4]int{30, 11, 59, 45}},
+		{"15 30 12,17 * * *", [4]int{30, 12, 30, 15}, [4]int{29, 17, 30, 15}},
+		{"15 30 */6 * * *", [4]int{30, 12, 30, 15}, [4]int{30, 6, 30, 15}},
+		{"0 0 * * * *", [4]int{30, 13, 0, 0}, [4]int{30, 12, 0, 0}},
+	}
+	// Africa/Monrovia used -0:44:30 until 1972.
+	for _, loc := range []*time.Location{time.FixedZone("X", 30), time.FixedZone("Y", -2670)} {
+		from := time.Date(2026, 10, 30, 12, 29, 15, 0, loc)
+		for _, tt := range tests {
+			t.Run(loc.String()+"/"+tt.spec, func(t *testing.T) {
+				sched, err := p.Parse(tt.spec)
+				if err != nil {
+					t.Fatal(err)
+				}
+				s := sched.(*SpecSchedule)
+				s.Location = loc
+				at := func(d [4]int) time.Time { return time.Date(2026, 10, d[0], d[1], d[2], d[3], 0, loc) }
+				if got, want := s.Next(from), at(tt.next); !got.Equal(want) {
+					t.Errorf("Next(%v) = %v, want %v", from, got.In(loc), want)
+				}
+				if got, want := s.Prev(from), at(tt.prev); !got.Equal(want) {
+					t.Errorf("Prev(%v) = %v, want %v", from, got.In(loc), want)
+				}
+			})
+		}
+	}
+}
+
+// TestNextPrevGapWithSeconds pins Next and Prev around a gap whose length
+// has seconds: Europe/Berlin moved from LMT (+0:53:28) to CET at 1893-04-01
+// 00:00 LMT, which became 00:06:32 CET (#451). The gap starts and ends
+// mid-minute in one of the two zones, so a step must reach the wall-clock
+// minute on both sides: the second step wraps into the next minute at
+// 00:06:32, and a minute step back from 00:06 lands at 23:59:59 LMT.
+func TestNextPrevGapWithSeconds(t *testing.T) {
+	berlin := loadLocation(t, "Europe/Berlin")
+	p := NewParser(Second | Minute | Hour | Dom | Month | Dow)
+	at := func(day, hour, minute, second int) time.Time {
+		return time.Date(1893, 3, day, hour, minute, second, 0, berlin) // March 32 is April 1
+	}
+	tests := []struct {
+		name, spec string
+		from, want time.Time
+	}{
+		{"Next", "0 30 * * * *", at(31, 23, 0, 0), at(31, 23, 30, 0)},
+		{"Next", "0 30 * * * *", at(31, 23, 30, 0), at(32, 0, 30, 0)},
+		{"Next", "45 59 * * * *", at(31, 23, 59, 49), at(32, 0, 59, 45)},
+		{"Prev", "45 59 * * * *", at(32, 0, 10, 0), at(31, 23, 59, 45)},
+	}
+	for _, tt := range tests {
+		sched, err := p.Parse(tt.spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := sched.(*SpecSchedule)
+		s.Location = berlin
+		got := s.Next(tt.from)
+		if tt.name == "Prev" {
+			got = s.Prev(tt.from)
+		}
+		if !got.Equal(tt.want) {
+			t.Errorf("%s %q (%v) = %v, want %v", tt.name, tt.spec, tt.from, got.In(berlin), tt.want)
+		}
 	}
 }
 
@@ -664,6 +743,50 @@ func TestPrevAcrossDateGoingBack(t *testing.T) {
 				}
 			case <-time.After(5 * time.Second):
 				t.Fatalf("Prev(%v) did not return within 5s", tc.from)
+			}
+		})
+	}
+}
+
+// TestNextPrevTransitionsOffMinute covers zone changes that do not fall on a
+// whole wall-clock minute. Next must not step past such a change (Asia/Dili,
+// 1912-01-01 00:22:20 LMT -> 00:00 +08). Prev must keep the wall-clock second
+// across a fall-back shorter than a minute (Asia/Jerusalem 1879, 14 s), and a
+// date change is no such fall-back (America/Juneau and America/Adak 1867,
+// -24 h). Times are given in UTC; the expected values come from a
+// second-by-second search over the wall clock.
+func TestNextPrevTransitionsOffMinute(t *testing.T) {
+	utc := func(y int, mo time.Month, d, h, mi, s int) time.Time {
+		return time.Date(y, mo, d, h, mi, s, 0, time.UTC)
+	}
+	tests := []struct {
+		zone, spec string
+		next       bool
+		from, want time.Time
+	}{
+		{"Asia/Dili", "9 0 * * * *", true, utc(1911, 12, 31, 15, 50, 0), utc(1911, 12, 31, 16, 0, 9)},
+		{"Asia/Dili", "9 */24 * * * *", true, utc(1911, 12, 31, 15, 50, 0), utc(1911, 12, 31, 16, 0, 9)},
+		{"Asia/Dili", "* 0 0 1 1 *", true, utc(1911, 12, 31, 15, 50, 0), utc(1911, 12, 31, 16, 0, 0)},
+		{"Asia/Jerusalem", "30,15 43,40,28 * * * *", false, utc(1879, 12, 31, 21, 39, 35), utc(1879, 12, 31, 21, 22, 36)},
+		{"Asia/Jerusalem", "47 22 * * * *", false, utc(1879, 12, 31, 21, 40, 6), utc(1879, 12, 31, 21, 1, 53)},
+		{"America/Juneau", "11-56 1 */3 * * *", false, utc(1867, 10, 19, 2, 49, 38), utc(1867, 10, 18, 23, 59, 37)},
+		{"America/Adak", "47-54/4 29-40 12 * * *", false, utc(1867, 10, 19, 3, 19, 8), utc(1867, 10, 19, 0, 27, 29)},
+	}
+	for _, tc := range tests {
+		t.Run(tc.zone+"/"+tc.spec, func(t *testing.T) {
+			loc := loadLocation(t, tc.zone)
+			sched, err := NewParser(Second | Minute | Hour | Dom | Month | Dow | DSTSkip | DowOrDom).Parse("TZ=" + tc.zone + " " + tc.spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got time.Time
+			if tc.next {
+				got = sched.Next(tc.from)
+			} else {
+				got = sched.(ScheduleWithPrev).Prev(tc.from)
+			}
+			if !got.Equal(tc.want) {
+				t.Errorf("next=%v from %v: got %v, want %v", tc.next, tc.from.In(loc), got.In(loc), tc.want.In(loc))
 			}
 		})
 	}
