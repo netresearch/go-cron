@@ -791,3 +791,58 @@ func TestNextPrevTransitionsOffMinute(t *testing.T) {
 		})
 	}
 }
+
+// TestNextDateStart pins the instant at which Next starts a new date where
+// that date's midnight is skipped or repeated (#457). A month step from a
+// date whose midnight time.Date moves to 23:00 of the day before must not
+// keep that time of day and skip a month (America/Asuncion); a restricted
+// day, month or weekday must start at the first copy of a repeated midnight
+// (Asia/Gaza); and where the clock goes back across midnight to the previous
+// date (Pacific/Guam, Pacific/Saipan, Antarctica/Casey), the copy of midnight
+// before the search start must not be returned or make Next lose the date.
+func TestNextDateStart(t *testing.T) {
+	const fields = Second | Minute | Hour | Dom | Month | Dow | Year | Extended
+	unix := func(sec int64) time.Time { return time.Unix(sec, 0).UTC() }
+	utc := func(y int, mo time.Month, d, h, mi int) time.Time {
+		return time.Date(y, mo, d, h, mi, 0, 0, time.UTC)
+	}
+	tests := []struct {
+		name, zone, spec string
+		options          ParseOption // DowOrDom: day of month or weekday
+		from             time.Time
+		want             []time.Time // successive results of Next
+	}{
+		// Asuncion skips midnight on 2023-10-01.
+		{"month after skipped midnight", "America/Asuncion", "0 0 0 25 11 * *", 0, utc(2023, 3, 26, 6, 0), []time.Time{utc(2023, 11, 25, 3, 0)}},
+		// Gaza repeats 00:00-00:59 on 2004-10-01, a Friday.
+		{"repeated midnight, day and month", "Asia/Gaza", "0 30 0 1 10 * *", 0, utc(2004, 9, 30, 9, 0), []time.Time{utc(2004, 9, 30, 21, 30), utc(2004, 9, 30, 22, 30), utc(2005, 9, 30, 21, 30)}},
+		{"repeated midnight, day", "Asia/Gaza", "0 30 0 1 * * *", 0, utc(2004, 9, 30, 9, 0), []time.Time{utc(2004, 9, 30, 21, 30), utc(2004, 9, 30, 22, 30)}},
+		{"repeated midnight, weekday", "Asia/Gaza", "0 30 0 * * 5 *", 0, utc(2004, 9, 30, 9, 0), []time.Time{utc(2004, 9, 30, 21, 30), utc(2004, 9, 30, 22, 30)}},
+		// Guam and Saipan go back from 1969-01-26 00:00:59 +11 to
+		// 1969-01-25 23:01 +10.
+		{"clock back across midnight, weekday", "Pacific/Guam", "0 15,45 3 * 1 0 1966-1969", 0, unix(-29415541), []time.Time{unix(-29400300)}},
+		{"clock back across midnight, 26th or last Monday", "Pacific/Guam", "59 1 2,3 26 * MON#L 1966-1969", DowOrDom, unix(-29502000), []time.Time{unix(-29404681)}},
+		{"clock back across midnight, 5th or Sunday", "Pacific/Saipan", "59 0 2,3 5 * 0 *", DowOrDom, unix(-29501940), []time.Time{unix(-29404741)}},
+		// Casey goes back from 2010-03-05 02:00 +11 to 2010-03-04 23:00 +08,
+		// so 2010-03-05 00:00 exists at +11 and again at +08.
+		{"clock back to previous date, before", "Antarctica/Casey", "0 0 0 5 3 * *", 0, utc(2010, 3, 4, 1, 0), []time.Time{utc(2010, 3, 4, 13, 0), utc(2010, 3, 4, 16, 0), utc(2011, 3, 4, 16, 0)}},
+		{"clock back to previous date, after", "Antarctica/Casey", "0 0 0 5 3 * *", 0, utc(2010, 3, 4, 15, 30), []time.Time{utc(2010, 3, 4, 16, 0)}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			loc := loadLocation(t, tc.zone)
+			sched, err := NewParser(fields | tc.options).Parse("TZ=" + tc.zone + " " + tc.spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			from := tc.from.In(loc)
+			for _, want := range tc.want {
+				got := sched.Next(from)
+				if !got.Equal(want) {
+					t.Fatalf("Next(%v) = %v, want %v", from, got.In(loc), want.In(loc))
+				}
+				from = got
+			}
+		})
+	}
+}

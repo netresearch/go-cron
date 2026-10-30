@@ -128,21 +128,20 @@ Clock jumps from 11:59:59 PM to 1:00:00 AM
 Midnight (00:00) does not exist on November 4th
 ```
 
-The `normalizeDSTDay` function handles this by adjusting the computed time:
+When `Next` moves to a new day, month or year, it starts that date at its first
+instant (`dateStart` in `spec.go`):
 
-```go
-// If midnight doesn't exist, adjust to the actual hour
-func normalizeDSTDay(t time.Time) time.Time {
-    if t.Hour() == 0 {
-        return t
-    }
-    // Time was shifted - normalize back
-    if t.Hour() > 12 {
-        return t.Add(time.Duration(24-t.Hour()) * time.Hour)
-    }
-    return t.Add(time.Duration(-t.Hour()) * time.Hour)
-}
-```
+- Where midnight is skipped, the date starts at the zone change, 01:00 on
+  November 4th in the example above.
+- Where midnight is repeated, the date starts at the first copy, so `Next`
+  returns the first copy of 00:30 for `30 0 1 10 *` as it does for
+  `30 0 * * *`.
+- Where the clock goes back across midnight to the previous date (Pacific/Guam
+  on 1969-01-26), a copy of midnight that lies before the search start is skipped.
+
+`time.Date` alone can return 23:00 of the day before for a skipped midnight and
+either copy of a repeated one; a month step from such an instant kept that time
+of day and could skip a month (#457).
 
 ## Timezone Configuration
 

@@ -543,15 +543,72 @@ func prepareTimeForSchedule(t time.Time, schedLoc *time.Location) (prepared time
 
 // nextDay returns the start of the day after t's day.
 func nextDay(t time.Time) time.Time {
-	day := t.Day()
-	// Handle DST causing midnight to not exist.
-	t = normalizeDSTDay(t.AddDate(0, 0, 1))
-	// A zone can skip a whole day (Pacific/Apia on 2011-12-30); AddDate then
-	// makes no progress.
-	if t.Day() == day {
-		t = normalizeDSTDay(t.Add(24 * time.Hour))
+	return dateStart(t.Year(), t.Month(), t.Day()+1, t.Location(), t)
+}
+
+// dateStart returns the first instant after `after` whose wall clock in loc
+// shows the date y-mo-d (normalized as time.Date does) or a later one. That
+// is the first copy of midnight when midnight repeats, unless the first copy
+// lies at or before `after` (the clock went back across midnight, Pacific/Guam
+// on 1969-01-26), and the zone change that skips midnight when it is skipped
+// (00:00 -> 01:00, or a whole day as in Pacific/Apia on 2011-12-30).
+// time.Date alone returns either copy of a repeated midnight and, for a
+// skipped one, an instant that can show 23:00 of the day before.
+func dateStart(y int, mo time.Month, d int, loc *time.Location, after time.Time) time.Time {
+	want := time.Date(y, mo, d, 0, 0, 0, 0, time.UTC)
+	m := time.Date(y, mo, d, 0, 0, 0, 0, loc)
+	if wallDate(m).Equal(want) && m.Hour() == 0 && m.Minute() == 0 && m.Second() == 0 {
+		for _, c := range [...]time.Time{earlierCopy(m), m, laterCopy(m)} {
+			if c.After(after) {
+				return c
+			}
+		}
 	}
-	return t
+	// Start the walk two days before the date; time.Date lands within a day
+	// of it even when a whole day is skipped.
+	from := after.In(loc)
+	if early := m.Add(-48 * time.Hour); early.After(from) {
+		from = early
+	}
+	return dateChangeAfter(want, from)
+}
+
+// dateChangeAfter returns the first instant after t at which the wall date
+// reaches want or a later date, found by walking the midnights and zone
+// changes after t. It serves the dates whose midnight is skipped, or whose
+// midnight copies all lie at or before t.
+func dateChangeAfter(want, t time.Time) time.Time {
+	for range 64 {
+		next := nextMidnightOrChange(t)
+		if !wallDate(next).Before(want) {
+			return next
+		}
+		t = next
+	}
+	// Not reached for any tzdata zone from 1900 to 2100; a later instant
+	// keeps the caller's search moving.
+	return t.Add(time.Second)
+}
+
+// nextMidnightOrChange returns the first instant after t that is a local
+// midnight (its first copy, if it repeats) or a zone change.
+func nextMidnightOrChange(t time.Time) time.Time {
+	next := time.Date(t.Year(), t.Month(), t.Day()+1, 0, 0, 0, 0, t.Location())
+	if first := earlierCopy(next); first.After(t) {
+		next = first
+	}
+	if end := zoneEndAfter(t); !end.IsZero() && (!next.After(t) || end.Before(next)) {
+		next = end
+	}
+	if !next.After(t) {
+		next = t.Add(time.Hour)
+	}
+	return next
+}
+
+// wallDate returns the date t's wall clock shows, at midnight UTC.
+func wallDate(t time.Time) time.Time {
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
 }
 
 // prevDay returns the end of the day before t's day.
@@ -563,18 +620,6 @@ func prevDay(t time.Time) time.Time {
 		t = normalizeDSTDayPrev(t.Add(-24 * time.Hour))
 	}
 	return t
-}
-
-// normalizeDSTDay adjusts time when DST causes midnight to not exist.
-// For example, Sao Paulo DST transforms midnight on 11/3 into 1am.
-func normalizeDSTDay(t time.Time) time.Time {
-	if t.Hour() == 0 {
-		return t
-	}
-	if t.Hour() > 12 {
-		return t.Add(time.Duration(24-t.Hour()) * time.Hour)
-	}
-	return t.Add(time.Duration(-t.Hour()) * time.Hour)
 }
 
 // fieldMatches checks if a time component value matches the schedule bitmask.
@@ -672,11 +717,8 @@ func (s *SpecSchedule) advanceDate(t time.Time, loc *time.Location, added bool, 
 	// Check year constraint first (if Year field is not wildcard).
 	// Advance to next valid year if current year doesn't match.
 	for !yearMatches(t.Year(), s.Year) {
-		if !added {
-			added = true
-			t = time.Date(t.Year(), 1, 1, 0, 0, 0, 0, loc)
-		}
-		t = t.AddDate(1, 0, 0)
+		added = true
+		t = dateStart(t.Year()+1, time.January, 1, loc, t)
 		if t.Year() > yearLimit {
 			return t, added, stepExhausted
 		}
@@ -685,37 +727,30 @@ func (s *SpecSchedule) advanceDate(t time.Time, loc *time.Location, added bool, 
 	// Find the first applicable month.
 	// If it's this month, then do nothing.
 	for !fieldMatches(int(t.Month()), s.Month) {
-		// If we have to add a month, reset the other parts to 0.
-		if !added {
-			added = true
-			// Otherwise, set the date at the beginning (since the current time is irrelevant).
-			t = time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, loc)
-		}
-		t = t.AddDate(0, 1, 0)
+		// Move to the start of the next month; the time of day starts over.
+		added = true
+		year := t.Year()
+		t = dateStart(year, t.Month()+1, 1, loc, t)
 
 		// Wrapped around.
-		if t.Month() == time.January {
+		if t.Year() != year {
 			return t, added, stepWrapped
 		}
 	}
 
-	return s.advanceDay(t, loc, added)
+	return s.advanceDay(t, added)
 }
 
-// advanceDay moves t forward to the first matching day of its month.
-//
-// NOTE: This causes issues for daylight savings regimes where midnight does
-// not exist.  For example: Sao Paulo has DST that transforms midnight on
-// 11/3 into 1am. Handle that by noticing when the Hour ends up != 0.
-func (s *SpecSchedule) advanceDay(t time.Time, loc *time.Location, added bool) (time.Time, bool, searchStep) {
+// advanceDay moves t forward to the first matching day of its month. Each
+// new day starts at its first instant (see dateStart): 01:00 where DST skips
+// midnight (Sao Paulo on 2018-11-04), the first copy where midnight repeats.
+func (s *SpecSchedule) advanceDay(t time.Time, added bool) (time.Time, bool, searchStep) {
 	for !dayMatches(s, t) {
-		if !added {
-			added = true
-			t = time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, loc)
-		}
+		added = true
+		month := t.Month()
 		t = nextDay(t)
 
-		if t.Day() == 1 {
+		if t.Month() != month {
 			return t, added, stepWrapped
 		}
 	}
@@ -1074,8 +1109,8 @@ func (s *SpecSchedule) gapRun(tr time.Time, loc *time.Location) (time.Time, bool
 	return time.Time{}, false
 }
 
-// normalizeDSTDayPrev adjusts time when DST causes issues going backwards.
-// Similar to normalizeDSTDay but for backwards traversal.
+// normalizeDSTDayPrev adjusts time when DST causes issues going backwards:
+// it moves t to 23:59:59 of its day unless t is in hour 23 already.
 func normalizeDSTDayPrev(t time.Time) time.Time {
 	// Ensure we're at the end of the day
 	if t.Hour() == 23 {
