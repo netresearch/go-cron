@@ -125,7 +125,10 @@ func (c *Cron) calculateMissedRuns(e *Entry, now time.Time) []time.Time {
 	}
 
 	var missed []time.Time
-	t := e.Prev
+	// A spec without TZ= matches the wall clock of the time it starts from,
+	// so step from Prev in the cron location, as the run loop does with now:
+	// a Prev restored in UTC must not shift the catch-ups to UTC (#447).
+	t := e.Prev.In(c.location)
 	// The DST fall-back guard applies to catch-ups too: the second copy of a
 	// time that ran, or that an earlier MissedRunAll catch-up in this list
 	// runs, is not a missed run.

@@ -636,6 +636,10 @@ func WithTags(tags ...string) JobOption {
 //   - Missed execution detection: combined with schedule analysis to detect missed runs
 //   - Process restarts: preserving interval-based job continuity across restarts
 //
+// Only the instant of prev counts: catch-up times are computed in the cron
+// location (or the spec's TZ=), so a last run time restored in UTC works as
+// well.
+//
 // Example:
 //
 //	// Migrate job with preserved history
