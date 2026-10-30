@@ -43,8 +43,9 @@ The API is 100% compatible with robfig/cron v3 — no code changes required for 
 > If your schedules must behave like robfig/cron v3, for example because
 > another system that uses robfig/cron (such as the Kubernetes CronJob controller)
 > validates or runs the same specs, use the `RobfigCompat` parser option. It turns on
-> `DowOrDom`, `LenientSteps`, `EveryRoundUp` and `DSTSkip`, which undo the DOM/DOW,
-> step validation, `@every` minimum and DST spring-forward differences below:
+> `DowOrDom`, `LenientSteps`, `EveryRoundUp`, `DSTSkip` and `DowStepToSaturday`, which
+> undo the DOM/DOW, step validation, `@every` minimum, DST spring-forward and
+> day-of-week step differences below:
 >
 > ```go
 > parser := cron.NewParser(
@@ -63,6 +64,7 @@ While the API is compatible, there are knowingly accepted behavior changes that 
 | **Entry.Run() bypasses chains** | `entry.Run()` calls job directly | `entry.Run()` honors chain wrappers |
 | **DST spring-forward** | Jobs silently skipped | Jobs run immediately after transition (ISC behavior) |
 | **DOM/DOW logic** | OR when both restricted | AND (logical, consistent with other fields) |
+| **Day-of-week `N/step`** | Runs up to Saturday (6), so `1/2` is MON,WED,FRI | Runs up to Sunday as 7, so `1/2` also selects Sunday |
 | **NewParser with no fields** | Panics | Returns error |
 
 #### TZ= Panic Fixes (#554, #555)

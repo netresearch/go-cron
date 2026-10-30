@@ -1930,10 +1930,11 @@ const (
     StepWildcard                            // With DowOrDom, a stepped star (*/2) in DOM or DOW still counts as a wildcard
     EveryRoundUp                            // Round interval durations below the minimum up instead of rejecting them
     DSTSkip                                 // Skip times in a DST spring-forward gap
+    DowStepToSaturday                       // A day-of-week "N/step" runs up to Saturday (6), not Sunday as 7
 )
 
 // RobfigCompat enables the options that make parsing and Next match robfig/cron v3.
-const RobfigCompat = DowOrDom | LenientSteps | EveryRoundUp | DSTSkip
+const RobfigCompat = DowOrDom | LenientSteps | EveryRoundUp | DSTSkip | DowStepToSaturday
 ```
 
 ParseOption represents parser configuration flags. `AlignEvery` changes only what a plain `@every` means; `@every_aligned` and `@every_start` keep their meaning on every parser. See the `RobfigCompat` doc comment for the cases where it still differs from robfig/cron.

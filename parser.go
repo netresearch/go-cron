@@ -22,29 +22,30 @@ type ParseOption int
 
 // ParseOption constants define which fields are included in parsing.
 const (
-	Second         ParseOption = 1 << iota // Seconds field, default 0
-	SecondOptional                         // Optional seconds field, default 0
-	Minute                                 // Minutes field, default 0
-	Hour                                   // Hours field, default 0
-	Dom                                    // Day of month field, default *
-	Month                                  // Month field, default *
-	Dow                                    // Day of week field, default *
-	DowOptional                            // Optional day of week field, default *
-	Descriptor                             // Allow descriptors such as @monthly, @weekly, etc.
-	Year                                   // Year field, default * (any year)
-	YearOptional                           // Optional year field, auto-detected by value >= 100
-	Hash                                   // Allow Jenkins-style 'H' hash expressions for load distribution
-	DowNth                                 // Allow #n syntax in DOW (e.g., FRI#3 for 3rd Friday)
-	DowLast                                // Allow #L syntax in DOW (e.g., FRI#L for last Friday)
-	DomL                                   // Allow L syntax in DOM (e.g., L for last day, L-3 for 3rd last day)
-	DomW                                   // Allow W syntax in DOM (e.g., 15W for nearest weekday, LW for last weekday)
-	DowOrDom                               // Use legacy OR logic for DOW/DOM (default: AND)
-	AlignEvery                             // Plain @every fires on the epoch grid, like @every_aligned (default: counts from start)
-	LenientSteps                           // Accept steps at or above the range size (e.g. */60), as robfig/cron did
-	StrictDays                             // Reject a day of month that occurs in none of the selected months (e.g. Feb 30)
-	StepWildcard                           // With DowOrDom, a stepped star (*/2) in DOM or DOW still counts as a wildcard, as in Vixie cron
-	EveryRoundUp                           // Round interval durations below the minimum up instead of rejecting them
-	DSTSkip                                // Skip times in a DST spring-forward gap instead of running them in the hour after it
+	Second            ParseOption = 1 << iota // Seconds field, default 0
+	SecondOptional                            // Optional seconds field, default 0
+	Minute                                    // Minutes field, default 0
+	Hour                                      // Hours field, default 0
+	Dom                                       // Day of month field, default *
+	Month                                     // Month field, default *
+	Dow                                       // Day of week field, default *
+	DowOptional                               // Optional day of week field, default *
+	Descriptor                                // Allow descriptors such as @monthly, @weekly, etc.
+	Year                                      // Year field, default * (any year)
+	YearOptional                              // Optional year field, auto-detected by value >= 100
+	Hash                                      // Allow Jenkins-style 'H' hash expressions for load distribution
+	DowNth                                    // Allow #n syntax in DOW (e.g., FRI#3 for 3rd Friday)
+	DowLast                                   // Allow #L syntax in DOW (e.g., FRI#L for last Friday)
+	DomL                                      // Allow L syntax in DOM (e.g., L for last day, L-3 for 3rd last day)
+	DomW                                      // Allow W syntax in DOM (e.g., 15W for nearest weekday, LW for last weekday)
+	DowOrDom                                  // Use legacy OR logic for DOW/DOM (default: AND)
+	AlignEvery                                // Plain @every fires on the epoch grid, like @every_aligned (default: counts from start)
+	LenientSteps                              // Accept steps at or above the range size (e.g. */60), as robfig/cron did
+	StrictDays                                // Reject a day of month that occurs in none of the selected months (e.g. Feb 30)
+	StepWildcard                              // With DowOrDom, a stepped star (*/2) in DOM or DOW still counts as a wildcard, as in Vixie cron
+	EveryRoundUp                              // Round interval durations below the minimum up instead of rejecting them
+	DSTSkip                                   // Skip times in a DST spring-forward gap instead of running them in the hour after it
+	DowStepToSaturday                         // A day-of-week "N/step" runs up to Saturday (6) instead of Sunday as 7, as robfig/cron did
 )
 
 // Extended is a convenience flag that enables all extended cron syntax options:
@@ -58,7 +59,7 @@ const Extended = DowNth | DowLast | DomL | DomW
 
 // RobfigCompat is a convenience flag that enables all options needed to
 // accept and schedule specs like robfig/cron/v3: DowOrDom, LenientSteps,
-// EveryRoundUp, and DSTSkip. Use it when go-cron must agree with another
+// EveryRoundUp, DSTSkip, and DowStepToSaturday. Use it when go-cron must agree with another
 // system that still uses robfig/cron, such as the Kubernetes CronJob controller.
 //
 // Known differences from robfig/cron v3:
@@ -67,8 +68,6 @@ const Extended = DowNth | DowLast | DomL | DomW
 //     descriptors such as @triggered and @every_aligned. It rejects specs
 //     longer than 1024 characters and an empty TZ= value, which robfig/cron
 //     accepts.
-//   - A day-of-week "N/step" field runs up to 7, which is Sunday, so
-//     "1/2" also selects Sunday; robfig/cron stops at 6 (Saturday).
 //   - EveryRoundUp rounds up to the parser's minimum @every interval, so
 //     Parser.WithMinEveryInterval(time.Minute) turns "@every 30s" into 1m,
 //     where robfig/cron keeps 30s, and Parser.WithMinEveryInterval(0) keeps
@@ -82,7 +81,7 @@ const Extended = DowNth | DowLast | DomL | DomW
 //	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor | cron.RobfigCompat)
 //	// Now "*/60 * * * *" parses, "0 0 13 * FRI" means "13th OR any Friday",
 //	// "@every 500ms" rounds up to 1s, and a 02:30 job is skipped on spring-forward days.
-const RobfigCompat = DowOrDom | LenientSteps | EveryRoundUp | DSTSkip
+const RobfigCompat = DowOrDom | LenientSteps | EveryRoundUp | DSTSkip | DowStepToSaturday
 
 var places = []ParseOption{
 	Second,
@@ -579,6 +578,15 @@ func (p Parser) fieldBounds(r bounds) bounds {
 	return r
 }
 
+// dowBounds returns the day-of-week bounds adjusted for the parser options.
+func (p Parser) dowBounds() bounds {
+	r := p.fieldBounds(dow)
+	if p.options&DowStepToSaturday != 0 {
+		r.stepEnd = 6
+	}
+	return r
+}
+
 // maxDaysInMonth is the most days each month can have, counting February's leap day.
 var maxDaysInMonth = [13]uint{0, 31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31}
 
@@ -640,12 +648,12 @@ func (p Parser) parseDowField(fieldStr string, hashEnabled bool) (uint64, []DowC
 
 	switch {
 	case (allowNth || allowLast) && hasHash:
-		bits, constraints, err := getDowFieldWithConstraints(fieldStr, p.fieldBounds(dow), allowNth, allowLast, p.hashKey, hashEnabled)
+		bits, constraints, err := getDowFieldWithConstraints(fieldStr, p.dowBounds(), allowNth, allowLast, p.hashKey, hashEnabled)
 		return NormalizeDOW(bits), constraints, err
 	case hasHash:
 		return 0, nil, errors.New("#n/#L syntax requires DowNth or DowLast option to be enabled")
 	default:
-		bits, err := getFieldWithHash(fieldStr, p.fieldBounds(dow), p.hashKey, hashEnabled)
+		bits, err := getFieldWithHash(fieldStr, p.dowBounds(), p.hashKey, hashEnabled)
 		return NormalizeDOW(bits), nil, err
 	}
 }
@@ -1291,6 +1299,7 @@ func getRange(expr string, r bounds) (uint64, error) {
 	}
 
 	var step uint
+	var dropped uint64
 	switch len(rangeAndStep) {
 	case 1:
 		step = 1
@@ -1302,6 +1311,12 @@ func getRange(expr string, r bounds) (uint64, error) {
 		// Special handling: "N/step" means "N-max/step".
 		if singleDigit {
 			end = r.max
+			// With stepEnd, drop the values past it. The step is still
+			// validated against max, and "*" (extra is starBit) and a start
+			// past stepEnd keep them.
+			if r.stepEnd != 0 && extra == 0 && start <= r.stepEnd {
+				dropped = getBits(r.stepEnd+1, r.max, 1)
+			}
 		}
 		if step > 1 {
 			extra = 0
@@ -1319,7 +1334,7 @@ func getRange(expr string, r bounds) (uint64, error) {
 		return getWraparoundBits(start, end, step, r) | extra, nil
 	}
 
-	return getBits(start, end, step) | extra, nil
+	return getBits(start, end, step)&^dropped | extra, nil
 }
 
 // getRangeWithHash handles H (hash) expressions in addition to standard range expressions.

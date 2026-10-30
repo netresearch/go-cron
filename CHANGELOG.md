@@ -9,6 +9,16 @@ Originally based on [robfig/cron](https://github.com/robfig/cron).
 
 ## [Unreleased]
 
+### Added
+- `DowStepToSaturday` parse option: a day-of-week `N/step` (such as `1/2`) runs
+  up to Saturday (6), as in robfig/cron, instead of up to Sunday as 7. It
+  accepts the same specs as the default parser ([PR#443])
+
+### Fixed
+- `RobfigCompat` now includes `DowStepToSaturday`, so `0 0 * * 1/2` runs on
+  Monday, Wednesday and Friday as in robfig/cron v3, and no longer also on
+  Sunday as in v0.18.0 ([PR#443])
+
 ### Planned for v2
 - Context-aware Job interface with graceful shutdown support
 
@@ -813,6 +823,7 @@ This fork includes all features from robfig/cron v3 plus:
 [PR#438]: https://github.com/netresearch/go-cron/pull/438
 [PR#439]: https://github.com/netresearch/go-cron/pull/439
 [PR#440]: https://github.com/netresearch/go-cron/pull/440
+[PR#443]: https://github.com/netresearch/go-cron/pull/443
 [@riki137]: https://github.com/riki137
 [@mrueg]: https://github.com/mrueg
 [0.17.0]: https://github.com/netresearch/go-cron/compare/v0.16.2...v0.17.0
