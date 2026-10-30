@@ -55,6 +55,8 @@ func (p Parser) Parse(spec string) (Schedule, error) {
 
 **Correction (2026-10-25):** The first version of this ADR showed an always-on cache that skipped errors. The code has been opt-in via `WithCache()` since commit edd6a42 (2025-12-02), before this ADR was written, and stores errors as well. Pinned by `TestParserWithCache` (opt-in) and `TestParserWithCacheStoresErrors` (errors cached) in `parser_test.go`.
 
+**Amendment (2026-10-30, #463):** The cache key is the spec string together with every parser setting that `parse` reads: `options`, `minEveryInterval`, `maxSearchYears`, and the hash key when the spec has a hash expression, detected with the same `containsHashExpr` that `parse` uses (`cacheKey` in `parser.go`). Parsers derived from a cached parser with `WithHashKey`, `WithSecondOptional`, `WithMinEveryInterval` or `WithMaxSearchYears` share its map. Keyed by the spec alone, `ParseWithHashKey("H * * * *", "job-b")` returned the schedule cached for `job-a`, and a derived parser received results parsed under the other settings. Pinned by `TestParserWithCacheHashKey`, `TestParserWithCacheEntryReuse` and `TestParserWithCacheDerivedSettings` in `parser_test.go`.
+
 **Characteristics of our use case that favor sync.Map:**
 
 1. **Read-heavy workload**: After initial setup, most operations are cache hits
