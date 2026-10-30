@@ -13,6 +13,10 @@ Originally based on [robfig/cron](https://github.com/robfig/cron).
 - `DowStepToSaturday` parse option: a day-of-week `N/step` (such as `1/2`) runs
   up to Saturday (6), as in robfig/cron, instead of up to Sunday as 7. It
   accepts the same specs as the default parser ([PR#443])
+- `DescribeSpec` and `Parser.DescribeSpec` return an English description of a
+  spec's second, minute and hour fields, with `WithClockForm` for 24-hour,
+  24-hour with words, or 12-hour times; other fields render literally for now.
+  Wording, grammar and method: `docs/DESCRIBE.md` (#205)
 
 ### Fixed
 - `RobfigCompat` now includes `DowStepToSaturday`, so `0 0 * * 1/2` runs on
