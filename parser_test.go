@@ -2447,6 +2447,62 @@ func TestParserWithCacheHashKey(t *testing.T) {
 			t.Error("expected the cached schedule for a repeated spec and key")
 		}
 	})
+
+	t.Run("spec without H shares one entry across keys", func(t *testing.T) {
+		t.Parallel()
+		p := base.WithCache()
+		s1, err1 := p.ParseWithHashKey("5 * * * *", "job-a")
+		s2, err2 := p.ParseWithHashKey("5 * * * *", "job-b")
+		if err1 != nil || err2 != nil {
+			t.Fatalf("parse failed: %v, %v", err1, err2)
+		}
+		if s1 != s2 {
+			t.Error("expected one cached schedule for a spec without H")
+		}
+	})
+}
+
+// TestParserWithCacheDerivedSettings verifies that parsers derived from a
+// cached parser do not get results cached under other settings (#463).
+func TestParserWithCacheDerivedSettings(t *testing.T) {
+	t.Parallel()
+
+	t.Run("WithMinEveryInterval", func(t *testing.T) {
+		t.Parallel()
+		base := NewParser(Minute | Hour | Dom | Month | Dow | Descriptor).WithCache()
+		if _, err := base.Parse("@every 30s"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := base.WithMinEveryInterval(time.Minute).Parse("@every 30s"); err == nil {
+			t.Error("parser with a 1m minimum accepted @every 30s from the cache")
+		}
+	})
+
+	t.Run("WithSecondOptional", func(t *testing.T) {
+		t.Parallel()
+		base := NewParser(Minute | Hour | Dom | Month | Dow).WithCache()
+		if _, err := base.Parse("30 * * * * *"); err == nil {
+			t.Fatal("five-field parser accepted six fields")
+		}
+		if _, err := base.WithSecondOptional().Parse("30 * * * * *"); err != nil {
+			t.Errorf("second-optional parser got the cached error: %v", err)
+		}
+	})
+
+	t.Run("WithMaxSearchYears", func(t *testing.T) {
+		t.Parallel()
+		base := NewParser(Minute | Hour | Dom | Month | Dow).WithCache()
+		if _, err := base.Parse("0 0 29 2 *"); err != nil {
+			t.Fatal(err)
+		}
+		s, err := base.WithMaxSearchYears(50).Parse("0 0 29 2 *")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := s.(*SpecSchedule).MaxSearchYears; got != 50 {
+			t.Errorf("MaxSearchYears = %d, want 50", got)
+		}
+	})
 }
 
 // TestWraparoundRangeOutOfBounds verifies that a range whose start lies above

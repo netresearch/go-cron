@@ -112,11 +112,32 @@ type Parser struct {
 	hashKey          string    // key used for H (hash) expressions
 }
 
-// cacheKey identifies a cached parse result. The hash key is part of it
-// because the same spec with H selects different values for different keys.
+// cacheKey identifies a cached parse result. Besides the spec it holds every
+// parser setting that parse reads, because parsers derived from a cached
+// parser (WithHashKey, WithSecondOptional, WithMinEveryInterval,
+// WithMaxSearchYears) share its cache map.
 type cacheKey struct {
-	spec    string
-	hashKey string
+	spec             string
+	hashKey          string
+	options          ParseOption
+	minEveryInterval time.Duration
+	maxSearchYears   int
+}
+
+// cacheKey returns the cache key for spec under this parser's settings.
+// The hash key only matters for a spec that contains H; leaving it out
+// otherwise keeps one entry per spec when every job parses with its own key.
+func (p Parser) cacheKey(spec string) cacheKey {
+	k := cacheKey{
+		spec:             spec,
+		options:          p.options,
+		minEveryInterval: p.minEveryInterval,
+		maxSearchYears:   p.maxSearchYears,
+	}
+	if strings.Contains(spec, "H") {
+		k.hashKey = p.hashKey
+	}
+	return k
 }
 
 // cacheEntry holds a cached parse result.
@@ -287,7 +308,9 @@ func (p Parser) WithMaxSearchYears(years int) Parser {
 
 // WithCache returns a new Parser with caching enabled for parsed schedules.
 // When caching is enabled, repeated calls to Parse with the same spec string
-// and the same hash key will return the cached result instead of re-parsing.
+// will return the cached result instead of re-parsing. Parsers derived from
+// this one with WithHashKey, WithSecondOptional, WithMinEveryInterval or
+// WithMaxSearchYears share the cache; each setting gets its own entries.
 //
 // Caching is particularly beneficial when:
 //   - The same cron expressions are parsed repeatedly
@@ -410,11 +433,12 @@ func parseTimezone(spec string) (*time.Location, string, error) {
 // It accepts crontab specs and features configured by NewParser.
 //
 // If caching is enabled via WithCache(), repeated calls with the same spec
-// and the same hash key will return the cached result.
+// and the same parser settings (including the hash key) will return the
+// cached result.
 func (p Parser) Parse(spec string) (Schedule, error) {
 	// Check cache first if enabled
 	if p.cache != nil {
-		if cached, ok := p.cache.Load(cacheKey{spec: spec, hashKey: p.hashKey}); ok {
+		if cached, ok := p.cache.Load(p.cacheKey(spec)); ok {
 			if entry, ok := cached.(cacheEntry); ok {
 				return entry.schedule, entry.err
 			}
@@ -425,7 +449,7 @@ func (p Parser) Parse(spec string) (Schedule, error) {
 
 	// Store in cache if enabled
 	if p.cache != nil {
-		p.cache.Store(cacheKey{spec: spec, hashKey: p.hashKey}, cacheEntry{schedule: schedule, err: err})
+		p.cache.Store(p.cacheKey(spec), cacheEntry{schedule: schedule, err: err})
 	}
 
 	return schedule, err
