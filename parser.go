@@ -125,8 +125,9 @@ type cacheKey struct {
 }
 
 // cacheKey returns the cache key for spec under this parser's settings.
-// The hash key only matters for a spec that contains H; leaving it out
-// otherwise keeps one entry per spec when every job parses with its own key.
+// The hash key only matters for a spec with a hash expression; leaving it
+// out otherwise keeps one entry per spec when every job parses with its own
+// key. containsHashExpr is the check parse uses, so "THU" does not count.
 func (p Parser) cacheKey(spec string) cacheKey {
 	k := cacheKey{
 		spec:             spec,
@@ -134,7 +135,7 @@ func (p Parser) cacheKey(spec string) cacheKey {
 		minEveryInterval: p.minEveryInterval,
 		maxSearchYears:   p.maxSearchYears,
 	}
-	if strings.Contains(spec, "H") {
+	if containsHashExpr(strings.Fields(spec)) {
 		k.hashKey = p.hashKey
 	}
 	return k
