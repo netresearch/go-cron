@@ -33,8 +33,8 @@ The extended cron syntax includes `nW` (nearest weekday to day n). A design deci
 When `nW` is specified and day `n` doesn't exist in the current month, return no match for that month. The scheduler advances to the next month that contains day `n`.
 
 ```go
-func nearestWeekday(year int, month time.Month, targetDay int, loc *time.Location) int {
-    lastDay := time.Date(year, month+1, 0, 12, 0, 0, 0, loc).Day()
+func nearestWeekday(year int, month time.Month, targetDay int) int {
+    lastDay := daysIn(year, month) // calendar fact, computed in UTC (#462)
 
     // Skip month if target day doesn't exist
     if targetDay > lastDay {
