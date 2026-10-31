@@ -395,6 +395,7 @@ func pastClause(rest []timeField, notes *[]string) string {
 // before a value ("for hour 9"), "in" before a recurrence ("in every hour").
 func joinPhrases(fs []timeField, notes *[]string) string {
 	var out strings.Builder
+	out.Grow(150) // the joined phrases fit without regrowing
 	for i, f := range fs {
 		text, note := f.phrase()
 		*notes = appendNote(*notes, note)
