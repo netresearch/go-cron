@@ -33,11 +33,11 @@ func WithParseOptions(o ParseOption) DescribeOption // package function only
   from the parsed schedule, because the parsed bits have lost what was
   written (`*/15` and `0,15,30,45` parse the same, but only one has a step).
 - Descriptions carry no time zone; callers show the location beside them.
-- **Coverage so far:** the second, minute and hour fields. A spec whose day
-  of month, month, day of week or year is restricted, and a spec with `H`,
+- **Coverage:** the second, minute and hour fields. A spec whose day of
+  month, month, day of week or year is restricted, and a spec with `H`,
   render literally, field by field: `0 9 * * 1-5` → "minute 0, hour 9, day
   of month *, month *, day of week 1-5". A descriptor renders as written
-  (`@daily`). Later changes describe those fields and shrink the fallback.
+  (`@daily`).
 
 ## Clock forms
 
@@ -75,7 +75,7 @@ which form a spec gets.
   the last run first.
 - **Clock order** follows the hour field, so a wrapped range reads in wrap
   order: "at 22:00, 00:00 and 02:00".
-- **Every day** follows clock times and the span when no day is named.
+- **Every day** follows clock times and the span.
   Times within the hour ("past the hour", "on the hour") do not get it.
 - **Commas.** No comma before a trailing clause such as "every day". A comma
   stays after the opening span, between list items, and inside parentheses.
@@ -86,12 +86,12 @@ which form a spec gets.
 
 ## Grammar (EBNF)
 
-The productions below are what `DescribeSpec` produces today.
+The productions below are what `DescribeSpec` produces.
 `TestDescribeSpecGrammar` checks every golden description against them.
 
 ```ebnf
 schedule  = time
-          | literal ;                                 (* not yet covered *)
+          | literal ;                                 (* the literal fallback *)
 
 time      = "at " , clocks , " every day"
           | "on the hour"
@@ -120,9 +120,6 @@ literal   = field , { ", " , field } ;
 field     = ( "second" | "minute" | "hour" | "day of month" | "month"
             | "day of week" | "year" ) , " " , text ;  (* the field as written *)
 ```
-
-The full grammar, with days, months, years, `H`, `L`, `W`, `#` and intervals,
-is planned in issue #205; each later change adds its productions here.
 
 ## How the wording was chosen
 

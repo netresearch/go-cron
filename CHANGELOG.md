@@ -15,7 +15,7 @@ Originally based on [robfig/cron](https://github.com/robfig/cron).
   accepts the same specs as the default parser ([PR#443])
 - `DescribeSpec` and `Parser.DescribeSpec` return an English description of a
   spec's second, minute and hour fields, with `WithClockForm` for 24-hour,
-  24-hour with words, or 12-hour times; other fields render literally for now.
+  24-hour with words, or 12-hour times; other fields render literally.
   Wording, grammar and method: `docs/DESCRIBE.md` (#205)
 
 ### Fixed

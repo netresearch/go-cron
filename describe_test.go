@@ -82,7 +82,7 @@ var describeGoldens = []struct {
 	{spec: "0 10,12,14 * * *", opts: []DescribeOption{WithClockForm(Clock12)}, want: "at 10 am, noon and 2 pm every day"},
 	{spec: "0 10,12,14 * * *", opts: []DescribeOption{WithClockForm(Clock24Words)}, want: "at 10:00, noon and 14:00 every day"},
 
-	// Not yet described: the whole spec renders literally
+	// Literal fallback: the whole spec renders field by field
 	{spec: "0 9 * * 1-5", want: "minute 0, hour 9, day of month *, month *, day of week 1-5", literal: true},
 	{spec: "15 0 9 1 * *", opts: []DescribeOption{withSeconds}, want: "second 15, minute 0, hour 9, day of month 1, month *, day of week *", literal: true},
 	{spec: "@daily", want: "@daily", literal: true},
