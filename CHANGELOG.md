@@ -17,6 +17,9 @@ Originally based on [robfig/cron](https://github.com/robfig/cron).
   spec's second, minute and hour fields, with `WithClockForm` for 24-hour,
   24-hour with words, or 12-hour times.
   Wording, grammar and method: `docs/DESCRIBE.md` (#205)
+- `DescribeSpec` describes the day of month, day of week, month and year
+  fields: "at 00:00 on the 13th of the month when it falls on Friday",
+  "at 09:00 on the 1st of the month in January thru March" (#205)
 
 ### Fixed
 - `RobfigCompat` now includes `DowStepToSaturday`, so `0 0 * * 1/2` runs on
