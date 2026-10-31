@@ -9,7 +9,7 @@ next to the spec, such as in a UI, a log line or a validation message:
 | `5/15 2 * * *` | at 02:05, 02:20, 02:35 and 02:50 every day |
 | `0 22-2/2 * * *` | at 22:00, 00:00 and 02:00 every day |
 | `*/7 9-17 * * *` | from 09:00 thru 17:56 every day, at 0, 7, 14, … 56 minutes past each hour (every 7 minutes, starting over each hour) |
-| `30 */2 * * *` | at 30 minutes past hours 0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20 and 22 of every day |
+| `30 */2 * * *` | at 30 minutes past hours 0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20 and 22 in every day |
 
 This file covers the API, the rules that pick the wording, the grammar every
 description follows, and how the wording was tested and is extended.
@@ -28,7 +28,11 @@ func WithParseOptions(o ParseOption) DescribeOption // package function only
   or the options given with `WithParseOptions`. The `Parser` method uses the
   parser's own settings and ignores `WithParseOptions`.
 - An invalid spec returns the parse error. A valid spec always gets a
-  description and a nil error.
+  description and a nil error. A spec outside the coverage below, or one
+  with `H`, gets the literal form: each written field by name, as written
+  ("minute 0, hour 9, day of month *, month *, day of week 1-5"). A
+  descriptor such as `@daily` is returned as written.
+- `H` needs no hash key: the description does not depend on it.
 - The description is made from the spec text as the parser splits it, not
   from the parsed schedule, because the parsed bits have lost what was
   written (`*/15` and `0,15,30,45` parse the same, but only one has a step).
@@ -57,11 +61,19 @@ The grammar below lists every form a description can take. These rules say
 which form a spec gets.
 
 - **Values lead.** A step renders as the values it fires on: `*/15` → "0,
-  15, 30 and 45". Seconds and minutes list up to 6 values, hours up to 12.
-  A longer list shows the first 3, "…" and the last, with a note giving the
-  interval: "(every 7 minutes, starting over each hour)". "starting over
-  each …" appears when the gap across the boundary differs from the step.
-  A list that mixes steps and values renders the union of its values.
+  15, 30 and 45". A step lists up to 6 values for seconds and minutes, 12
+  for hours. A longer step shows the first 3, "…" and the last, with a note
+  giving the interval: "(every 7 minutes, starting over each hour)".
+  "starting over each …" appears when the gap across the boundary differs
+  from the step.
+- **Lists.** A list of several items renders the union of their values,
+  sorted and once each, with consecutive values as a range: `0-10,*/15` →
+  "0 thru 10, 15, 30 and 45". It is never cut short, since no note could
+  give the values left out.
+- **Every value.** A field that covers its whole range reads as every
+  value: `0-59` is "every minute", and `0 0-23 * * *` is "on the hour".
+  After a leading "every …", such fields are left out: `* * 9 * * *` is
+  "every second for hour 9".
 - **Clock times** are used when the second is fixed and either one hour has
   up to 6 minutes, or one minute falls on up to 12 hours written as a list
   or range. Hour steps (`*/2`) keep "past hours 0, 2, …".
@@ -71,6 +83,9 @@ which form a spec gets.
   the last run first.
 - **Clock order** follows the hour field, so a wrapped range reads in wrap
   order: "at 22:00, 00:00 and 02:00".
+- **for / in.** "for" joins a value ("every minute for hour 9") and "in"
+  a recurrence ("every second for minute 30 in every hour", "at 30
+  minutes past hours 0, 2, … 22 in every day").
 - **Every day** follows clock times and the span.
   Times within the hour ("past the hour", "on the hour") do not get it.
 - **Commas.** No comma before a trailing clause such as "every day". A comma
@@ -83,7 +98,8 @@ which form a spec gets.
 ## Grammar (EBNF)
 
 The productions below are what `DescribeSpec` produces.
-`TestDescribeSpecGrammar` checks every golden description against them.
+`TestDescribeSpecGrammar` checks every golden description against them, and
+`FuzzDescribeSpec` checks the descriptions of generated specs.
 
 ```ebnf
 schedule  = time
@@ -93,16 +109,18 @@ time      = "at " , clocks , " every day"
           | "on the hour"
           | "from " , clock , " thru " , clock , " every day" , ", " , each , [ note ]
           | perunit , [ note ]
-          | lead , { " of " , unit } , [ note ] ;
+          | lead , { join } , [ note ] ;
 each      = "at " , tvals , " past each hour" ;
 clocks    = clock , [ { ", " , clock } , " and " , clock ] ;
 clock     = clock24 | "midnight" | "noon" | clock12 ;   (* one form per call *)
 clock24   = hh , ":" , mm , [ ":" , ss ] ;
 clock12   = h12 , [ ":" , mm , [ ":" , ss ] ] , ( " am" | " pm" ) ;
-perunit   = "at " , tvals , " past " , ( "the " , ( "minute" | "hour" ) | unit , { " of " , unit } ) ;
+perunit   = "at " , tvals , " past " , ( "the " , ( "minute" | "hour" ) | ( unit | every ) , { join } ) ;
 tvals     = vlist , " " , ( "second" | "seconds" | "minute" | "minutes" ) ;
 lead      = "every " , unit-sg ;
-unit      = ( unit-sg | unit-pl ) , " " , vlist | "every " , unit-sg | "every day" ;
+unit      = ( unit-sg | unit-pl ) , " " , vlist ;
+every     = "every " , unit-sg | "every day" ;
+join      = " for " , unit | " in " , every ;
 
 note      = " (" , ival , { "; " , ival } , ")" ;
 ival      = "every " , ( unit-sg | int , " " , unit-pl ) ,
