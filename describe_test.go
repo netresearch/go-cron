@@ -12,6 +12,12 @@ import (
 // withSeconds parses six-field specs, seconds first.
 var withSeconds = WithParseOptions(Second | Minute | Hour | Dom | Month | Dow | Descriptor)
 
+// withDowOrDom ORs the day fields when both are restricted.
+var withDowOrDom = WithParseOptions(Minute | Hour | Dom | Month | Dow | DowOrDom)
+
+// withYear parses a sixth field, the year.
+var withYear = WithParseOptions(Minute | Hour | Dom | Month | Dow | Year)
+
 // describeGoldens are the binding descriptions (docs/DESCRIBE.md). literal
 // marks the field-by-field fallback, which is outside the grammar.
 var describeGoldens = []struct {
@@ -103,9 +109,63 @@ var describeGoldens = []struct {
 	{spec: "0 10,12,14 * * *", opts: []DescribeOption{WithClockForm(Clock12)}, want: "at 10 am, noon and 2 pm every day"},
 	{spec: "0 10,12,14 * * *", opts: []DescribeOption{WithClockForm(Clock24Words)}, want: "at 10:00, noon and 14:00 every day"},
 
+	// A named day: ascending clock times, no "midnight", no "every day"
+	{spec: "0 0 * * 5", want: "at 00:00 on Friday"},
+	{spec: "0 0 * * 5", opts: []DescribeOption{WithClockForm(Clock24Words)}, want: "at 00:00 on Friday"},
+	{spec: "0 0 * * 5", opts: []DescribeOption{WithClockForm(Clock12)}, want: "at 12 am on Friday"},
+	{spec: "0 22-2/2 * * 5", want: "at 00:00, 02:00 and 22:00 on Friday"},
+	{spec: "0 22-2/2 * * 5", opts: []DescribeOption{WithClockForm(Clock12)}, want: "at 12 am, 2 am and 10 pm on Friday"},
+	{spec: "0 9-17 * * 1-5", want: "at 09:00, 10:00, 11:00, 12:00, 13:00, 14:00, 15:00, 16:00 and 17:00 on Monday thru Friday"},
+	{spec: "0 12 * * 1-5", opts: []DescribeOption{WithClockForm(Clock24Words)}, want: "at noon on Monday thru Friday"},
+	{spec: "15 0 9 1 * *", opts: []DescribeOption{withSeconds}, want: "at 09:00:15 on the 1st of the month"},
+
+	{spec: "30 */2 * * 1", want: "at 30 minutes past hours 0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20 and 22 on Monday"},
+	{spec: "*/7 9-17 * * 1-5", want: "from 09:00 thru 17:56, at 0, 7, 14, … 56 minutes past each hour on Monday thru Friday (every 7 minutes, starting over each hour)"},
+	{spec: "* * * 1 *", want: "every minute in January"},
+	{spec: "0 * * * 1", want: "on the hour on Monday"},
+	{spec: "*/15 * 1 * *", want: "at 0, 15, 30 and 45 minutes past the hour on the 1st of the month"},
+
+	// Days of the month
+	{spec: "0 0 1,15 * *", want: "at 00:00 on the 1st and 15th of the month"},
+	{spec: "0 0 1-7 * *", want: "at 00:00 on the 1st thru 7th of the month"},
+	{spec: "0 0 11-13,22 * *", want: "at 00:00 on the 11th thru 13th and 22nd of the month"},
+	{spec: "0 0 1-28/7 * *", want: "at 00:00 on the 1st, 8th, 15th and 22nd of every month"},
+	{spec: "0 0 1/10 * *", want: "at 00:00 on the 1st, 11th, 21st and 31st of the month; the 31st runs only in months that have one"},
+	{spec: "0 0 */3 * *", want: "at 00:00 on the 1st, 4th, 7th, 10th, 13th, 16th, 19th, 22nd, 25th, 28th and 31st of the month; the 31st runs only in months that have one"},
+	{spec: "0 0 */2 * *", want: "at 00:00 on the 1st, 3rd, 5th, … 31st of the month (every 2 days, starting over each month); the 29th and 31st run only in months that have them"},
+	{spec: "0 0 29 * *", want: "at 00:00 on the 29th of the month; the 29th runs only in months that have one"},
+	{spec: "0 0 30,31 * *", want: "at 00:00 on the 30th and 31st of the month; the 30th and 31st run only in months that have them"},
+
+	// Days of the week, from the parser's values
+	{spec: "0 0 * * 1,3,5", want: "at 00:00 on Monday, Wednesday and Friday"},
+	{spec: "0 0 * * MON-FRI", want: "at 00:00 on Monday thru Friday"},
+	{spec: "0 0 * * 6-7", want: "at 00:00 on Saturday and Sunday"},
+	{spec: "0 0 * * 0,7", want: "at 00:00 on Sunday"},
+	{spec: "0 0 * * */2", want: "at 00:00 on Sunday, Tuesday, Thursday and Saturday"},
+	{spec: "0 0 * * 5-1/2", want: "at 00:00 on Friday and Sunday"},
+	{spec: "0 0 * * 1/2", want: "at 00:00 on Monday, Wednesday, Friday and Sunday"},
+	{spec: "0 0 * * 1/2", opts: []DescribeOption{WithParseOptions(Minute | Hour | Dom | Month | Dow | DowStepToSaturday)}, want: "at 00:00 on Monday, Wednesday and Friday"},
+
+	// Both day fields
+	{spec: "0 0 13 * 5", want: "at 00:00 on the 13th of the month when it falls on Friday"},
+	{spec: "0 0 1 * 1", opts: []DescribeOption{withDowOrDom}, want: "at 00:00 on the 1st of the month or on any Monday"},
+	{spec: "0 0 1,15 * 1-5", opts: []DescribeOption{withDowOrDom}, want: "at 00:00 on the 1st and 15th of the month or on any Monday thru Friday"},
+
+	// Months and years
+	{spec: "0 0 * 1-3 *", want: "at 00:00 every day in January thru March"},
+	{spec: "0 0 * 1-3 *", opts: []DescribeOption{WithClockForm(Clock24Words)}, want: "at midnight every day in January thru March"},
+	{spec: "0 0 1 1-3 *", want: "at 00:00 on the 1st of the month in January thru March"},
+	{spec: "0 0 1 */3 *", want: "at 00:00 on the 1st of the month in January, April, July and October"},
+	{spec: "0 0 1 JAN,JUN *", want: "at 00:00 on the 1st of the month in January and June"},
+	{spec: "0 0 1 1 * 2026-2028", opts: []DescribeOption{withYear}, want: "at 00:00 on the 1st of the month in January in years 2026 thru 2028"},
+	{spec: "0 0 1 1 * *", opts: []DescribeOption{withYear}, want: "at 00:00 on the 1st of the month in January"},
+	{spec: "0 0 1 1 * 2027", opts: []DescribeOption{withYear}, want: "at 00:00 on the 1st of the month in January in year 2027"},
+	{spec: "0 0 1 1 * 2030,2026", opts: []DescribeOption{withYear}, want: "at 00:00 on the 1st of the month in January in years 2026 and 2030"},
+	{spec: "0 0 1 1 * 2026-2030/2", opts: []DescribeOption{withYear}, want: "at 00:00 on the 1st of the month in January in years 2026, 2028 and 2030"},
+
 	// Literal fallback: the whole spec renders field by field
-	{spec: "0 9 * * 1-5", want: "minute 0, hour 9, day of month *, month *, day of week 1-5", literal: true},
-	{spec: "15 0 9 1 * *", opts: []DescribeOption{withSeconds}, want: "second 15, minute 0, hour 9, day of month 1, month *, day of week *", literal: true},
+	{spec: "0 0 L * *", opts: []DescribeOption{WithParseOptions(Minute | Hour | Dom | Month | Dow | DomL)}, want: "minute 0, hour 0, day of month L, month *, day of week *", literal: true},
+	{spec: "0 0 * * 5#3", opts: []DescribeOption{WithParseOptions(Minute | Hour | Dom | Month | Dow | DowNth)}, want: "minute 0, hour 0, day of month *, month *, day of week 5#3", literal: true},
 	{spec: "@daily", want: "@daily", literal: true},
 	{spec: "* , * * *", want: "minute *, hour ,, day of month *, month *, day of week *", literal: true},
 	{spec: ", * * * *", want: "minute ,, hour *, day of month *, month *, day of week *", literal: true},
@@ -125,9 +185,9 @@ func TestDescribeSpec(t *testing.T) {
 	}
 }
 
-// describeGrammar is the time part of the EBNF in docs/DESCRIBE.md as a
-// regular expression. Every description outside the literal fallback must
-// match it.
+// describeGrammar is the EBNF in docs/DESCRIBE.md, without the forms that
+// render literally, as a regular expression. Every description outside the
+// literal fallback must match it.
 func describeGrammar() *regexp.Regexp {
 	alt := func(s ...string) string { return "(?:" + strings.Join(s, "|") + ")" }
 	andList := func(item string) string { return item + "(?:(?:, " + item + ")* and " + item + ")?" }
@@ -147,14 +207,38 @@ func describeGrammar() *regexp.Regexp {
 	ival := "every " + alt(unitSg, num+" "+unitPl) +
 		"(?:, starting over each " + alt("minute", "hour", "day") + ")?"
 	note := ` \(` + ival + "(?:; " + ival + `)*\)`
-	time := alt(
-		"at "+andList(clock)+" every day",
-		"on the hour",
-		"from "+clock+" thru "+clock+" every day, at "+tvals+" past each hour(?:"+note+")?",
-		"at "+tvals+" past "+alt("the "+alt("minute", "hour"), alt(unit, every)+join)+"(?:"+note+")?",
-		"every "+unitSg+join+"(?:"+note+")?",
+
+	dayname := alt("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")
+	monthname := alt("January", "February", "March", "April", "May", "June", "July",
+		"August", "September", "October", "November", "December")
+	ord := `\d+(?:st|nd|rd|th)`
+	olist := andList(ord + "(?: thru " + ord + ")?")
+	ovlist := alt(olist, ord+", "+ord+", "+ord+", … "+ord)
+	dnote := ` \(every ` + alt("day", num+" days") + `(?:, starting over each month)?\)`
+	dom := "the " + ovlist + " of " + alt("the", "every") + " month(?:" + dnote + ")?"
+	dowItem := dayname + "(?: thru " + dayname + ")?"
+	day := "on " + alt(dom+"(?: when it falls on "+andList(dowItem)+"| or on "+andList("any "+dowItem)+")?",
+		andList(dowItem))
+	month := "in " + andList(monthname+"(?: thru "+monthname+")?")
+	year := alt("in year "+num, "in years "+vlist+`(?: \(every `+alt("year", num+" years")+`\))?`)
+	short := "; the " + alt(ord+" runs only in months that have one",
+		ord+"(?:, "+ord+")* and "+ord+" run only in months that have them")
+	later := "(?: " + month + ")?(?: " + year + ")?"
+	dated := "(?: " + day + ")?" + later
+
+	clocks := "at " + andList(clock)
+	span := "from " + clock + " thru " + clock
+	each := ", at " + tvals + " past each hour"
+	schedule := alt(
+		clocks+" every day"+later,
+		clocks+" "+day+later,
+		span+" every day"+each+later,
+		span+each+" "+day+later,
+		"on the hour"+dated,
+		"at "+tvals+" past "+alt("the "+alt("minute", "hour"), alt(unit, every)+join)+dated,
+		"every "+unitSg+join+dated,
 	)
-	return regexp.MustCompile("^" + time + "$")
+	return regexp.MustCompile("^" + schedule + "(?:" + note + ")?(?:" + short + ")?$")
 }
 
 func TestDescribeSpecGrammar(t *testing.T) {
@@ -205,20 +289,29 @@ func TestParserDescribeSpec(t *testing.T) {
 		t.Errorf("got %q, want %q", got, want)
 	}
 
-	// SecondOptional: a second that was not written is not listed.
-	got, err = FullParser().DescribeSpec("0 0 1 * *")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := "minute 0, hour 0, day of month 1, month *, day of week *"; got != want {
-		t.Errorf("got %q, want %q", got, want)
-	}
-
+	// YearOptional with a year written.
 	got, err = FullParser().DescribeSpec("0 0 0 * * * 2027")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "second 0, minute 0, hour 0, day of month *, month *, day of week *, year 2027"; got != want {
+	if want := "at 00:00 every day in year 2027"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+
+	// SecondOptional: a second that was not written is not listed.
+	got, err = FullParser().DescribeSpec("0 0 L * *")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "minute 0, hour 0, day of month L, month *, day of week *"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+
+	got, err = FullParser().DescribeSpec("0 0 0 L * * 2027")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "second 0, minute 0, hour 0, day of month L, month *, day of week *, year 2027"; got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
 
