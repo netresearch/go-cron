@@ -2984,7 +2984,8 @@ error. The package function parses as `AnalyzeSpec` does (the standard parser
 unless `WithParseOptions` is given); the `Parser` method uses the parser's own
 settings. `WithClockForm` picks `Clock24` (default), `Clock24Words` or
 `Clock12`. Descriptions carry no time zone. The wording and its grammar are in
-[DESCRIBE.md](DESCRIBE.md); fields not covered yet render literally.
+[DESCRIBE.md](DESCRIBE.md); specs with restricted day, month or year fields
+render literally.
 
 **Example:**
 ```go

@@ -68,11 +68,10 @@ func DescribeSpec(spec string, opts ...DescribeOption) (string, error) {
 
 // DescribeSpec returns an English description of spec as p parses it, or the
 // parse error. The description follows the grammar in docs/DESCRIBE.md and
-// leaves out the time zone; callers show the location beside it. Anything the
-// grammar does not cover yet renders literally, with a nil error: a spec with
-// a restricted day, month or year field, or with H, field by field ("minute
-// 0, hour 9, day of month *, month *, day of week 1-5"), and a descriptor as
-// written ("@daily").
+// leaves out the time zone; callers show the location beside it. A spec with
+// a restricted day, month or year field, or with H, renders literally, field
+// by field ("minute 0, hour 9, day of month *, month *, day of week 1-5"),
+// and a descriptor as written ("@daily"), with a nil error.
 func (p Parser) DescribeSpec(spec string, opts ...DescribeOption) (string, error) {
 	if _, err := p.Parse(spec); err != nil {
 		return "", err
@@ -392,8 +391,8 @@ func withNote(note string) string {
 	return " (" + note + ")"
 }
 
-// clockTime writes h:m:s in the clock form. "midnight" and "noon" are used
-// only when no day is named, which holds for every description so far.
+// clockTime writes h:m:s in the clock form. The word forms write 00:00 as
+// "midnight" and 12:00 as "noon".
 func clockTime(h, m, s uint, form ClockForm) string {
 	switch {
 	case form != Clock24 && h == 0 && m == 0 && s == 0:
