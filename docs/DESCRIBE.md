@@ -137,6 +137,8 @@ which form a spec gets.
   both ("5 and 6"). A wrapped range reads as its two parts ("50 thru 59 and
   0 thru 10"), and a wrapped step lists its values in full. Minute 0 of
   every hour is "on the hour".
+- A range that starts with `*` or `?` reads as the star alone, as the
+  parser runs it: `*-5` is `*`, `*-/15` is `*/15`.
 
 ## Grammar (EBNF)
 
@@ -236,3 +238,9 @@ When a parser option or a new field form changes what a spec means:
 3. For new wording, run a reader trial as described above before settling
    it, with start times that cross the boundary the wording is about.
 4. Keep the rule that decides between forms in "Rendering rules".
+5. A form the grammar does not cover renders literally. `literalSyntax` in
+   `describe_test.go` names the syntax that does, written apart from the
+   describer's own check, and `FuzzDescribeSpec` fails when a spec renders
+   literally without it or is described with it. When a change covers a
+   form, take it out of `literalSyntax`; a fuzz failure then shows any spec
+   still left out.
