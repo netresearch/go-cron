@@ -54,6 +54,7 @@ func WithParseOptions(o ParseOption) DescribeOption {
 	}
 }
 
+// newDescribeConfig applies opts to a zero describeConfig.
 func newDescribeConfig(opts []DescribeOption) describeConfig {
 	var c describeConfig
 	for _, o := range opts {
@@ -159,6 +160,8 @@ type timeField struct {
 	vals      []uint // values once each: sorted for a list, else in firing order
 }
 
+// newTimeField parses the field text, which has already parsed as a spec,
+// into its items and the values they fire on, once each.
 func newTimeField(text, unit, container string, r bounds, limit int) timeField {
 	f := timeField{unit: unit, container: container, r: r, limit: limit}
 	for _, expr := range strings.FieldsFunc(text, func(r rune) bool { return r == ',' }) {
@@ -196,6 +199,7 @@ func (it timeItem) runs(r bounds) []uint {
 	return out
 }
 
+// uniq drops repeated values, keeping the first of each in order.
 func uniq(vals []uint) []uint {
 	var out []uint
 	for _, v := range vals {
@@ -206,6 +210,7 @@ func uniq(vals []uint) []uint {
 	return out
 }
 
+// stepped reports a field with a wildcard or a step greater than 1.
 func (f timeField) stepped() bool {
 	return slices.ContainsFunc(f.items, func(it timeItem) bool { return it.star || it.step > 1 })
 }
@@ -279,6 +284,7 @@ func (f timeField) phrase() (text, note string) {
 	return f.unitWord() + " " + text, note
 }
 
+// unitWord returns the unit, plural unless the field has one value.
 func (f timeField) unitWord() string {
 	if len(f.vals) == 1 {
 		return f.unit
@@ -411,6 +417,7 @@ func joinPhrases(fs []timeField, notes *[]string) string {
 	return out.String()
 }
 
+// appendNote appends note to notes unless it is empty.
 func appendNote(notes []string, note string) []string {
 	if note == "" {
 		return notes
@@ -418,6 +425,7 @@ func appendNote(notes []string, note string) []string {
 	return append(notes, note)
 }
 
+// withNote returns note in parentheses after a space, or "" for no note.
 func withNote(note string) string {
 	if note == "" {
 		return ""
@@ -453,6 +461,7 @@ func clockTime(h, m, s uint, form ClockForm) string {
 	return t
 }
 
+// andList joins words as "a, b and c".
 func andList(words []string) string {
 	if len(words) == 1 {
 		return words[0]
