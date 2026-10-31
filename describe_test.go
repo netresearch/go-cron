@@ -5,6 +5,7 @@ package cron
 
 import (
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -162,6 +163,12 @@ var describeGoldens = []struct {
 	{spec: "0 0 1 1 * 2027", opts: []DescribeOption{withYear}, want: "at 00:00 on the 1st of the month in January in year 2027"},
 	{spec: "0 0 1 1 * 2030,2026", opts: []DescribeOption{withYear}, want: "at 00:00 on the 1st of the month in January in years 2026 and 2030"},
 	{spec: "0 0 1 1 * 2026-2030/2", opts: []DescribeOption{withYear}, want: "at 00:00 on the 1st of the month in January in years 2026, 2028 and 2030"},
+
+	// The parser reads a range from "*" or "?" as the star alone
+	{spec: "0 *-5 * * *", want: "on the hour"},
+	{spec: "*-/15 * * * *", want: "at 0, 15, 30 and 45 minutes past the hour"},
+	{spec: "0 0 *-3 * *", want: "at 00:00 every day"},
+	{spec: "0 0 ?-3 * 1", want: "at 00:00 on Monday"},
 
 	// Literal fallback: the whole spec renders field by field
 	{spec: "0 0 L * *", opts: []DescribeOption{WithParseOptions(Minute | Hour | Dom | Month | Dow | DomL)}, want: "minute 0, hour 0, day of month L, month *, day of week *", literal: true},
@@ -336,8 +343,40 @@ func TestParserDescribeSpec(t *testing.T) {
 // literalForm matches the field-by-field fallback and bare descriptors.
 var literalForm = regexp.MustCompile(`^(?:@|(?:second|minute|hour|day of month|month|day of week|year) )`)
 
-// FuzzDescribeSpec checks that every spec that parses gets a description, and
-// that it is in the grammar or the literal fallback.
+// longNumber matches a number of six or more digits.
+var longNumber = regexp.MustCompile(`[0-9]{6}`)
+
+// literalSyntax reports the syntax DescribeSpec renders literally: H in any
+// field, L or W in the day of month, L or # in the day of week, and a field
+// written as commas only. An item that starts with "*" or "?" is the star,
+// whatever follows it, as the parser reads it. It is written apart from the
+// describer's own check, so a spec that falls back for another reason fails
+// FuzzDescribeSpec.
+func literalSyntax(fields []string, yearField string) bool {
+	if yearField != "" {
+		fields = append(slices.Clone(fields), yearField)
+	}
+	for i, f := range fields {
+		if strings.Trim(f, ",") == "" {
+			return true
+		}
+		for item := range strings.SplitSeq(f, ",") {
+			if strings.HasPrefix(item, "*") || strings.HasPrefix(item, "?") {
+				continue
+			}
+			u := strings.ToUpper(item)
+			if strings.HasPrefix(item, "H") ||
+				(i == 3 && strings.ContainsAny(u, "LW")) || (i == 5 && strings.ContainsAny(u, "L#")) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// FuzzDescribeSpec checks that every spec that parses gets a description in
+// the grammar or the literal fallback, and the literal fallback exactly for
+// descriptors and literalSyntax.
 func FuzzDescribeSpec(f *testing.F) {
 	for _, tt := range describeGoldens {
 		f.Add(tt.spec)
@@ -345,6 +384,10 @@ func FuzzDescribeSpec(f *testing.F) {
 	f.Add("5 , , * * *")
 	f.Add("1,,2 * * * *")
 	f.Add("0-59 0-23 * * *")
+	f.Add("0 *- 1 1 0")
+	f.Add("0 0 *-L 1 0")
+	f.Add("+0 0 1 1 0")
+	f.Add("0 0 1 1 0 22-99999")
 
 	g := describeGrammar()
 	parsers := []Parser{
@@ -353,6 +396,12 @@ func FuzzDescribeSpec(f *testing.F) {
 		FullParser(),
 	}
 	f.Fuzz(func(t *testing.T, spec string) {
+		// The parser expands a year range year by year, so a range of
+		// millions of years takes Parse itself minutes. Only a year can have
+		// six digits.
+		if longNumber.MatchString(spec) {
+			return
+		}
 		for _, p := range parsers {
 			if _, err := p.WithHashKey("fuzz").Parse(spec); err != nil {
 				continue
@@ -363,6 +412,10 @@ func FuzzDescribeSpec(f *testing.F) {
 			}
 			if !g.MatchString(got) && !literalForm.MatchString(got) {
 				t.Fatalf("DescribeSpec(%q) = %q, outside the grammar", spec, got)
+			}
+			_, descriptor, fields, yearField, _ := p.specFields(spec)
+			if want := descriptor != "" || literalSyntax(fields, yearField); literalForm.MatchString(got) != want {
+				t.Fatalf("DescribeSpec(%q) = %q: literal form %v, want %v", spec, got, !want, want)
 			}
 		}
 	})

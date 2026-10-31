@@ -5,6 +5,7 @@ package cron
 
 import (
 	"fmt"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -94,8 +95,7 @@ func (p Parser) DescribeSpec(spec string, opts ...DescribeOption) (string, error
 	if descriptor != "" {
 		return descriptor, nil
 	}
-	if containsHashExpr(fields) || slices.ContainsFunc(fields, noValues) || (yearField != "" && noValues(yearField)) ||
-		strings.ContainsAny(fields[3], "LlWw") || strings.ContainsAny(fields[5], "Ll#") {
+	if !allDescribable(fields) || (yearField != "" && !describable(yearField)) {
 		return p.describeLiteral(spec, fields, yearField), nil
 	}
 	day, short := p.describeDays(fields[3], fields[5])
@@ -204,10 +204,12 @@ func describeYears(field string) string {
 			y.vals = append(y.vals, uint(v)) // #nosec G115 -- years are positive
 		}
 	}
+	// Year ranges run ascending and can hold many values: sort only a list,
+	// and compact rather than uniq.
 	if len(y.items) > 1 {
 		slices.Sort(y.vals)
 	}
-	y.vals = uniq(y.vals)
+	y.vals = slices.Compact(y.vals)
 	text, note := y.nums()
 	if len(y.vals) == 1 {
 		return "in year " + text
@@ -232,18 +234,33 @@ func ordinal(n uint) string {
 }
 
 // isWildcard reports a field that selects every value and, like "*", keeps
-// the parser's star bit ("*/1" included).
+// the parser's star bit ("*/1" included). The parser reads a range that
+// starts with "*" or "?" as the star alone, so "*-5" is "*" too.
 func isWildcard(field string) bool {
-	switch field {
-	case "*", "?", "*/1", "?/1":
-		return true
-	}
-	return false
+	rng, step, _ := strings.Cut(field, "/")
+	lo, _, _ := strings.Cut(rng, "-")
+	return (lo == "*" || lo == "?") && (step == "" || step == "1") && !strings.Contains(field, ",")
 }
 
-// noValues reports a field written as commas only, which never fires.
-func noValues(field string) bool {
-	return strings.Trim(field, ",") == ""
+// describableItem is the item syntax the description covers: "*", "?", a
+// number (with an optional "+", as strconv.Atoi reads it) or a three-letter
+// name, or a range of them, each with an optional
+// step. A range that starts with "*" or "?" is the star alone, whatever
+// follows the "-", as the parser reads it. Any other item, including syntax the parser gains later, renders the
+// spec literally, so a gap shows as the literal form, not as a wrong
+// description.
+var describableItem = regexp.MustCompile(`^(?:[*?](?:-[^/]*)?|(?:\+?[0-9]+|[A-Za-z]{3})(?:-(?:\+?[0-9]+|[A-Za-z]{3}))?)(?:/\+?[0-9]+)?$`)
+
+// describable reports a field whose items all have the covered syntax. A
+// field written as commas only never fires and is not describable.
+func describable(field string) bool {
+	items := strings.FieldsFunc(field, func(r rune) bool { return r == ',' })
+	return len(items) > 0 && !slices.ContainsFunc(items, func(it string) bool { return !describableItem.MatchString(it) })
+}
+
+// allDescribable reports fields that are all describable.
+func allDescribable(fields []string) bool {
+	return !slices.ContainsFunc(fields, func(f string) bool { return !describable(f) })
 }
 
 var literalNames = []string{"second", "minute", "hour", "day of month", "month", "day of week"}
@@ -308,7 +325,7 @@ func newTimeField(text, unit, container string, r bounds, limit int) timeField {
 		lowAndHigh := strings.Split(rangeAndStep[0], "-")
 		// The spec parsed, so the bounds and the step are valid.
 		lo, hi, extra, _ := parseRangeBounds(lowAndHigh, r)
-		it := timeItem{lo: lo, hi: hi, step: 1, star: extra != 0, ranged: len(lowAndHigh) == 2}
+		it := timeItem{lo: lo, hi: hi, step: 1, star: extra != 0, ranged: extra == 0 && len(lowAndHigh) == 2}
 		if len(rangeAndStep) == 2 {
 			it.step, _ = mustParseInt(rangeAndStep[1])
 			if len(lowAndHigh) == 1 && !it.star {
