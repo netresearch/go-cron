@@ -139,6 +139,9 @@ which form a spec gets.
   every hour is "on the hour".
 - A range that starts with `*` or `?` reads as the star alone, as the
   parser runs it: `*-5` is `*`, `*-/15` is `*/15`.
+- A list with a star item reads as the star: the star selects every
+  value, so `*,5` is `*`. In the day fields it also keeps the AND under
+  `DowOrDom`, as the parser does: `0 0 *,1 * 1` is "at 00:00 on Monday".
 
 ## Grammar (EBNF)
 

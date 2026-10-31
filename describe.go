@@ -234,12 +234,21 @@ func ordinal(n uint) string {
 }
 
 // isWildcard reports a field that selects every value and, like "*", keeps
-// the parser's star bit ("*/1" included). The parser reads a range that
-// starts with "*" or "?" as the star alone, so "*-5" is "*" too.
+// the parser's star bit: one of its items is the star ("*/1" included).
+// The star selects every value, so the other items add nothing ("*,5" is
+// "*"), and with the bit set the day fields AND under DowOrDom. The parser
+// reads a range that starts with "*" or "?" as the star alone, so "*-5" is
+// "*" too.
 func isWildcard(field string) bool {
-	rng, step, _ := strings.Cut(field, "/")
-	lo, _, _ := strings.Cut(rng, "-")
-	return (lo == "*" || lo == "?") && (step == "" || step == "1") && !strings.Contains(field, ",")
+	for item := range strings.SplitSeq(field, ",") {
+		rng, step, hasStep := strings.Cut(item, "/")
+		lo, _, _ := strings.Cut(rng, "-")
+		n, err := strconv.Atoi(step)
+		if (lo == "*" || lo == "?") && (!hasStep || err == nil && n == 1) {
+			return true
+		}
+	}
+	return false
 }
 
 // describableItem is the item syntax the description covers: "*", "?", a

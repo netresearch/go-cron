@@ -170,6 +170,16 @@ var describeGoldens = []struct {
 	{spec: "0 0 *-3 * *", want: "at 00:00 every day"},
 	{spec: "0 0 ?-3 * 1", want: "at 00:00 on Monday"},
 
+	// A star anywhere in a list selects every value, and the day fields
+	// then AND, as the parser runs them
+	{spec: "0 0 * *,3 *", want: "at 00:00 every day"},
+	{spec: "0 0 *,1 * *", want: "at 00:00 every day"},
+	{spec: "0 0 *,1 * 1", opts: []DescribeOption{withDowOrDom}, want: "at 00:00 on Monday"},
+	{spec: "0 0 1,* * 1", opts: []DescribeOption{WithParseOptions(Minute | Hour | Dom | Month | Dow | DowOrDom | StepWildcard)}, want: "at 00:00 on Monday"},
+	{spec: "0 0 1 * *,1", opts: []DescribeOption{withDowOrDom}, want: "at 00:00 on the 1st of the month"},
+	{spec: "0 0 13 * ?,5", opts: []DescribeOption{withDowOrDom}, want: "at 00:00 on the 13th of the month"},
+	{spec: "0 0 1 * */01", opts: []DescribeOption{withDowOrDom}, want: "at 00:00 on the 1st of the month"},
+
 	// Literal fallback: the whole spec renders field by field
 	{spec: "0 0 L * *", opts: []DescribeOption{WithParseOptions(Minute | Hour | Dom | Month | Dow | DomL)}, want: "minute 0, hour 0, day of month L, month *, day of week *", literal: true},
 	{spec: "0 0 * * 5#3", opts: []DescribeOption{WithParseOptions(Minute | Hour | Dom | Month | Dow | DowNth)}, want: "minute 0, hour 0, day of month *, month *, day of week 5#3", literal: true},
