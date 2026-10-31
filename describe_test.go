@@ -240,3 +240,37 @@ func TestParserDescribeSpec(t *testing.T) {
 	}
 }
 
+// literalForm matches the field-by-field fallback and bare descriptors.
+var literalForm = regexp.MustCompile(`^(?:@|(?:second|minute|hour|day of month|month|day of week|year) )`)
+
+// FuzzDescribeSpec checks that every spec that parses gets a description, and
+// that it is in the grammar or the literal fallback.
+func FuzzDescribeSpec(f *testing.F) {
+	for _, tt := range describeGoldens {
+		f.Add(tt.spec)
+	}
+	f.Add("5 , , * * *")
+	f.Add("1,,2 * * * *")
+	f.Add("0-59 0-23 * * *")
+
+	g := describeGrammar()
+	parsers := []Parser{
+		NewParser(Minute | Hour | Dom | Month | Dow | Descriptor),
+		NewParser(Second | Minute | Hour | Dom | Month | Dow | Descriptor),
+		FullParser(),
+	}
+	f.Fuzz(func(t *testing.T, spec string) {
+		for _, p := range parsers {
+			if _, err := p.WithHashKey("fuzz").Parse(spec); err != nil {
+				continue
+			}
+			got, err := p.DescribeSpec(spec)
+			if err != nil {
+				t.Fatalf("DescribeSpec(%q): unexpected error %v", spec, err)
+			}
+			if !g.MatchString(got) && !literalForm.MatchString(got) {
+				t.Fatalf("DescribeSpec(%q) = %q, outside the grammar", spec, got)
+			}
+		}
+	})
+}
