@@ -68,10 +68,8 @@ func DescribeSpec(spec string, opts ...DescribeOption) (string, error) {
 
 // DescribeSpec returns an English description of spec as p parses it, or the
 // parse error. The description follows the grammar in docs/DESCRIBE.md and
-// leaves out the time zone; callers show the location beside it. A spec with
-// a restricted day, month or year field, or with H, renders literally, field
-// by field ("minute 0, hour 9, day of month *, month *, day of week 1-5"),
-// and a descriptor as written ("@daily"), with a nil error.
+// leaves out the time zone; callers show the location beside it. A valid spec
+// always gets a description and a nil error.
 func (p Parser) DescribeSpec(spec string, opts ...DescribeOption) (string, error) {
 	if _, err := p.Parse(spec); err != nil {
 		return "", err

@@ -33,11 +33,7 @@ func WithParseOptions(o ParseOption) DescribeOption // package function only
   from the parsed schedule, because the parsed bits have lost what was
   written (`*/15` and `0,15,30,45` parse the same, but only one has a step).
 - Descriptions carry no time zone; callers show the location beside them.
-- **Coverage:** the second, minute and hour fields. A spec whose day of
-  month, month, day of week or year is restricted, and a spec with `H`,
-  render literally, field by field: `0 9 * * 1-5` → "minute 0, hour 9, day
-  of month *, month *, day of week 1-5". A descriptor renders as written
-  (`@daily`).
+- **Coverage:** the second, minute and hour fields.
 
 ## Clock forms
 
@@ -91,7 +87,7 @@ The productions below are what `DescribeSpec` produces.
 
 ```ebnf
 schedule  = time
-          | literal ;                                 (* the literal fallback *)
+          | literal ;                                 (* field by field, as written *)
 
 time      = "at " , clocks , " every day"
           | "on the hour"
