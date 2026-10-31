@@ -33,8 +33,12 @@ type describeConfig struct {
 // DescribeOption configures DescribeSpec.
 type DescribeOption func(*describeConfig)
 
-// WithClockForm sets how clock times are written. The default is Clock24.
+// WithClockForm sets how clock times are written. The default is Clock24,
+// which an unknown form also gets.
 func WithClockForm(f ClockForm) DescribeOption {
+	if f < Clock24 || f > Clock12 {
+		f = Clock24
+	}
 	return func(c *describeConfig) { c.clock = f }
 }
 
@@ -69,8 +73,15 @@ func DescribeSpec(spec string, opts ...DescribeOption) (string, error) {
 // DescribeSpec returns an English description of spec as p parses it, or the
 // parse error. The description follows the grammar in docs/DESCRIBE.md and
 // leaves out the time zone; callers show the location beside it. A valid spec
-// always gets a description and a nil error.
+// always gets a description and a nil error. Specs outside the fields covered
+// so far (see docs/DESCRIBE.md) get each written field by name, as written:
+// "minute 0, hour 9, day of month *, month *, day of week 1-5". A descriptor
+// such as "@daily" is returned as written. H needs no hash key here: the
+// description does not depend on it.
 func (p Parser) DescribeSpec(spec string, opts ...DescribeOption) (string, error) {
+	if p.hashKey == "" {
+		p.hashKey = "describe"
+	}
 	if _, err := p.Parse(spec); err != nil {
 		return "", err
 	}
@@ -81,7 +92,8 @@ func (p Parser) DescribeSpec(spec string, opts ...DescribeOption) (string, error
 	if descriptor != "" {
 		return descriptor, nil
 	}
-	if containsHashExpr(fields) || !isWildcard(fields[3]) || !isWildcard(fields[4]) ||
+	if containsHashExpr(fields) || slices.ContainsFunc(fields[:3], noValues) ||
+		!isWildcard(fields[3]) || !isWildcard(fields[4]) ||
 		!isWildcard(fields[5]) || (yearField != "" && !isWildcard(yearField)) {
 		return p.describeLiteral(spec, fields, yearField), nil
 	}
@@ -96,6 +108,11 @@ func isWildcard(field string) bool {
 		return true
 	}
 	return false
+}
+
+// noValues reports a field written as commas only, which never fires.
+func noValues(field string) bool {
+	return strings.Trim(field, ",") == ""
 }
 
 var literalNames = []string{"second", "minute", "hour", "day of month", "month", "day of week"}
@@ -139,7 +156,7 @@ type timeField struct {
 	r         bounds
 	limit     int // values listed before the list is cut short
 	items     []timeItem
-	vals      []uint // values in firing order, a wrapped range past the field's end
+	vals      []uint // values once each: sorted for a list, else in firing order
 }
 
 func newTimeField(text, unit, container string, r bounds, limit int) timeField {
@@ -159,8 +176,8 @@ func newTimeField(text, unit, container string, r bounds, limit int) timeField {
 		f.items = append(f.items, it)
 		f.vals = append(f.vals, it.runs(r)...)
 	}
-	if f.stepped() && len(f.items) > 1 {
-		slices.Sort(f.vals) // a list mixing steps and values renders the union
+	if len(f.items) > 1 {
+		slices.Sort(f.vals) // a list renders the union of its items
 	}
 	f.vals = uniq(f.vals)
 	return f
@@ -193,29 +210,18 @@ func (f timeField) stepped() bool {
 	return slices.ContainsFunc(f.items, func(it timeItem) bool { return it.star || it.step > 1 })
 }
 
-// every reports a field that fires on every value ("*", "*/1").
+// every reports a field that fires on every value ("*", "*/1", "0-59").
 func (f timeField) every() bool {
-	return len(f.items) == 1 && f.items[0].star && f.items[0].step == 1
+	return len(f.vals) == int(f.r.max-f.r.min+1)
 }
 
 // nums renders the field's values ("0, 15, 30 and 45", "9 thru 17") and, for
-// a step whose list is cut short, its interval note.
+// a step whose list is cut short, its interval note. Only a single step is
+// cut short: its note restores the values left out.
 func (f timeField) nums() (text, note string) {
-	if !f.stepped() {
-		var words []string
-		for _, it := range f.items {
-			switch {
-			case !it.ranged:
-				words = append(words, strconv.Itoa(int(it.lo)))
-			case it.lo > it.hi:
-				// A wrapped range reads as its two parts: "50 thru 59 and 0 thru 10".
-				words = append(words, rangeWords(it.lo, f.r.max)...)
-				words = append(words, rangeWords(f.r.min, it.hi)...)
-			default:
-				words = append(words, rangeWords(it.lo, it.hi)...)
-			}
-		}
-		return andList(words), ""
+	if !f.stepped() || len(f.items) > 1 {
+		// A wrapped range reads as its two parts: "50 thru 59 and 0 thru 10".
+		return andList(runWords(f.vals)), ""
 	}
 	words := make([]string, len(f.vals))
 	for i, v := range f.vals {
@@ -227,9 +233,6 @@ func (f timeField) nums() (text, note string) {
 		return andList(words), ""
 	}
 	text = strings.Join(words[:3], ", ") + ", … " + words[len(words)-1]
-	if len(f.items) > 1 {
-		return text, ""
-	}
 	it := f.items[0]
 	note = "every " + f.unit
 	if it.step > 1 {
@@ -239,6 +242,20 @@ func (f timeField) nums() (text, note string) {
 		note += ", starting over each " + f.container
 	}
 	return text, note
+}
+
+// runWords names vals as runs of consecutive values: "0 thru 10, 15 and 30".
+func runWords(vals []uint) []string {
+	var words []string
+	for i := 0; i < len(vals); {
+		j := i
+		for j+1 < len(vals) && vals[j+1] == vals[j]+1 {
+			j++
+		}
+		words = append(words, rangeWords(vals[i], vals[j])...)
+		i = j + 1
+	}
+	return words
 }
 
 // rangeWords names a range: "5", "5 and 6" when adjacent, or "5 thru 9".
@@ -300,10 +317,8 @@ func describeClocks(s uint, minute, hour timeField, form ClockForm) (out string,
 		}
 		return "at " + andList(clocks) + " every day", true
 	}
-	// Several minutes over one hour range: the first and last run of the
-	// day lead.
-	if it := hour.items[0]; s == 0 && len(hour.items) == 1 && it.ranged && it.step == 1 &&
-		it.lo < it.hi && len(minute.vals) > 1 && !minute.every() {
+	if isSpan(s, minute, hour) {
+		it := hour.items[0]
 		text, note := minute.nums()
 		return "from " + clockTime(it.lo, slices.Min(minute.vals), 0, form) +
 			" thru " + clockTime(it.hi, slices.Max(minute.vals), 0, form) +
@@ -312,8 +327,16 @@ func describeClocks(s uint, minute, hour timeField, form ClockForm) (out string,
 	return "", false
 }
 
+// isSpan reports several minutes over one hour range short of the whole
+// day, which the span form describes: the first and last run of the day lead.
+func isSpan(s uint, minute, hour timeField) bool {
+	it := hour.items[0]
+	return s == 0 && len(hour.items) == 1 && it.ranged && it.step == 1 && it.lo < it.hi &&
+		!hour.every() && len(minute.vals) > 1 && !minute.every()
+}
+
 // describePerUnit describes the time fields finest first: "at 15 seconds past
-// minutes 0, 4, 8, … 56 of every hour", "every minute of hour 9".
+// minutes 0, 4, 8, … 56 in every hour", "every minute for hour 9".
 func describePerUnit(sec, minute, hour timeField) string {
 	ps := []timeField{minute, hour}
 	if len(sec.vals) != 1 || sec.vals[0] != 0 {
@@ -322,6 +345,10 @@ func describePerUnit(sec, minute, hour timeField) string {
 	// "every minute" already covers every hour.
 	for n := len(ps); n > 1 && ps[n-1].every() && ps[n-2].every(); n-- {
 		ps = ps[:n-1]
+	}
+	// "every second" already covers every minute: "every second for hour 9".
+	for len(ps) > 1 && ps[0].every() && ps[1].every() {
+		ps = slices.Delete(ps, 1, 2)
 	}
 
 	if isTheHour(ps) {
@@ -341,7 +368,7 @@ func describePerUnit(sec, minute, hour timeField) string {
 		out = "at " + text + " " + unit + " past " + pastClause(ps[1:], &notes)
 	}
 	if last := ps[len(ps)-1]; last.unit == "hour" && last.stepped() && !last.every() {
-		out += " of every day"
+		out += " in every day"
 	}
 	return out + withNote(strings.Join(notes, "; "))
 }
@@ -353,7 +380,7 @@ func isTheHour(fs []timeField) bool {
 }
 
 // pastClause names what leading values fall past: "the minute", "the hour",
-// or the coarser fields joined with "of".
+// or the coarser fields joined with "for" or "in".
 func pastClause(rest []timeField, notes *[]string) string {
 	switch {
 	case len(rest) == 1 && rest[0].every():
@@ -364,15 +391,23 @@ func pastClause(rest []timeField, notes *[]string) string {
 	return joinPhrases(rest, notes)
 }
 
-// joinPhrases joins the fields' phrases with "of" and collects their notes.
+// joinPhrases joins the fields' phrases and collects their notes: "for"
+// before a value ("for hour 9"), "in" before a recurrence ("in every hour").
 func joinPhrases(fs []timeField, notes *[]string) string {
-	parts := make([]string, len(fs))
+	var out strings.Builder
 	for i, f := range fs {
-		var note string
-		parts[i], note = f.phrase()
+		text, note := f.phrase()
 		*notes = appendNote(*notes, note)
+		switch {
+		case i == 0:
+		case f.every():
+			out.WriteString(" in ")
+		default:
+			out.WriteString(" for ")
+		}
+		out.WriteString(text)
 	}
-	return strings.Join(parts, " of ")
+	return out.String()
 }
 
 func appendNote(notes []string, note string) []string {

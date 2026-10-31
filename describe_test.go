@@ -41,7 +41,23 @@ var describeGoldens = []struct {
 	{spec: "0 * * * *", want: "on the hour"},
 	{spec: "*/60 * * * *", opts: []DescribeOption{WithParseOptions(Minute | Hour | Dom | Month | Dow | LenientSteps)}, want: "on the hour"},
 	{spec: "* * * * *", want: "every minute"},
-	{spec: "* 9 * * *", want: "every minute of hour 9"},
+	{spec: "* 9 * * *", want: "every minute for hour 9"},
+
+	// Lists of several items render their values sorted, once each
+	{spec: "*/10,5 * * * *", want: "at 0, 5, 10, 20, 30, 40 and 50 minutes past the hour"},
+	{spec: "0-10,*/15 * * * *", want: "at 0 thru 10, 15, 30 and 45 minutes past the hour"},
+	{spec: "1-5,3-7 * * * *", want: "at 1 thru 7 minutes past the hour"},
+	{spec: "1,1 * * * *", want: "at 1 minute past the hour"},
+	{spec: "30,0 * * * *", want: "at 0 and 30 minutes past the hour"},
+	{spec: "* 1,1 * * *", want: "every minute for hour 1"},
+	{spec: "1,3,5,7,9,11,13,15 * * * *", want: "at 1, 3, 5, 7, 9, 11, 13 and 15 minutes past the hour"},
+
+	// A field that covers its whole range is every value
+	{spec: "*/1,5 * * * *", want: "every minute"},
+	{spec: "0 0-23 * * *", want: "on the hour"},
+	{spec: "0 */1,* * * *", want: "on the hour"},
+	{spec: "* 0-23 * * *", want: "every minute"},
+	{spec: "*/15 0-23 * * *", want: "at 0, 15, 30 and 45 minutes past the hour"},
 
 	// Clock times
 	{spec: "5/15 2 * * *", want: "at 02:05, 02:20, 02:35 and 02:50 every day"},
@@ -55,6 +71,8 @@ var describeGoldens = []struct {
 	{spec: "0 12 * * *", want: "at 12:00 every day"},
 	{spec: "0 12 * * *", opts: []DescribeOption{WithClockForm(Clock24Words)}, want: "at noon every day"},
 	{spec: "CRON_TZ=UTC 0 0 * * *", want: "at 00:00 every day"},
+	{spec: "0 17,9 * * *", want: "at 09:00 and 17:00 every day"},
+	{spec: "0 0,12,13 * * *", opts: []DescribeOption{WithClockForm(ClockForm(99))}, want: "at 00:00, 12:00 and 13:00 every day"},
 
 	// Span form: several minutes over an hour range
 	{spec: "*/7 9-17 * * *", want: "from 09:00 thru 17:56 every day, at 0, 7, 14, … 56 minutes past each hour (every 7 minutes, starting over each hour)"},
@@ -63,13 +81,16 @@ var describeGoldens = []struct {
 	{spec: "*/30 0-5 * * *", opts: []DescribeOption{WithClockForm(Clock24Words)}, want: "from midnight thru 05:30 every day, at 0 and 30 minutes past each hour"},
 
 	// Hour lists and steps
-	{spec: "30 */2 * * *", want: "at 30 minutes past hours 0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20 and 22 of every day"},
+	{spec: "30 */2 * * *", want: "at 30 minutes past hours 0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20 and 22 in every day"},
 	{spec: "0,30 9,17 * * *", want: "at 0 and 30 minutes past hours 9 and 17"},
 
 	// Seconds
-	{spec: "15 */4 * * * *", opts: []DescribeOption{withSeconds}, want: "at 15 seconds past minutes 0, 4, 8, … 56 of every hour (every 4 minutes)"},
-	{spec: "*/20 30 * * * *", opts: []DescribeOption{withSeconds}, want: "at 0, 20 and 40 seconds past minute 30 of every hour"},
+	{spec: "15 */4 * * * *", opts: []DescribeOption{withSeconds}, want: "at 15 seconds past minutes 0, 4, 8, … 56 in every hour (every 4 minutes)"},
+	{spec: "*/20 30 * * * *", opts: []DescribeOption{withSeconds}, want: "at 0, 20 and 40 seconds past minute 30 in every hour"},
 	{spec: "* * * * * *", opts: []DescribeOption{withSeconds}, want: "every second"},
+	{spec: "* * 9 * * *", opts: []DescribeOption{withSeconds}, want: "every second for hour 9"},
+	{spec: "* 0-59 9 * * *", opts: []DescribeOption{withSeconds}, want: "every second for hour 9"},
+	{spec: "* 30 * * * *", opts: []DescribeOption{withSeconds}, want: "every second for minute 30 in every hour"},
 	{spec: "5 * * * * *", opts: []DescribeOption{withSeconds}, want: "at 5 seconds past the minute"},
 	{spec: "5 0 * * * *", opts: []DescribeOption{withSeconds}, want: "at 5 seconds past the hour"},
 	{spec: "15 30 2 * * *", opts: []DescribeOption{withSeconds}, want: "at 02:30:15 every day"},
@@ -86,6 +107,9 @@ var describeGoldens = []struct {
 	{spec: "0 9 * * 1-5", want: "minute 0, hour 9, day of month *, month *, day of week 1-5", literal: true},
 	{spec: "15 0 9 1 * *", opts: []DescribeOption{withSeconds}, want: "second 15, minute 0, hour 9, day of month 1, month *, day of week *", literal: true},
 	{spec: "@daily", want: "@daily", literal: true},
+	{spec: "* , * * *", want: "minute *, hour ,, day of month *, month *, day of week *", literal: true},
+	{spec: ", * * * *", want: "minute ,, hour *, day of month *, month *, day of week *", literal: true},
+	{spec: "H/15 * * * *", opts: []DescribeOption{WithParseOptions(Minute | Hour | Dom | Month | Dow | Hash)}, want: "minute H/15, hour *, day of month *, month *, day of week *", literal: true},
 }
 
 func TestDescribeSpec(t *testing.T) {
@@ -116,7 +140,9 @@ func describeGrammar() *regexp.Regexp {
 	vlist := alt(list, num+", "+num+", "+num+", … "+num)
 	unitSg := alt("second", "minute", "hour")
 	unitPl := alt("seconds", "minutes", "hours")
-	unit := alt(alt(unitSg, unitPl)+" "+vlist, "every "+unitSg, "every day")
+	unit := alt(unitSg, unitPl) + " " + vlist
+	every := alt("every "+unitSg, "every day")
+	join := "(?: for " + unit + "| in " + every + ")*"
 	tvals := vlist + " " + alt("seconds?", "minutes?")
 	ival := "every " + alt(unitSg, num+" "+unitPl) +
 		"(?:, starting over each " + alt("minute", "hour", "day") + ")?"
@@ -125,8 +151,8 @@ func describeGrammar() *regexp.Regexp {
 		"at "+andList(clock)+" every day",
 		"on the hour",
 		"from "+clock+" thru "+clock+" every day, at "+tvals+" past each hour(?:"+note+")?",
-		"at "+tvals+" past "+alt("the "+alt("minute", "hour"), unit+"(?: of "+unit+")*")+"(?:"+note+")?",
-		"every "+unitSg+"(?: of "+unit+")*(?:"+note+")?",
+		"at "+tvals+" past "+alt("the "+alt("minute", "hour"), alt(unit, every)+join)+"(?:"+note+")?",
+		"every "+unitSg+join+"(?:"+note+")?",
 	)
 	return regexp.MustCompile("^" + time + "$")
 }
@@ -203,4 +229,14 @@ func TestParserDescribeSpec(t *testing.T) {
 	if want := "minute H/15, hour *, day of month *, month *, day of week *"; got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
+
+	// No hash key: the description does not depend on one.
+	got, err = FullParser().DescribeSpec("H H * * *")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "minute H, hour H, day of month *, month *, day of week *"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
 }
+
