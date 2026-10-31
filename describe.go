@@ -91,7 +91,15 @@ func (p Parser) DescribeSpec(spec string, opts ...DescribeOption) (string, error
 	return describeTime(fields, newDescribeConfig(opts).clock), nil
 }
 
-func isWildcard(field string) bool { return field == "*" || field == "?" }
+// isWildcard reports a field that selects every value and, like "*", keeps
+// the parser's star bit ("*/1" included).
+func isWildcard(field string) bool {
+	switch field {
+	case "*", "?", "*/1", "?/1":
+		return true
+	}
+	return false
+}
 
 var literalNames = []string{"second", "minute", "hour", "day of month", "month", "day of week"}
 
@@ -199,14 +207,15 @@ func (f timeField) nums() (text, note string) {
 	if !f.stepped() {
 		var words []string
 		for _, it := range f.items {
-			lo, hi := strconv.Itoa(int(it.lo)), strconv.Itoa(int(it.hi))
 			switch {
-			case !it.ranged || it.lo == it.hi:
-				words = append(words, lo)
-			case it.hi == it.lo+1 || (it.lo == f.r.max && it.hi == f.r.min):
-				words = append(words, lo, hi)
+			case !it.ranged:
+				words = append(words, strconv.Itoa(int(it.lo)))
+			case it.lo > it.hi:
+				// A wrapped range reads as its two parts: "50 thru 59 and 0 thru 10".
+				words = append(words, rangeWords(it.lo, f.r.max)...)
+				words = append(words, rangeWords(f.r.min, it.hi)...)
 			default:
-				words = append(words, lo+" thru "+hi)
+				words = append(words, rangeWords(it.lo, it.hi)...)
 			}
 		}
 		return andList(words), ""
@@ -215,7 +224,9 @@ func (f timeField) nums() (text, note string) {
 	for i, v := range f.vals {
 		words[i] = strconv.Itoa(int(v))
 	}
-	if len(words) <= f.limit {
+	// A wrapped step lists in full: its gap is not at the boundary, so the
+	// "starting over" note cannot describe it.
+	if len(words) <= f.limit || (len(f.items) == 1 && f.items[0].lo > f.items[0].hi) {
 		return andList(words), ""
 	}
 	text = strings.Join(words[:3], ", ") + ", … " + words[len(words)-1]
@@ -231,6 +242,18 @@ func (f timeField) nums() (text, note string) {
 		note += ", starting over each " + f.container
 	}
 	return text, note
+}
+
+// rangeWords names a range: "5", "5 and 6" when adjacent, or "5 thru 9".
+func rangeWords(lo, hi uint) []string {
+	l, h := strconv.Itoa(int(lo)), strconv.Itoa(int(hi))
+	switch hi {
+	case lo:
+		return []string{l}
+	case lo + 1:
+		return []string{l, h}
+	}
+	return []string{l + " thru " + h}
 }
 
 // phrase renders the field as "minutes 0, 4, 8, … 56" or "every minute".

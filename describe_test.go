@@ -31,6 +31,11 @@ var describeGoldens = []struct {
 	{spec: "5-5 * * * *", want: "at 5 minutes past the hour"},
 	{spec: "5/1 * * * *", want: "at 5 thru 59 minutes past the hour"},
 	{spec: "0 5/1 * * *", want: "at 0 minutes past hours 5 thru 23"},
+	{spec: "50-10 * * * *", want: "at 50 thru 59 and 0 thru 10 minutes past the hour"},
+	{spec: "58-1 * * * *", want: "at 58, 59, 0 and 1 minutes past the hour"},
+	{spec: "50-10/2 * * * *", want: "at 50, 52, 54, 56, 58, 0, 2, 4, 6, 8 and 10 minutes past the hour"},
+	{spec: "*/7 22-2 * * *", want: "at 0, 7, 14, … 56 minutes past hours 22, 23 and 0 thru 2 (every 7 minutes, starting over each hour)"},
+	{spec: "0 0 */1 * *", want: "at 00:00 every day"},
 	{spec: "5 * * * *", want: "at 5 minutes past the hour"},
 	{spec: "1 * * * *", want: "at 1 minute past the hour"},
 	{spec: "0 * * * *", want: "on the hour"},
@@ -55,6 +60,7 @@ var describeGoldens = []struct {
 	{spec: "*/7 9-17 * * *", want: "from 09:00 thru 17:56 every day, at 0, 7, 14, … 56 minutes past each hour (every 7 minutes, starting over each hour)"},
 	{spec: "*/7 9-17 * * *", opts: []DescribeOption{WithClockForm(Clock12)}, want: "from 9 am thru 5:56 pm every day, at 0, 7, 14, … 56 minutes past each hour (every 7 minutes, starting over each hour)"},
 	{spec: "0,30 9-17 * * *", want: "from 09:00 thru 17:30 every day, at 0 and 30 minutes past each hour"},
+	{spec: "*/30 0-5 * * *", opts: []DescribeOption{WithClockForm(Clock24Words)}, want: "from midnight thru 05:30 every day, at 0 and 30 minutes past each hour"},
 
 	// Hour lists and steps
 	{spec: "30 */2 * * *", want: "at 30 minutes past hours 0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20 and 22 of every day"},
@@ -112,8 +118,8 @@ func describeGrammar() *regexp.Regexp {
 	unitPl := alt("seconds", "minutes", "hours")
 	unit := alt(alt(unitSg, unitPl)+" "+vlist, "every "+unitSg, "every day")
 	tvals := vlist + " " + alt("seconds?", "minutes?")
-	ival := "every " + alt(unitSg, "day", "year", num+" "+alt(unitPl, "days", "years")) +
-		"(?:, starting over each " + alt("minute", "hour", "day", "month") + ")?"
+	ival := "every " + alt(unitSg, num+" "+unitPl) +
+		"(?:, starting over each " + alt("minute", "hour", "day") + ")?"
 	note := ` \(` + ival + "(?:; " + ival + `)*\)`
 	time := alt(
 		"at "+andList(clock)+" every day",
@@ -161,6 +167,15 @@ func TestParserDescribeSpec(t *testing.T) {
 		t.Fatal(err)
 	}
 	if want := "at 02:30:15 every day"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+
+	// YearOptional with no year written: the time-only description.
+	got, err = FullParser().DescribeSpec("0 0 * * *")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "at 00:00 every day"; got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
 

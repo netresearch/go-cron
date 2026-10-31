@@ -80,7 +80,9 @@ which form a spec gets.
 - **Commas.** No comma before a trailing clause such as "every day". A comma
   stays after the opening span, between list items, and inside parentheses.
 - A range reads "thru" ("0 thru 5"); a range of two adjacent values names
-  both ("5 and 6"). Minute 0 of every hour is "on the hour".
+  both ("5 and 6"). A wrapped range reads as its two parts ("50 thru 59 and
+  0 thru 10"), and a wrapped step lists its values in full. Minute 0 of
+  every hour is "on the hour".
 
 ## Grammar (EBNF)
 
@@ -88,10 +90,10 @@ The productions below are what `DescribeSpec` produces today.
 `TestDescribeSpecGrammar` checks every golden description against them.
 
 ```ebnf
-schedule  = time , [ " every day" ]
+schedule  = time
           | literal ;                                 (* not yet covered *)
 
-time      = "at " , clocks
+time      = "at " , clocks , " every day"
           | "on the hour"
           | "from " , clock , " thru " , clock , " every day" , ", " , each , [ note ]
           | perunit , [ note ]
