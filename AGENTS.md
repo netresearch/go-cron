@@ -137,6 +137,7 @@ import (
 | `chain.go` | Job wrappers: `Recover`, `SkipIfStillRunning`, `Timeout`, etc. |
 | `retry.go` | `RetryWithBackoff`, `RetryOnError`, `CircuitBreaker` wrappers |
 | `validate.go` | `ValidateSpec`, `ValidateSpecWith`, `AnalyzeSpec` for expression validation |
+| `describe.go` | `DescribeSpec` English descriptions of specs (see `docs/DESCRIBE.md`) |
 | `introspect.go` | Schedule introspection: `Bounds()`, `Fields()`, `Matches()` |
 | `observability.go` | `ObservabilityHooks` for metrics integration |
 | `logger.go` | Logger interface compatible with go-logr/logr |
@@ -188,6 +189,15 @@ sentinel (ADR-009); `request[T, R]` generic channel request/response pattern;
 paths. Verify relevance before acting; acknowledge unrelated noise on CodSpeed rather
 than chasing it.
 
+## Schedule descriptions
+
+`DescribeSpec` wording is binding through tests, and its rules, grammar and
+method are in `docs/DESCRIBE.md`. When a change alters what a spec means
+(a parse option, a field form), extend in `describe_test.go`:
+`describeGoldens` (the expected descriptions) and `describeGrammar` (the
+EBNF as a regexp; every description must match), and update the EBNF in
+`docs/DESCRIBE.md` to match.
+
 ## Documentation index
 
 | Document | Purpose |
@@ -197,6 +207,7 @@ than chasing it.
 | `docs/MIGRATION.md` | Migration guide from robfig/cron |
 | `docs/API_REFERENCE.md` | Public API documentation |
 | `docs/DST_HANDLING.md` | Daylight saving time behavior |
+| `docs/DESCRIBE.md` | `DescribeSpec` wording, grammar (EBNF), reader-trial method |
 | `docs/TESTING_GUIDE.md` | Testing strategies and FakeClock usage |
 | `docs/OPERATIONS.md` | Production deployment, shutdown, monitoring |
 | `docs/TROUBLESHOOTING.md` | Common issues and debugging techniques |

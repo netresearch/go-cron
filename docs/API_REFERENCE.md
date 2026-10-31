@@ -2972,6 +2972,31 @@ The seed (e.g., job name) produces deterministic, distributed scheduling times.
 for other field counts it is empty. `NextRun` reflects the chosen values. See
 [Hash expressions](#hash-expressions-h).
 
+### DescribeSpec
+
+```go
+func DescribeSpec(spec string, opts ...DescribeOption) (string, error)
+func (p Parser) DescribeSpec(spec string, opts ...DescribeOption) (string, error)
+```
+
+DescribeSpec returns an English description of a cron expression, or the parse
+error. The package function parses as `AnalyzeSpec` does (the standard parser
+unless `WithParseOptions` is given); the `Parser` method uses the parser's own
+settings. `WithClockForm` picks `Clock24` (default), `Clock24Words` or
+`Clock12`. Descriptions carry no time zone. A valid spec always gets a
+description. Specs outside the fields covered so far, and specs with `H`, get
+each written field by name ("minute 0, hour 9, day of month *, month *, day of
+week 1-5"); a descriptor is returned as written. `H` needs no hash key. The
+wording and its grammar are in [DESCRIBE.md](DESCRIBE.md).
+
+**Example:**
+```go
+desc, err := cron.DescribeSpec("0 22-2/2 * * *")
+// "at 22:00, 00:00 and 02:00 every day"
+desc, err = cron.DescribeSpec("0 22-2/2 * * *", cron.WithClockForm(cron.Clock12))
+// "at 10 pm, midnight and 2 am every day"
+```
+
 ### WorkflowExecutionID
 
 ```go
