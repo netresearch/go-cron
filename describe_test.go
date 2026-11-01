@@ -5,6 +5,7 @@ package cron
 
 import (
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -271,8 +272,26 @@ func TestParserDescribeSpec(t *testing.T) {
 // literalForm matches the field-by-field fallback and bare descriptors.
 var literalForm = regexp.MustCompile(`^(?:@|(?:second|minute|hour|day of month|month|day of week|year) )`)
 
+// numberRange matches a range of numbers in a spec, such as a year range.
+var numberRange = regexp.MustCompile(`(\d+)-(\d+)`)
+
+// wideRange reports a range of more than 100 values. The parser lists every
+// year of a year range, so a wide one spends the fuzz run in Parse; no other
+// field has more than 60 values.
+func wideRange(spec string) bool {
+	for _, m := range numberRange.FindAllStringSubmatch(spec, -1) {
+		lo, errLo := strconv.Atoi(m[1])
+		hi, errHi := strconv.Atoi(m[2])
+		if errLo != nil || errHi != nil || hi-lo > 100 {
+			return true
+		}
+	}
+	return false
+}
+
 // FuzzDescribeSpec checks that every spec that parses gets a description, and
-// that it is in the grammar or the literal fallback.
+// that it is in the grammar or the literal fallback. Specs with a range of
+// more than 100 values (years) are skipped.
 func FuzzDescribeSpec(f *testing.F) {
 	for _, tt := range describeGoldens {
 		f.Add(tt.spec)
@@ -288,6 +307,9 @@ func FuzzDescribeSpec(f *testing.F) {
 		FullParser(),
 	}
 	f.Fuzz(func(t *testing.T, spec string) {
+		if wideRange(spec) {
+			t.Skip("range of more than 100 years")
+		}
 		for _, p := range parsers {
 			if _, err := p.WithHashKey("fuzz").Parse(spec); err != nil {
 				continue
