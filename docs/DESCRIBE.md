@@ -60,7 +60,7 @@ which form a spec gets. Each has an ID, which the grammar cites.
 
 | ID | Rule |
 |---|---|
-| T1 | Values lead. Seconds and minutes list up to 6 values. Past that, evenly spaced values show the first 3, "…", the last, and a note: "(every 7 minutes, starting over each hour)". "starting over each …" appears when the gap across the boundary differs from the step. Hours follow R8, R9 and T4 |
+| T1 | Values lead. Seconds and minutes list up to 6 values. Past that, evenly spaced values show the first 3, "…", the last, and a note: "(every 7 minutes, starting over each hour)". Two fields cut short share one parenthesis, joined with "; ". "starting over each …" appears when the gap across the boundary differs from the step. Hours follow R8, R9 and T4 |
 | T2 | A list renders the union of its values, sorted and once each, with consecutive values as a range. A list that a step describes exactly renders as that step (`1,3,5,7,9,11,13,15` reads like `1-15/2`) |
 | T3 | A field that covers its range is every value. After a leading "every …", such fields are left out |
 | T4 | Clock times when the second is fixed and either one hour has up to 6 minutes, or one minute falls on hours written as a list (all values) or a range of up to 6 hours |
@@ -83,7 +83,11 @@ which form a spec gets. Each has an ID, which the grammar cites.
 | R6 | Seconds fall "within" a minute. Minutes of the generic hour are "past the hour"; in a named hour they fall "during" it |
 | R7 | A fixed second under a fixed minute and hour reads as a clock time ("at 2:30:15 am") |
 | R8 | An hour step past 6 values reads as the step. It states the start, with the minute folded in ("every 2 hours starting at 12:30 am in every day"), and the end when the range isn't the whole day or the step doesn't divide 24 ("every 2 hours from 9:15 am thru 11:15 pm in every day") |
-| R9 | An hour range past 6 values states its start and end: "at the top of every hour from 9 am thru 5 pm every day" |
+| R9 | One minute on an hour range past 6 values states the range's start and end: "at the top of every hour from 9 am thru 5 pm every day", "at 30 minutes past every hour from 9 am thru 5 pm every day" |
+| R10 | An hour step of up to 6 values (`*/6`) names its hours, followed by "in every day": "at the top of the midnight, 6 am, noon, and 6 pm hours in every day", "at minutes 0 and 30 during the … hours in every day" |
+| R11 | Several minutes, or every minute, on an hour step past 6 values: the minutes, then the step: "at minutes 0, 15, 30, and 45 every 2 hours starting with the midnight hour in every day", "every minute every 3 hours from the 1 am hour thru the 10 pm hour in every day" |
+| R12 | Every minute or every second on an hour range past 6 values states the first and last run: "every minute from 9 am thru 5:59 pm every day". Several minutes on a wrapped range past 6 values take the span form |
+| C1 | Seconds other than 0 lead: "every second", "at 5 seconds", "at seconds 0 and 30". The minutes join with "within" ("within a minute", "within every minute", "within minute 30", "within minutes 0 and 30"), minute 0 with "past the top of", and after "every second" with "for" ("for minute 30"). The hours then join as for minutes: "in every hour", "during the 9 am hour", R9–R12 |
 
 ## Grammar (EBNF)
 
@@ -95,7 +99,7 @@ The productions below are what `DescribeSpec` produces, in
 form (G10) and descriptors are outside the grammar.
 
 What a context-free grammar can't check is kept by the goldens: the value
-limits (T1, T4, R8, R9), the hour order (T6) and the values themselves (G1).
+limits (T1, T4, R8–R12), the hour order (T6) and the values themselves (G1).
 
 ```ebnf
 // "x" literal, [x] optional, (x)* repeat, a | b choice.
@@ -105,36 +109,56 @@ start: schedule
 
 schedule: time [note]                                                     // G7
 
-time: clocktime | toptime | perunit | span | lead | hourstep
+time: clocktime | span | hourstep | parts
 
-clocktime: "at" list{clock} [everyday]                                    // T4, R7, J1
+// T4, R1, R2, R7, J1: set clock times
+clocktime: "at" list{clock} [everyday]
 
-toptime: "at" "the" "top" "of" "every" "hour" [hourrange] [everyday]      // R4, R9, J1
-       | "at" "the" "top" "of" hours "in" "every" "day"                   // R3, J1
+// T5, R12: span form, the first and last run lead
+span: "from" clock "thru" clock [everyday] "," inner "past" "each" "hour"
 
-perunit: "at" INT ("minute" | "minutes") "past" "the" "hour"              // R5
-       | "at" "minutes" vlist minplace [note]                             // R5, R6
-       | "at" INT ("second" | "seconds") "within" "a" "minute"            // R6
-       | "at" INT ("second" | "seconds") "past" "the" "top" "of" "every" "hour"           // R4, R6
-       | "at" INT ("second" | "seconds") "within" "minutes" vlist "in" "every" "hour"     // R6, J1
-       | "at" "seconds" vlist "within" "minute" INT "in" "every" "hour"   // R5, R6, J1
-minplace: "past" "the" "hour" | "during" hours                            // R6
+// R8: one minute on an hour step past 6 values, the minute folded in
+hourstep: "every" INT "hours" ("starting" "at" clock | hourrange) [inevery]
 
-span: "from" clock "thru" clock [everyday] "," "at" "minutes" vlist "past" "each" "hour"   // T5
+// C1: seconds, minutes, then hours, finest first
+parts: inner [hourjoin]
+     | top tophours                                                       // R4, R9, R10
+     | "every" ("minute" | "second") hourrange [everyday]                 // R12
+     | secs "within" "every" "minute" hourrange [everyday]                // C1, R12
 
-lead: "every" ("minute" | "second") [leadjoin]                            // T3
-leadjoin: "during" hours                                                  // R6
-        | "for" "minute" INT "in" "every" "hour"                          // J1
+// C1, R5, T3: what leads, with the minutes joined to the seconds
+inner: secs [minjoin]
+     | "at" "minutes" vlist                                               // R5
+     | "every" "minute"                                                   // T3
+     | "every" "second" [forjoin]                                         // T3, J1
+secs: "at" INT ("second" | "seconds") | "at" "seconds" vlist              // C1, R5
+minjoin: "within" ("a" "minute" | "every" "minute" | "minute" INT | "minutes" vlist)   // C1, R6
+forjoin: "for" ("minute" INT | "minutes" vlist)                           // C1, J1
 
-hourstep: "every" INT "hours" ("starting" "at" clock | hourrange) [inevery]   // R8
+// R4, R5, R9, R10: one minute, any minute, on the hour forms
+top: "at" "the" "top" "of"                                                // R4
+   | "at" INT ("minute" | "minutes") "past"                               // R5
+   | secs "past" "the" "top" "of"                                         // C1, R4
+tophours: "the" "hour"                                                    // R6
+        | "every" "hour" [hourrange] [everyday]                           // R9, J1
+        | hours [inevery]                                                 // R3, R10, J1
+        | hstep                                                           // R11
+
+// R6, R9, R10, R11: the hours joined to what comes before
+hourjoin: "past" "the" "hour"                                             // R6
+        | "in" "every" "hour" [hourrange [everyday]]                      // J1, R9
+        | "during" hours [inevery]                                        // R6, R10
+        | hstep                                                           // R11
+hstep: "every" INT "hours" ("starting" "with" hours | "from" "the" clock "hour" "thru" "the" clock "hour") [inevery]   // R11
 
 hours: "the" clock "hour" | "the" list2{clock} "hours"                    // R3
-hourrange: "from" clock "thru" clock                                      // R8, R9
+hourrange: "from" clock "thru" clock                                      // R8, R9, R12
 everyday: "every" "day"                                                   // J1
 inevery: "in" "every" "day"                                               // J1
 clock: CLOCK12 | "midnight" | "noon"                                      // R1, R2, T12
 
-note: "(" "every" (unit | INT units) ["," "starting" "over" "each" unit] ")"   // T1
+note: "(" ival (";" ival)* ")"                                            // T1
+ival: "every" (unit | INT units) ["," "starting" "over" "each" unit]
 unit: "second" | "minute" | "hour"
 units: "seconds" | "minutes"
 
