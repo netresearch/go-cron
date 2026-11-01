@@ -5,6 +5,7 @@ package cron
 
 import (
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -12,6 +13,12 @@ import (
 
 // withSeconds parses six-field specs, seconds first.
 var withSeconds = WithParseOptions(Second | Minute | Hour | Dom | Month | Dow | Descriptor)
+
+// withDowOrDom ORs the day fields; withYear adds the year field.
+var (
+	withDowOrDom = WithParseOptions(Minute | Hour | Dom | Month | Dow | DowOrDom)
+	withYear     = WithParseOptions(Minute | Hour | Dom | Month | Dow | Year)
+)
 
 // describeGoldens are the binding descriptions (docs/DESCRIBE.md). literal
 // marks the field-by-field fallback, which is outside the grammar.
@@ -131,6 +138,61 @@ var describeGoldens = []struct {
 	{spec: "*/30 0 */2 * * *", opts: []DescribeOption{withSeconds}, want: "at seconds 0 and 30 past the top of every 2 hours starting with the midnight hour in every day"},
 	{spec: "*/7 */7 * * * *", opts: []DescribeOption{withSeconds}, want: "at seconds 0, 7, 14, … 56 within minutes 0, 7, 14, … 56 in every hour (every 7 seconds, starting over each minute; every 7 minutes, starting over each hour)"},
 
+	// Date fields
+	{spec: "0 0 * * 5", want: "at 12 am on Friday"},
+	{spec: "0 22-2/2 * * 5", want: "at 12 am, 2 am, and 10 pm on Friday"},
+	{spec: "0 9-17 * * 1-5", want: "at the top of every hour from 9 am thru 5 pm on Monday thru Friday"},
+	{spec: "0 12 * * 1-5", want: "at noon on Monday thru Friday"},
+	{spec: "15 0 9 1 * *", opts: []DescribeOption{withSeconds}, want: "at 9:00:15 am on the 1st of the month"},
+	{spec: "30 */2 * * 1", want: "every 2 hours starting at 12:30 am on Monday"},
+	{spec: "*/7 9-17 * * 1-5", want: "from 9 am thru 5:56 pm, at minutes 0, 7, 14, … 56 past each hour on Monday thru Friday (every 7 minutes, starting over each hour)"},
+	{spec: "* * * 1 *", want: "every minute in January"},
+	{spec: "0 * * * 1", want: "at the top of every hour on Monday"},
+	{spec: "*/15 * 1 * *", want: "at minutes 0, 15, 30, and 45 past the hour on the 1st of the month"},
+	{spec: "0 0 1,15 * *", want: "at 12 am on the 1st and 15th of the month"},
+	{spec: "0 0 1-7 * *", want: "at 12 am on the 1st thru 7th of the month"},
+	{spec: "0 0 11-13,22 * *", want: "at 12 am on the 11th thru 13th and 22nd of the month"},
+	{spec: "0 0 1-28/7 * *", want: "at 12 am on the 1st, 8th, 15th, and 22nd of every month"},
+	{spec: "0 0 1/10 * *", want: "at 12 am on the 1st, 11th, 21st, and 31st of the month; the 31st runs only in months that have one"},
+	{spec: "0 0 */3 * *", want: "at 12 am on the 1st, 4th, 7th, 10th, 13th, 16th, 19th, 22nd, 25th, 28th, and 31st of the month; the 31st runs only in months that have one"},
+	{spec: "0 0 */2 * *", want: "at 12 am on the 1st, 3rd, 5th, … 31st of the month (every 2 days, starting over each month); the 29th and 31st run only in months that have them"},
+	{spec: "0 0 29 * *", want: "at 12 am on the 29th of the month; the 29th runs only in months that have one"},
+	{spec: "0 0 30,31 * *", want: "at 12 am on the 30th and 31st of the month; the 30th and 31st run only in months that have them"},
+	{spec: "0 0 * * 1,3,5", want: "at 12 am on Monday, Wednesday, and Friday"},
+	{spec: "0 0 * * MON-FRI", want: "at 12 am on Monday thru Friday"},
+	{spec: "0 0 * * 6-7", want: "at 12 am on Saturday and Sunday"},
+	{spec: "0 0 * * 0,7", want: "at 12 am on Sunday"},
+	{spec: "0 0 * * */2", want: "at 12 am on Sunday, Tuesday, Thursday, and Saturday"},
+	{spec: "0 0 * * 5-1/2", want: "at 12 am on Friday and Sunday"},
+	{spec: "0 0 * * 1/2", want: "at 12 am on Monday, Wednesday, Friday, and Sunday"},
+	{spec: "0 0 * * 1/2", opts: []DescribeOption{WithParseOptions(Minute | Hour | Dom | Month | Dow | DowStepToSaturday)}, want: "at 12 am on Monday, Wednesday, and Friday"},
+	{spec: "0 0 13 * 5", want: "at 12 am on the 13th of the month when it falls on Friday"},
+	{spec: "0 0 1 * 1", opts: []DescribeOption{withDowOrDom}, want: "at 12 am on the 1st of the month or on any Monday"},
+	{spec: "0 0 1,15 * 1-5", opts: []DescribeOption{withDowOrDom}, want: "at 12 am on the 1st and 15th of the month or on any Monday thru Friday"},
+	{spec: "0 0 * 1-3 *", want: "at midnight every day in January thru March"},
+	{spec: "0 0 1 1-3 *", want: "at 12 am on the 1st of the month in January thru March"},
+	{spec: "0 0 1 */3 *", want: "at 12 am on the 1st of the month in January, April, July, and October"},
+	{spec: "0 0 1 JAN,JUN *", want: "at 12 am on the 1st of the month in January and June"},
+	{spec: "0 0 1 1 * 2026-2028", opts: []DescribeOption{withYear}, want: "at 12 am on the 1st of the month in January in years 2026 thru 2028"},
+	{spec: "0 0 1 1 * *", opts: []DescribeOption{withYear}, want: "at 12 am on the 1st of the month in January"},
+	{spec: "0 0 1 1 * 2027", opts: []DescribeOption{withYear}, want: "at 12 am on the 1st of the month in January in year 2027"},
+	{spec: "0 0 1 1 * 2030,2026", opts: []DescribeOption{withYear}, want: "at 12 am on the 1st of the month in January in years 2026 and 2030"},
+	{spec: "0 0 1 1 * 2026-2030/2", opts: []DescribeOption{withYear}, want: "at 12 am on the 1st of the month in January in years 2026, 2028, and 2030"},
+	{spec: "0 0 * *,3 *", want: "at midnight every day"},
+	{spec: "0 0 *,1 * *", want: "at midnight every day"},
+	{spec: "0 0 *,1 * 1", opts: []DescribeOption{withDowOrDom}, want: "at 12 am on Monday"},
+	{spec: "0 0 1,* * 1", opts: []DescribeOption{WithParseOptions(Minute | Hour | Dom | Month | Dow | DowOrDom | StepWildcard)}, want: "at 12 am on Monday"},
+	{spec: "0 0 1 * *,1", opts: []DescribeOption{withDowOrDom}, want: "at 12 am on the 1st of the month"},
+	{spec: "0 0 13 * ?,5", opts: []DescribeOption{withDowOrDom}, want: "at 12 am on the 13th of the month"},
+	{spec: "0 0 1 * */01", opts: []DescribeOption{withDowOrDom}, want: "at 12 am on the 1st of the month"},
+	{spec: "0 0 1-31 * 1", opts: []DescribeOption{withDowOrDom}, want: "at midnight every day"},
+	{spec: "* 9-17 * * 1-5", want: "every minute from 9 am thru 5:59 pm on Monday thru Friday"},
+	{spec: "30 9-17 * * 1-5", want: "at 30 minutes past every hour from 9 am thru 5 pm on Monday thru Friday"},
+	{spec: "0 */6 * * 1", want: "at the top of the 12 am, 6 am, noon, and 6 pm hours on Monday"},
+	{spec: "*/15 */2 * * 1", want: "at minutes 0, 15, 30, and 45 every 2 hours starting with the 12 am hour on Monday"},
+	{spec: "0 0 13 * 1-5", want: "at 12 am on the 13th of the month when it falls on Monday thru Friday"},
+	{spec: "*/30 20-5 * * 1", want: "from 12 am thru 5:30 am and 8 pm thru 11:30 pm, at minutes 0 and 30 past each hour on Monday"},
+
 	// Wrapped hour spans: two parts in clock order (T9)
 	{spec: "* 20-5 * * *", want: "every minute from midnight thru 5:59 am and 8 pm thru 11:59 pm every day"},
 	{spec: "30 20-5 * * *", want: "at 30 minutes past every hour from midnight thru 5 am and 8 pm thru 11 pm every day"},
@@ -163,8 +225,8 @@ var describeGoldens = []struct {
 	{spec: "5 1-0 * * *", want: "at 5 minutes past the hour"},
 
 	// Literal fallback: the whole spec renders field by field
-	{spec: "0 9 * * 1-5", want: "minute 0, hour 9, day of month *, month *, day of week 1-5", literal: true},
-	{spec: "15 0 9 1 * *", opts: []DescribeOption{withSeconds}, want: "second 15, minute 0, hour 9, day of month 1, month *, day of week *", literal: true},
+	{spec: "0 0 L * *", opts: []DescribeOption{WithParseOptions(Minute | Hour | Dom | Month | Dow | DomL)}, want: "minute 0, hour 0, day of month L, month *, day of week *", literal: true},
+	{spec: "0 0 * * 5#3", opts: []DescribeOption{WithParseOptions(Minute | Hour | Dom | Month | Dow | DowNth)}, want: "minute 0, hour 0, day of month *, month *, day of week 5#3", literal: true},
 	{spec: "@daily", want: "@daily", literal: true},
 	{spec: "H/15 * * * *", opts: []DescribeOption{WithParseOptions(Minute | Hour | Dom | Month | Dow | Hash)}, want: "minute H/15, hour *, day of month *, month *, day of week *", literal: true},
 }
@@ -193,11 +255,11 @@ func describeGrammar() *regexp.Regexp {
 	list := func(x string) string { return alt(x, list2(x)) }
 
 	num := `\d+`
-	clock12 := alt(`(?:1[0-2]|[1-9])(?::[0-5]\d){1,2} [ap]m`, `(?:1[01]|[1-9]) [ap]m`)
+	clock12 := alt(`(?:1[0-2]|[1-9])(?::[0-5]\d){1,2} [ap]m`, `(?:1[01]|[1-9]) [ap]m`, "12 am")
 	clock := alt(clock12, "midnight", "noon")
 	vlist := alt(list(num+opt(" thru "+num)), num+", "+num+", "+num+", … "+num)
-	unit := alt("second", "minute", "hour")
-	units := alt("seconds", "minutes")
+	unit := alt("second", "minute", "hour", "day", "month", "year")
+	units := alt("seconds", "minutes", "days", "months", "years")
 	// R3: no article before a list that starts with midnight
 	hourtail := alt(" and "+clock, "(?:, "+clock+")+, and "+clock) + " hours"
 	hours := alt("the "+clock+" hour", "the "+alt(clock12, "noon")+hourtail, "midnight"+hourtail)
@@ -248,7 +310,23 @@ func describeGrammar() *regexp.Regexp {
 		"every "+alt("minute", "second")+" "+hourrange+opt(everyday),
 		secs+" within every minute "+hourrange+opt(everyday),
 	)
-	return regexp.MustCompile("^" + time + opt(note) + "$")
+	// D2, D4–D6: the date clauses; D3: the short-month clause
+	ord := `\d+(?:st|nd|rd|th)`
+	dayname := alt("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")
+	monthname := alt("January", "February", "March", "April", "May", "June", "July",
+		"August", "September", "October", "November", "December")
+	olist := alt(list(ord+opt(" thru "+ord)), ord+", "+ord+", "+ord+", … "+ord)
+	dom := "the " + olist + " of " + alt("the", "every") + " month"
+	dowitem := dayname + opt(" thru "+dayname)
+	dow := list(dowitem)
+	andor := alt(" when it falls on "+dow, " or on "+list("any "+dowitem))
+	day := alt("on "+dom+opt(andor), "on "+dow)
+	month := "in " + list(monthname+opt(" thru "+monthname))
+	year := alt("in year "+num, "in years "+vlist)
+	short := "; the " + list(ord) + " " + alt("runs", "run") + " only in months that have " + alt("one", "them")
+
+	schedule := time + opt(" "+day) + opt(" "+month) + opt(" "+year) + opt(note) + "(?:" + short + ")*"
+	return regexp.MustCompile("^" + schedule + "$")
 }
 
 func TestDescribeSpecGrammar(t *testing.T) {
@@ -320,19 +398,19 @@ func TestParserDescribeSpec(t *testing.T) {
 	}
 
 	// SecondOptional: a second that was not written is not listed.
-	got, err = FullParser().DescribeSpec("0 0 1 * *")
+	got, err = FullParser().DescribeSpec("0 0 L * *")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "minute 0, hour 0, day of month 1, month *, day of week *"; got != want {
+	if want := "minute 0, hour 0, day of month L, month *, day of week *"; got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
 
-	got, err = FullParser().DescribeSpec("0 0 0 * * * 2027")
+	got, err = FullParser().DescribeSpec("0 0 0 L * * 2027")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "second 0, minute 0, hour 0, day of month *, month *, day of week *, year 2027"; got != want {
+	if want := "second 0, minute 0, hour 0, day of month L, month *, day of week *, year 2027"; got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
 
@@ -416,15 +494,42 @@ func wideRange(spec string) bool {
 	return false
 }
 
-// FuzzDescribeSpec checks that every spec that parses gets a description, and
-// that it is in the grammar or the literal fallback. Specs with a range of
-// more than 100 values (years) are skipped.
+// literalSyntax reports the syntax DescribeSpec renders literally: H in any
+// field, L or W in the day of month, L or # in the day of week. An item that
+// starts with "*" or "?" is the star, whatever follows it, as the parser
+// reads it. It is written apart from the describer's own check, so a spec
+// that falls back for another reason fails FuzzDescribeSpec.
+func literalSyntax(fields []string, yearField string) bool {
+	if yearField != "" {
+		fields = append(slices.Clone(fields), yearField)
+	}
+	for i, f := range fields {
+		for item := range strings.SplitSeq(f, ",") {
+			if strings.HasPrefix(item, "*") || strings.HasPrefix(item, "?") {
+				continue
+			}
+			u := strings.ToUpper(item)
+			if strings.HasPrefix(item, "H") ||
+				(i == 3 && strings.ContainsAny(u, "LW")) || (i == 5 && strings.ContainsAny(u, "L#")) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// FuzzDescribeSpec checks that every spec that parses gets a description in
+// the grammar or the literal fallback, and the literal fallback exactly for
+// descriptors and literalSyntax. Specs with a range of more than 100 values
+// (years) are skipped.
 func FuzzDescribeSpec(f *testing.F) {
 	for _, tt := range describeGoldens {
 		f.Add(tt.spec)
 	}
 	f.Add("1,,2 * * * *")
 	f.Add("0-59 0-23 * * *")
+	f.Add("+0 0 1 1 0")
+	f.Add("0 0 1 1 0 22-99")
 
 	g := describeGrammar()
 	parsers := []Parser{
@@ -446,6 +551,10 @@ func FuzzDescribeSpec(f *testing.F) {
 			}
 			if !g.MatchString(got) && !literalForm.MatchString(got) {
 				t.Fatalf("DescribeSpec(%q) = %q, outside the grammar", spec, got)
+			}
+			_, descriptor, fields, yearField, _ := p.specFields(spec)
+			if want := descriptor != "" || literalSyntax(fields, yearField); literalForm.MatchString(got) != want {
+				t.Fatalf("DescribeSpec(%q) = %q: literal form %v, want %v", spec, got, !want, want)
 			}
 		}
 	})

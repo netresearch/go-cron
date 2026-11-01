@@ -5,9 +5,11 @@ package cron
 
 import (
 	"fmt"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type describeConfig struct {
@@ -56,8 +58,8 @@ func DescribeSpec(spec string, opts ...DescribeOption) (string, error) {
 // parse error. The description follows the grammar in docs/DESCRIBE.md and
 // leaves out the time zone; callers show the location beside it. A valid spec
 // always gets a description and a nil error. Specs outside the fields covered so far (see docs/DESCRIBE.md) get
-// each written field by name, as written: "minute 0, hour 9, day of month *,
-// month *, day of week 1-5". A descriptor such as "@daily" is returned as
+// each written field by name, as written: "minute 0, hour 0, day of month L,
+// month *, day of week *". A descriptor such as "@daily" is returned as
 // written. H needs no hash key here: the description does not depend on it.
 // With no key, StrictDays does not check a spec with H in the day of the
 // month or the month, as the value the key picks decides that check.
@@ -77,21 +79,190 @@ func (p Parser) DescribeSpec(spec string, _ ...DescribeOption) (string, error) {
 	if descriptor != "" {
 		return descriptor, nil
 	}
-	if !containsHashExpr(fields) && isWildcard(fields[3]) && isWildcard(fields[4]) &&
-		isWildcard(fields[5]) && (yearField == "" || isWildcard(yearField)) {
-		return describeTime(fields), nil
+	if containsHashExpr(fields) || !allDescribable(fields) || !describable(yearField) {
+		return p.describeLiteral(spec, fields, yearField), nil
 	}
-	return p.describeLiteral(spec, fields, yearField), nil
+	var d describer
+	day, short := p.describeDays(&d, fields[3], fields[5])
+	d.named = day != ""
+	parts := []string{d.describeTime(fields)}
+	for _, clause := range []string{day, d.describeMonths(fields[4]), d.describeYears(yearField)} {
+		if clause != "" {
+			parts = append(parts, clause)
+		}
+	}
+	return strings.Join(parts, " ") + d.noteText() + short, nil
+}
+
+// describer builds one description: whether it names a day, and the notes
+// of the fields it cuts short.
+type describer struct {
+	named     bool     // a day clause follows the time (D7)
+	notes     []string // the time fields' notes
+	dateNotes []string // the date fields' notes, after the time's (G7)
+}
+
+// describeDays describes the day of month and day of week, "" when neither
+// is restricted (D2, D4, D5). short names the days above the 28th that the
+// day of month fires on: "; the 31st runs only in months that have one" (D3).
+func (p Parser) describeDays(d *describer, domField, dowField string) (day, short string) {
+	md := newTimeField(domField, "day", "month", dom)
+	md.word, md.limit = ordinal, 12
+	wd := newTimeField(dowField, "day", "week", p.dowBounds())
+	wd.word = func(v uint) string { return time.Weekday(v).String() }
+	domSet := !isWildcard(domField)
+	dowSet := !isWildcard(dowField)
+	or := domSet && dowSet && p.dowOrDom(domField, dowField)
+	domAll, dowAll := len(md.vals) == 31, len(wd.vals) == 7
+	switch {
+	case or && (domAll || dowAll):
+		return "", "" // T3: one side of the OR is every day
+	case domAll:
+		domSet = false
+	case dowAll:
+		dowSet = false
+	}
+
+	var domText string
+	if domSet {
+		domText, short = d.describeDom(md)
+	}
+	var dowWords []string
+	if dowSet {
+		dowWords = wd.runWords(wd.vals)
+	}
+	return dayClause(domText, dowWords, or), short
+}
+
+// dayClause joins the day of month and the days of the week, either of which
+// may be missing: "and" (D5 AND) or "or on any" (D5 OR).
+func dayClause(domText string, dowWords []string, or bool) string {
+	switch {
+	case or:
+		for i, w := range dowWords {
+			dowWords[i] = "any " + w
+		}
+		return "on " + domText + " or on " + andList(dowWords)
+	case domText != "" && dowWords != nil:
+		return "on " + domText + " when it falls on " + andList(dowWords)
+	case domText != "":
+		return "on " + domText
+	case dowWords != nil:
+		return "on " + andList(dowWords)
+	}
+	return ""
+}
+
+// describeDom describes the day of month, "the 1st and 15th of the month"
+// (D2), and the clause naming its days above the 28th (D3).
+func (d *describer) describeDom(md timeField) (text, short string) {
+	text = d.dateNums(md)
+	var late []string
+	for _, v := range slices.Sorted(slices.Values(md.vals)) {
+		if v > 28 {
+			late = append(late, ordinal(v))
+		}
+	}
+	of := " of the month"
+	if _, even := md.gap(); even && len(late) == 0 {
+		of = " of every month"
+	}
+	switch len(late) {
+	case 0:
+	case 1:
+		short = "; the " + late[0] + " runs only in months that have one"
+	default:
+		short = "; the " + andList(late) + " run only in months that have them"
+	}
+	return "the " + text + of, short
+}
+
+// dowOrDom reports a spec whose restricted day fields are ORed, as the parser
+// decides it: DowOrDom, unless StepWildcard keeps a field that starts with
+// "*" or "?" unrestricted.
+func (p Parser) dowOrDom(domField, dowField string) bool {
+	return p.options&DowOrDom != 0 &&
+		(p.options&StepWildcard == 0 || wildcardBit(domField)|wildcardBit(dowField) == 0)
+}
+
+// describeMonths describes the month field: "in January thru March" (D6).
+func (d *describer) describeMonths(field string) string {
+	m := newTimeField(field, "month", "year", months)
+	if isWildcard(field) || m.every() {
+		return ""
+	}
+	m.word, m.limit = func(v uint) string { return time.Month(v).String() }, 12
+	return "in " + d.dateNums(m)
+}
+
+// describeYears describes the year field: "in year 2027", "in years 2026
+// thru 2028" (D6).
+func (d *describer) describeYears(field string) string {
+	if field == "" || isWildcard(field) {
+		return ""
+	}
+	y := timeField{unit: "year", r: years}
+	for _, expr := range strings.FieldsFunc(field, func(r rune) bool { return r == ',' }) {
+		// The spec parsed, so the range and step are valid.
+		vals, _ := getYearRange(expr)
+		y.items = append(y.items, timeItem{})
+		for _, v := range vals {
+			y.vals = append(y.vals, uint(v)) // #nosec G115 -- years are positive
+		}
+	}
+	slices.Sort(y.vals)
+	y.vals = slices.Compact(y.vals)
+	if y.single() {
+		return fmt.Sprintf("in year %d", y.vals[0])
+	}
+	return "in years " + d.dateNums(y)
+}
+
+// ordinal writes n as "1st", "2nd", "3rd", "4th", "11th", "21st".
+func ordinal(n uint) string {
+	suffix := "th"
+	if n%100 < 11 || n%100 > 13 {
+		switch n % 10 {
+		case 1:
+			suffix = "st"
+		case 2:
+			suffix = "nd"
+		case 3:
+			suffix = "rd"
+		}
+	}
+	return strconv.Itoa(int(n)) + suffix
 }
 
 // isWildcard reports a field that selects every value and, like "*", keeps
-// the parser's star bit ("*/1" included).
+// the parser's star bit: one of its items is the star ("*/1" included).
+// The star selects every value, so the other items add nothing ("*,5" is
+// "*"), and with the bit set the day fields AND under DowOrDom.
 func isWildcard(field string) bool {
-	switch field {
-	case "*", "?", "*/1", "?/1":
-		return true
+	for item := range strings.SplitSeq(field, ",") {
+		lo, step, hasStep := strings.Cut(item, "/")
+		n, err := strconv.Atoi(step)
+		if (lo == "*" || lo == "?") && (!hasStep || err == nil && n == 1) {
+			return true
+		}
 	}
 	return false
+}
+
+// describableItem is the item syntax the description covers: "*", "?", a
+// number (with an optional "+", as strconv.Atoi reads it) or a three-letter
+// name, or a range of them, each with an optional step. Any other item renders the spec field by field (G10).
+var describableItem = regexp.MustCompile(`^(?:[*?]|(?:\+?[0-9]+|[A-Za-z]{3})(?:-(?:\+?[0-9]+|[A-Za-z]{3}))?)(?:/\+?[0-9]+)?$`)
+
+// describable reports a field whose items all have the covered syntax.
+func describable(field string) bool {
+	items := strings.FieldsFunc(field, func(r rune) bool { return r == ',' })
+	return !slices.ContainsFunc(items, func(it string) bool { return !describableItem.MatchString(it) })
+}
+
+// allDescribable reports fields that are all describable.
+func allDescribable(fields []string) bool {
+	return !slices.ContainsFunc(fields, func(f string) bool { return !describable(f) })
 }
 
 var literalNames = []string{seconds.name, minutes.name, hours.name, dom.name, months.name, dow.name}
@@ -128,8 +299,8 @@ const (
 	inEveryDaySuffix = " in every day"
 )
 
-// valueLimit is how many second or minute values are listed before a step
-// is cut short (T1).
+// valueLimit is how many values are listed before a step is cut short,
+// unless a field sets its own limit (T1).
 const valueLimit = 6
 
 // timeItem is one comma-separated element of a second, minute or hour field.
@@ -139,18 +310,30 @@ type timeItem struct {
 	ranged       bool // "lo-hi", alone or with a step
 }
 
-// timeField is a second, minute or hour field.
+// timeField is a field of a spec: its items and the values they fire on.
 type timeField struct {
-	unit      string // "second", "minute" or "hour"
-	container string // the unit a step starts over in
+	unit      string // "second", "minute", "hour", "day", "month" or "year"
+	container string // the unit a step starts over in; "" for none
 	r         bounds
 	items     []timeItem
-	vals      []uint // values once each, sorted
+	vals      []uint            // values once each: sorted, except one item of a date field in firing order
+	word      func(uint) string // names a value; nil writes the number
+	limit     int               // values listed before a step is cut short; 0 for valueLimit
+}
+
+// w names the value v: "5", "5th", "Friday" or "May".
+func (f timeField) w(v uint) string {
+	if f.word == nil {
+		return strconv.Itoa(int(v))
+	}
+	return f.word(v)
 }
 
 // newTimeField parses the field text, which has already parsed as a spec,
-// into its items and the values they fire on, once each, sorted: a wrapped
-// range is shorthand for two ranges, so it reads in clock order (T6, T9).
+// into its items and the values they fire on, once each. Seconds, minutes
+// and hours sort: a wrapped range is shorthand for two ranges, so it reads
+// in clock order (T6, T9). A date field keeps the firing order of a single
+// item (D4).
 func newTimeField(text, unit, container string, r bounds) timeField {
 	f := timeField{unit: unit, container: container, r: r}
 	for _, expr := range strings.FieldsFunc(text, func(r rune) bool { return r == ',' }) {
@@ -163,14 +346,37 @@ func newTimeField(text, unit, container string, r bounds) timeField {
 			it.step, _ = mustParseInt(rangeAndStep[1])
 			if len(lowAndHigh) == 1 && !it.star {
 				it.hi, it.ranged = r.max, true // "N/step" means "N-max/step"
+				if r.stepEnd != 0 && it.lo <= r.stepEnd {
+					it.hi = r.stepEnd // DowStepToSaturday
+				}
 			}
 		}
 		f.items = append(f.items, it)
-		f.vals = append(f.vals, it.runs(r)...)
+		f.vals = append(f.vals, it.fires(r)...)
 	}
-	slices.Sort(f.vals)
+	if len(f.items) > 1 || unit == "second" || unit == "minute" || unit == "hour" {
+		slices.Sort(f.vals) // a list renders the union of its items
+	}
 	f.vals = uniq(f.vals)
 	return f
+}
+
+// fires lists the values an item fires on, in firing order, as the parser
+// selects them. A day-of-week step walks the seven distinct days (dowCycle),
+// and Sunday reads as 0 whether written 0 or 7 (D4).
+func (it timeItem) fires(r bounds) []uint {
+	if !isDowBounds(r) {
+		return it.runs(r)
+	}
+	lo, hi, cr := it.lo, it.hi, r
+	if it.step > 1 && lo > hi {
+		lo, hi, cr = dowCycle(lo, hi, r)
+	}
+	vals := timeItem{lo: lo, hi: hi, step: it.step}.runs(cr)
+	for i := range vals {
+		vals[i] %= 7
+	}
+	return vals
 }
 
 // parts splits the item's range into the ranges it covers in clock order: a
@@ -194,9 +400,10 @@ func fromThru(it timeItem, start, end func(h uint) string) string {
 	return "from " + andList(words)
 }
 
-// onHour writes an hour as its clock time on the hour.
-func onHour(h uint) string {
-	return clockTime(h, 0, 0)
+// onHour writes an hour as its clock time on the hour; midnight is "12 am"
+// on a named day (R2).
+func (d *describer) onHour(h uint) string {
+	return d.clock(h, 0, 0)
 }
 
 // runs lists the values an item fires on, in firing order.
@@ -262,40 +469,44 @@ func (f timeField) gap() (uint, bool) {
 	return d, d > 1
 }
 
-// nums renders second or minute values ("0, 15, 30, and 45", "0 thru 10")
-// and, for evenly spaced values past the limit, the first 3, "…", the last
-// and an interval note (T1, T2). Other values are listed in full.
+// nums renders the values ("0, 15, 30, and 45", "0 thru 10", "the 1st and
+// 15th") and, for evenly spaced values past the limit, the first 3, "…",
+// the last and an interval note (T1, T2). Other values are listed in full.
 func (f timeField) nums() (text, note string) {
+	limit := f.limit
+	if limit == 0 {
+		limit = valueLimit
+	}
 	d, even := f.gap()
-	if !even || len(f.vals) <= valueLimit {
-		return andList(runWords(f.vals)), ""
+	if !even || len(f.vals) <= limit {
+		return andList(f.runWords(f.vals)), ""
 	}
 	first, last := f.vals[0], f.vals[len(f.vals)-1]
-	text = fmt.Sprintf("%d, %d, %d, … %d", first, f.vals[1], f.vals[2], last)
+	text = f.w(first) + ", " + f.w(f.vals[1]) + ", " + f.w(f.vals[2]) + ", … " + f.w(last)
 	note = fmt.Sprintf("every %d %ss", d, f.unit)
-	if first+f.r.max-f.r.min+1-last != d {
+	if f.container != "" && first+f.r.max-f.r.min+1-last != d {
 		note += ", starting over each " + f.container
 	}
 	return text, note
 }
 
 // runWords names vals as runs of consecutive values: "0 thru 10", "15", "30".
-func runWords(vals []uint) []string {
+func (f timeField) runWords(vals []uint) []string {
 	var words []string
 	for i := 0; i < len(vals); {
 		j := i
 		for j+1 < len(vals) && vals[j+1] == vals[j]+1 {
 			j++
 		}
-		words = append(words, rangeWords(vals[i], vals[j])...)
+		words = append(words, f.rangeWords(vals[i], vals[j])...)
 		i = j + 1
 	}
 	return words
 }
 
 // rangeWords names a range: "5", "5 and 6" when adjacent, or "5 thru 9".
-func rangeWords(lo, hi uint) []string {
-	l, h := strconv.Itoa(int(lo)), strconv.Itoa(int(hi))
+func (f timeField) rangeWords(lo, hi uint) []string {
+	l, h := f.w(lo), f.w(hi)
 	switch hi {
 	case lo:
 		return []string{l}
@@ -313,11 +524,12 @@ func (f timeField) named() bool {
 
 // hourNames names the hours: "the 9 am hour", "the 9 am and 5 pm hours", and
 // with no article before a list that starts with midnight, "midnight, 6 am,
-// noon, and 6 pm hours" (R3).
-func (f timeField) hourNames() string {
+// noon, and 6 pm hours" (R3). On a named day midnight is "12 am" and keeps
+// the article.
+func (d *describer) hourNames(f timeField) string {
 	clocks := make([]string, len(f.vals))
 	for i, h := range f.vals {
-		clocks[i] = onHour(h)
+		clocks[i] = d.onHour(h)
 	}
 	switch {
 	case len(clocks) == 1:
@@ -362,90 +574,117 @@ func (f timeField) kind() hourKind {
 	return longRange
 }
 
-// describeTime describes the second, minute and hour fields of a spec whose
-// date fields are all wildcards: what leads, the minutes joined to it, then
-// the hours (C1).
-func describeTime(fields []string) string {
-	sec := newTimeField(fields[0], "second", "minute", seconds)
-	minute := newTimeField(fields[1], "minute", "hour", minutes)
-	hour := newTimeField(fields[2], "hour", "day", hours)
-	if sec.single() {
-		if out, ok := clockTimes(sec.vals[0], minute, hour); ok {
-			return out
-		}
-		if out, ok := hourStep(sec.vals[0], minute, hour); ok {
-			return out
-		}
+// noteText returns the notes in one pair of parentheses, joined with "; ".
+func (d *describer) noteText() string {
+	all := slices.Concat(d.notes, d.dateNotes)
+	if len(all) == 0 {
+		return ""
 	}
-	var n notes
-	out := n.describe(sec, minute, hour)
-	if len(n) == 0 {
-		return out
-	}
-	return out + " (" + strings.Join(n, "; ") + ")"
+	return " (" + strings.Join(all, "; ") + ")"
 }
 
-// notes collects the interval notes of the fields a description cuts short.
-type notes []string
-
 // nums renders f's values and keeps its note.
-func (n *notes) nums(f timeField) string {
+func (d *describer) nums(f timeField) string {
 	text, note := f.nums()
 	if note != "" {
-		*n = append(*n, note)
+		d.notes = append(d.notes, note)
+	}
+	return text
+}
+
+// dateNums renders a date field's values and keeps its note.
+func (d *describer) dateNums(f timeField) string {
+	text, note := f.nums()
+	if note != "" {
+		d.dateNotes = append(d.dateNotes, note)
 	}
 	return text
 }
 
 // values names minutes after "within" or "for": "minute 30", "minutes 0 and 30".
-func (n *notes) values(f timeField) string {
+func (d *describer) values(f timeField) string {
 	if f.single() {
 		return fmt.Sprintf("%s %d", f.unit, f.vals[0])
 	}
-	return f.unit + "s " + n.nums(f)
+	return f.unit + "s " + d.nums(f)
 }
 
-// describe describes the fields by what leads: minutes at second 0, or the
-// seconds.
-func (n *notes) describe(sec, minute, hour timeField) string {
+// everyDay is " every day", or "" when a day clause takes its place (J1).
+func (d *describer) everyDay() string {
+	if d.named {
+		return ""
+	}
+	return everyDaySuffix
+}
+
+// inEveryDay is " in every day", or "" when a day clause takes its place (J1).
+func (d *describer) inEveryDay() string {
+	if d.named {
+		return ""
+	}
+	return inEveryDaySuffix
+}
+
+// clock writes a clock time; midnight is "12 am" on a named day (R2).
+func (d *describer) clock(h, m, s uint) string {
+	if d.named && h == 0 && m == 0 && s == 0 {
+		return "12 am"
+	}
+	return clockTime(h, m, s)
+}
+
+// describeTime describes the second, minute and hour fields: what leads, the
+// minutes joined to it, then the hours (C1).
+func (d *describer) describeTime(fields []string) string {
+	sec := newTimeField(fields[0], "second", "minute", seconds)
+	minute := newTimeField(fields[1], "minute", "hour", minutes)
+	hour := newTimeField(fields[2], "hour", "day", hours)
+	if sec.single() {
+		if out, ok := d.clockTimes(sec.vals[0], minute, hour); ok {
+			return out
+		}
+		if out, ok := d.hourStep(sec.vals[0], minute, hour); ok {
+			return out
+		}
+	}
 	switch {
 	case !sec.single() || sec.vals[0] != 0:
-		return n.bySeconds(sec, minute, hour)
+		return d.bySeconds(sec, minute, hour)
 	case minute.single():
 		m := minute.vals[0]
-		return onTheHour(minuteAt(m), hour, func(h uint) string { return clockTime(h, m, 0) })
+		return d.onTheHour(minuteAt(m), hour, func(h uint) string { return d.clock(h, m, 0) })
 	case minute.every():
-		return joinHours("every minute", "", sec, minute, hour)
+		return d.joinHours("every minute", "", sec, minute, hour)
 	}
-	return joinHours("at minutes "+n.nums(minute), "past the hour", sec, minute, hour)
+	return d.joinHours("at minutes "+d.nums(minute), "past the hour", sec, minute, hour)
 }
 
 // bySeconds describes fields led by seconds other than 0 (C1): the minutes
 // join with "within", or with "for" after "every second".
-func (n *notes) bySeconds(sec, minute, hour timeField) string {
+func (d *describer) bySeconds(sec, minute, hour timeField) string {
 	if sec.every() {
 		if minute.every() {
-			return joinHours("every second", "", sec, minute, hour)
+			return d.joinHours("every second", "", sec, minute, hour)
 		}
-		return joinHours("every second for "+n.values(minute), "in every hour", sec, minute, hour)
+		return d.joinHours("every second for "+d.values(minute), "in every hour", sec, minute, hour)
 	}
 	secs := "at " + count(sec.vals[0], "second")
 	if !sec.single() {
-		secs = "at seconds " + n.nums(sec)
+		secs = "at seconds " + d.nums(sec)
 	}
 	switch {
 	case minute.every() && hour.every():
 		return secs + " within a minute"
 	case minute.every():
-		return joinHours(secs+" within every minute", "", sec, minute, hour)
+		return d.joinHours(secs+" within every minute", "", sec, minute, hour)
 	case minute.single() && minute.vals[0] == 0:
 		var at func(h uint) string
 		if sec.single() {
-			at = func(h uint) string { return clockTime(h, 0, sec.vals[0]) }
+			at = func(h uint) string { return d.clock(h, 0, sec.vals[0]) }
 		}
-		return onTheHour(secs+" past the top of", hour, at)
+		return d.onTheHour(secs+" past the top of", hour, at)
 	}
-	return joinHours(secs+" within "+n.values(minute), "in every hour", sec, minute, hour)
+	return d.joinHours(secs+" within "+d.values(minute), "in every hour", sec, minute, hour)
 }
 
 // minuteAt opens one minute on the hour forms: "at the top of" (R4), "at 30
@@ -465,7 +704,7 @@ func minuteAt(m uint) string {
 // second; a part of one hour of a wrapped range then reads "at" that run
 // (R9, T9): "from midnight thru 5 am and at 11:30 pm". Otherwise at is nil,
 // and that part reads as its hour: "from 6 pm thru 11 pm and the 5 am hour".
-func onTheHour(lead string, hour timeField, at func(h uint) string) string {
+func (d *describer) onTheHour(lead string, hour timeField, at func(h uint) string) string {
 	switch hour.kind() {
 	case everyHour:
 		if strings.HasSuffix(lead, " past") {
@@ -473,39 +712,39 @@ func onTheHour(lead string, hour timeField, at func(h uint) string) string {
 		}
 		return lead + " every hour"
 	case namedHours:
-		return lead + " " + hour.hourNames()
+		return lead + " " + d.hourNames(hour)
 	case stepHours:
-		return lead + " " + hour.hourNames() + inEveryDaySuffix
+		return lead + " " + d.hourNames(hour) + d.inEveryDay()
 	case longStep:
-		return lead + " " + stepClause(hour)
+		return lead + " " + d.stepClause(hour)
 	}
 	it := hour.items[0]
 	if p := it.parts(hours); len(p) == 2 {
 		switch {
 		case p[1][0] == p[1][1] && at != nil:
-			return lead + " every hour from " + partRange(p[0]) + " and at " + at(p[1][0]) + everyDaySuffix
+			return lead + " every hour from " + d.partRange(p[0]) + " and at " + at(p[1][0]) + d.everyDay()
 		case p[0][0] == p[0][1] && at != nil:
-			return "at " + at(p[0][0]) + " and " + lead + " every hour from " + partRange(p[1]) + everyDaySuffix
+			return "at " + at(p[0][0]) + " and " + lead + " every hour from " + d.partRange(p[1]) + d.everyDay()
 		case p[1][0] == p[1][1]:
-			return lead + " every hour from " + partRange(p[0]) + " and the " + onHour(p[1][0]) + " hour" + everyDaySuffix
+			return lead + " every hour from " + d.partRange(p[0]) + " and the " + d.onHour(p[1][0]) + " hour" + d.everyDay()
 		case p[0][0] == p[0][1]:
-			return lead + " the " + onHour(p[0][0]) + " hour and every hour from " + partRange(p[1]) + everyDaySuffix
+			return lead + " the " + d.onHour(p[0][0]) + " hour and every hour from " + d.partRange(p[1]) + d.everyDay()
 		}
 	}
-	return lead + " every hour " + fromThru(it, onHour, onHour) + everyDaySuffix
+	return lead + " every hour " + fromThru(it, d.onHour, d.onHour) + d.everyDay()
 }
 
 // joinHours joins the hours to inner, the seconds and minutes (R6, R9–R12,
 // T5). every is the join for every hour.
-func joinHours(inner, every string, sec, minute, hour timeField) string {
+func (d *describer) joinHours(inner, every string, sec, minute, hour timeField) string {
 	if it, ok := hour.span(); ok && !hour.every() && len(minute.vals) > 1 && !minute.every() &&
 		(it.lo < it.hi || hour.kind() == longRange) {
 		// T5: the first and last run of the day lead.
-		first := func(h uint) string { return clockTime(h, minute.vals[0], sec.vals[0]) }
+		first := func(h uint) string { return d.clock(h, minute.vals[0], sec.vals[0]) }
 		last := func(h uint) string {
-			return clockTime(h, minute.vals[len(minute.vals)-1], sec.vals[len(sec.vals)-1])
+			return d.clock(h, minute.vals[len(minute.vals)-1], sec.vals[len(sec.vals)-1])
 		}
-		return fromThru(it, first, last) + " every day, " + inner + " past each hour"
+		return fromThru(it, first, last) + d.everyDay() + ", " + inner + " past each hour"
 	}
 	switch hour.kind() {
 	case everyHour:
@@ -514,11 +753,11 @@ func joinHours(inner, every string, sec, minute, hour timeField) string {
 		}
 		return inner + " " + every
 	case namedHours:
-		return inner + " during " + hour.hourNames()
+		return inner + " during " + d.hourNames(hour)
 	case stepHours:
-		return inner + " during " + hour.hourNames() + inEveryDaySuffix
+		return inner + " during " + d.hourNames(hour) + d.inEveryDay()
 	case longStep:
-		return inner + " " + stepClause(hour)
+		return inner + " " + d.stepClause(hour)
 	}
 	it := hour.items[0]
 	if minute.every() {
@@ -527,19 +766,19 @@ func joinHours(inner, every string, sec, minute, hour timeField) string {
 		if sec.every() {
 			s = 59
 		}
-		last := func(h uint) string { return clockTime(h, 59, s) }
-		return inner + " " + fromThru(it, onHour, last) + everyDaySuffix
+		last := func(h uint) string { return d.clock(h, 59, s) }
+		return inner + " " + fromThru(it, d.onHour, last) + d.everyDay()
 	}
-	if out, ok := wrappedPart(inner, sec, minute, it); ok {
+	if out, ok := d.wrappedPart(inner, sec, minute, it); ok {
 		return out
 	}
-	return inner + " in every hour " + fromThru(it, onHour, onHour) + everyDaySuffix // R9
+	return inner + " in every hour " + fromThru(it, d.onHour, d.onHour) + d.everyDay() // R9
 }
 
 // wrappedPart joins one minute on a wrapped hour range with a part of one
 // hour: the part reads "at" its run under one second, otherwise "during" its
 // hour (T9, R11). ok is false when neither part is one hour.
-func wrappedPart(inner string, sec, minute timeField, it timeItem) (string, bool) {
+func (d *describer) wrappedPart(inner string, sec, minute timeField, it timeItem) (string, bool) {
 	p := it.parts(hours)
 	if len(p) != 2 {
 		return "", false
@@ -547,20 +786,20 @@ func wrappedPart(inner string, sec, minute timeField, it timeItem) (string, bool
 	m := minute.vals[0]
 	switch {
 	case p[1][0] == p[1][1] && sec.single():
-		return inner + " in every hour from " + partRange(p[0]) + " and at " + clockTime(p[1][0], m, sec.vals[0]) + everyDaySuffix, true
+		return inner + " in every hour from " + d.partRange(p[0]) + " and at " + d.clock(p[1][0], m, sec.vals[0]) + d.everyDay(), true
 	case p[0][0] == p[0][1] && sec.single():
-		return "at " + clockTime(p[0][0], m, sec.vals[0]) + " and " + inner + " in every hour from " + partRange(p[1]) + everyDaySuffix, true
+		return "at " + d.clock(p[0][0], m, sec.vals[0]) + " and " + inner + " in every hour from " + d.partRange(p[1]) + d.everyDay(), true
 	case p[1][0] == p[1][1]:
-		return inner + " in every hour from " + partRange(p[0]) + " and during the " + onHour(p[1][0]) + " hour" + everyDaySuffix, true
+		return inner + " in every hour from " + d.partRange(p[0]) + " and during the " + d.onHour(p[1][0]) + " hour" + d.everyDay(), true
 	case p[0][0] == p[0][1]:
-		return inner + " during the " + onHour(p[0][0]) + " hour and in every hour from " + partRange(p[1]) + everyDaySuffix, true
+		return inner + " during the " + d.onHour(p[0][0]) + " hour and in every hour from " + d.partRange(p[1]) + d.everyDay(), true
 	}
 	return "", false
 }
 
 // partRange names a part of an hour range: "midnight thru 5 am".
-func partRange(p [2]uint) string {
-	return onHour(p[0]) + thruSep + onHour(p[1])
+func (d *describer) partRange(p [2]uint) string {
+	return d.onHour(p[0]) + thruSep + d.onHour(p[1])
 }
 
 // wholeDay reports an hour step over the whole day that divides 24 (R8, R11).
@@ -570,11 +809,11 @@ func wholeDay(it timeItem) bool {
 
 // stepClause names an hour step past 6 values by its hours (R11): "every 2
 // hours starting with the midnight hour in every day".
-func stepClause(hour timeField) string {
+func (d *describer) stepClause(hour timeField) string {
 	it := hour.items[0]
 	out := fmt.Sprintf("every %d hours ", it.step)
 	if wholeDay(it) {
-		return out + "starting with the " + onHour(it.lo) + " hour in every day"
+		return out + "starting with the " + d.onHour(it.lo) + " hour" + d.inEveryDay()
 	}
 	// T9: the parts, the first range after "from"; a part of one run is
 	// "during" its hour.
@@ -582,16 +821,16 @@ func stepClause(hour timeField) string {
 	words := make([]string, 0, len(parts))
 	for i, p := range parts {
 		if p[0] == p[1] {
-			words = append(words, "during the "+onHour(p[0])+" hour")
+			words = append(words, "during the "+d.onHour(p[0])+" hour")
 			continue
 		}
-		w := "the " + onHour(p[0]) + " hour thru the " + onHour(p[1]) + " hour"
+		w := "the " + d.onHour(p[0]) + " hour thru the " + d.onHour(p[1]) + " hour"
 		if i == 0 || parts[0][0] == parts[0][1] {
 			w = "from " + w
 		}
 		words = append(words, w)
 	}
-	return out + andList(words) + inEveryDaySuffix
+	return out + andList(words) + d.inEveryDay()
 }
 
 // stepParts returns the first and last run of an hour step. A wrapped step
@@ -640,7 +879,7 @@ func partWords(parts [][2]uint, at func(h uint) string) string {
 
 // clockTimes describes a fixed second as clock times: one hour with up to 6
 // minutes, or one minute on named hours (T4, R7).
-func clockTimes(s uint, minute, hour timeField) (string, bool) {
+func (d *describer) clockTimes(s uint, minute, hour timeField) (string, bool) {
 	oneHour := hour.single() && len(minute.vals) <= valueLimit
 	oneMinute := minute.single() && hour.kind() == namedHours // T3: every hour is not a list
 	if !oneHour && !oneMinute {
@@ -649,28 +888,28 @@ func clockTimes(s uint, minute, hour timeField) (string, bool) {
 	clocks := make([]string, 0, len(hour.vals)*len(minute.vals))
 	for _, h := range hour.vals {
 		for _, m := range minute.vals {
-			clocks = append(clocks, clockTime(h, m, s))
+			clocks = append(clocks, d.clock(h, m, s))
 		}
 	}
-	return "at " + andList(clocks) + everyDaySuffix, true
+	return "at " + andList(clocks) + d.everyDay(), true
 }
 
 // hourStep describes one minute on an hour step past 6 values (R8): the
 // start, with the minute folded in, and the end unless the step covers the
 // whole day and divides 24.
-func hourStep(s uint, minute, hour timeField) (string, bool) {
+func (d *describer) hourStep(s uint, minute, hour timeField) (string, bool) {
 	if !minute.single() || hour.kind() != longStep {
 		return "", false
 	}
 	it, m := hour.items[0], minute.vals[0]
 	out := fmt.Sprintf("every %d hours ", it.step)
 	if wholeDay(it) {
-		out += "starting at " + clockTime(it.lo, m, s)
+		out += "starting at " + d.clock(it.lo, m, s)
 	} else {
-		at := func(h uint) string { return clockTime(h, m, s) }
+		at := func(h uint) string { return d.clock(h, m, s) }
 		out += partWords(stepParts(it, hour.r), at)
 	}
-	return out + inEveryDaySuffix, true
+	return out + d.inEveryDay(), true
 }
 
 // clockTime writes h:m:s on the 12-hour clock: "midnight", "noon", "2 am",
