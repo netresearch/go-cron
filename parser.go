@@ -147,6 +147,9 @@ type cacheEntry struct {
 	err      error
 }
 
+// errHashKeyRequired is returned for a spec with H and no hash key.
+var errHashKeyRequired = errors.New("h expressions require a hash key: use ParseWithHashKey or WithHashKey")
+
 // ErrNoFields is returned when no fields or Descriptor are configured.
 var ErrNoFields = errors.New("at least one field or Descriptor must be configured")
 
@@ -366,7 +369,9 @@ func (p Parser) WithSecondOptional() Parser {
 // distribute execution times across the allowed range.
 //
 // When a hash key is set, the Parse method can handle H expressions without
-// requiring ParseWithHashKey to be called explicitly.
+// requiring ParseWithHashKey to be called explicitly. On a Cron that uses this
+// Parser directly, the key applies to unnamed jobs and a named job uses its name
+// instead. A wrapper around Parser uses this key for named jobs too.
 //
 // Example:
 //
@@ -507,7 +512,7 @@ func (p Parser) parse(spec string) (Schedule, error) {
 			return nil, errors.New("h expressions require hash option to be enabled")
 		}
 		if p.hashKey == "" {
-			return nil, errors.New("h expressions require a hash key: use ParseWithHashKey or WithHashKey")
+			return nil, errHashKeyRequired
 		}
 	}
 

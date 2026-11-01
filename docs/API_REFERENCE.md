@@ -1937,24 +1937,20 @@ With the `Hash` option (included in `FullParser`), a field can hold `H`, which s
 - The bounds of `H(a-b)` are numbers (`H(MON-FRI)` is an error). The range may wrap around like a plain range, e.g. `H(22-2)` in hours.
 - `H` is accepted in the seconds, minutes, hours, day-of-month, month and day-of-week fields, also in a list (`H,30`); the year field does not accept it. In day of month, `H` can choose 29–31, which short months lack; `H(1-28)` gives a day of every month.
 - In day of week, `H` chooses among the seven days and counts Sunday (0 or 7) once, so each day is chosen equally often; steps walk the seven days. `0 0 * * H` with `job-a` runs on Saturdays, `0 0 * * H(1-5)` on Fridays.
-- Without a hash key, or without the `Hash` option, a spec with `H` is an error. `ValidateSpec` therefore rejects it; use `AnalyzeSpecWithHash` or a parser with `WithHashKey`.
+- Without a hash key, or without the `Hash` option, a spec with `H` is an error. The package-level `ValidateSpec` therefore rejects it; use `Cron.ValidateSpec`, `AnalyzeSpecWithHash` or a parser with `WithHashKey`.
 
-A `Cron` does not use the entry name as the hash key. With `WithParser(parser.WithHashKey(k))`, every job added with the same `H` spec runs at the same time. To spread jobs, parse each spec with its own key and schedule the result:
+On a `Cron`, a named job uses its name as the hash key, so named jobs with the same `H` spec are spread without further setup ([ADR-028](adr/ADR-028-entry-name-as-hash-key.md)). This holds for every method that takes a spec for a named entry, including `UpsertJob`, the `Update*` methods with a spec, and `AddWorkflow`. Renaming a job moves it to other values.
 
 ```go
 parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Hash)
 c := cron.New(cron.WithParser(parser))
-for _, name := range []string{"job-a", "job-b"} {
-    schedule, err := parser.ParseWithHashKey("H * * * *", name)
-    if err != nil {
-        return err
-    }
-    if _, err := c.ScheduleJob(schedule, cron.FuncJob(run), cron.WithName(name)); err != nil {
-        return err
-    }
-}
-// job-a runs at minute 54, job-b at minute 23
+c.AddFunc("H * * * *", backup, cron.WithName("job-a")) // minute 54
+c.AddFunc("H * * * *", report, cron.WithName("job-b")) // minute 23
 ```
+
+The key is the entry's name, then the parser's `WithHashKey` for an unnamed job; without either, a spec with `H` is an error. For a key that differs from the name, use `ParseWithHashKey` and add the result with `ScheduleJob`.
+
+This needs the built-in `Parser`. `Cron` calls any other `ScheduleParser`, including a wrapper that embeds `Parser`, through `Parse`, also for named jobs; such a parser needs its own key.
 
 Each value above is checked by an `Example` function in `example_test.go`. The package documentation (`doc.go`, "Hash Expressions") describes the same syntax.
 

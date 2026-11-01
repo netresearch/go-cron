@@ -1113,8 +1113,8 @@ func ExampleNewParser_hashStepEdgeCases() {
 	// H(0-5)/10: [4]
 }
 
-// This example demonstrates spreading jobs on one Cron. A parser has one hash
-// key, so parse each job's spec with its own key and schedule the result.
+// This example demonstrates setting the hash key per job with ParseWithHashKey
+// and ScheduleJob, which also works for a key that differs from the entry name.
 func ExampleCron_ScheduleJob_hashKeyPerJob() {
 	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Hash)
 	c := cron.New(cron.WithParser(parser))
@@ -1126,6 +1126,28 @@ func ExampleCron_ScheduleJob_hashKeyPerJob() {
 			return
 		}
 		if _, err := c.ScheduleJob(schedule, cron.FuncJob(func() {}), cron.WithName(name)); err != nil {
+			fmt.Println("Error:", err)
+			return
+		}
+	}
+
+	from := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	for _, name := range []string{"job-a", "job-b"} {
+		fmt.Printf("%s at minute %d\n", name, c.EntryByName(name).Schedule.Next(from).Minute())
+	}
+	// Output:
+	// job-a at minute 54
+	// job-b at minute 23
+}
+
+// This example shows that a named job uses its name as the hash key, so jobs
+// with the same H spec are spread without further setup.
+func ExampleCron_AddFunc_hashKeyFromName() {
+	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Hash)
+	c := cron.New(cron.WithParser(parser))
+
+	for _, name := range []string{"job-a", "job-b"} {
+		if _, err := c.AddFunc("H * * * *", func() {}, cron.WithName(name)); err != nil {
 			fmt.Println("Error:", err)
 			return
 		}
