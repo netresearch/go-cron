@@ -137,12 +137,12 @@ type timeField struct {
 	container string // the unit a step starts over in
 	r         bounds
 	items     []timeItem
-	vals      []uint // values once each: sorted, except one hour item in firing order
+	vals      []uint // values once each, sorted
 }
 
 // newTimeField parses the field text, which has already parsed as a spec,
-// into its items and the values they fire on, once each. Seconds and
-// minutes sort (T9); hours keep the firing order of a single item (T6).
+// into its items and the values they fire on, once each, sorted: a wrapped
+// range is shorthand for two ranges, so it reads in clock order (T6, T9).
 func newTimeField(text, unit, container string, r bounds) timeField {
 	f := timeField{unit: unit, container: container, r: r}
 	for _, expr := range strings.FieldsFunc(text, func(r rune) bool { return r == ',' }) {
@@ -160,11 +160,35 @@ func newTimeField(text, unit, container string, r bounds) timeField {
 		f.items = append(f.items, it)
 		f.vals = append(f.vals, it.runs(r)...)
 	}
-	if len(f.items) > 1 || unit != "hour" {
-		slices.Sort(f.vals) // a list renders the union of its items
-	}
+	slices.Sort(f.vals)
 	f.vals = uniq(f.vals)
 	return f
+}
+
+// parts splits the item's range into the ranges it covers in clock order: a
+// wrapped range is shorthand for two (T9).
+func (it timeItem) parts(r bounds) [][2]uint {
+	if it.lo <= it.hi {
+		return [][2]uint{{it.lo, it.hi}}
+	}
+	return [][2]uint{{r.min, it.hi}, {it.lo, r.max}}
+}
+
+// fromThru names an hour range by its parts (T9): "from 9 am thru 5 pm",
+// "from midnight thru 5 am and 8 pm thru 11 pm". start and end write a
+// part's first and last hour.
+func fromThru(it timeItem, start, end func(h uint) string) string {
+	parts := it.parts(hours)
+	words := make([]string, 0, len(parts))
+	for _, p := range parts {
+		words = append(words, start(p[0])+" thru "+end(p[1]))
+	}
+	return "from " + andList(words)
+}
+
+// onHour writes an hour as its clock time on the hour.
+func onHour(h uint) string {
+	return clockTime(h, 0, 0)
 }
 
 // runs lists the values an item fires on, in firing order.
@@ -279,14 +303,19 @@ func (f timeField) named() bool {
 	return f.single() || !f.star() && (len(f.items) > 1 || len(f.vals) <= valueLimit)
 }
 
-// hourNames names the hours: "the 9 am hour", "the 9 am and 5 pm hours" (R3).
+// hourNames names the hours: "the 9 am hour", "the 9 am and 5 pm hours", and
+// with no article before a list that starts with midnight, "midnight, 6 am,
+// noon, and 6 pm hours" (R3).
 func (f timeField) hourNames() string {
 	clocks := make([]string, len(f.vals))
 	for i, h := range f.vals {
-		clocks[i] = clockTime(h, 0, 0)
+		clocks[i] = onHour(h)
 	}
-	if len(clocks) == 1 {
+	switch {
+	case len(clocks) == 1:
 		return "the " + clocks[0] + " hour"
+	case clocks[0] == "midnight":
+		return andList(clocks) + " hours"
 	}
 	return "the " + andList(clocks) + " hours"
 }
@@ -432,8 +461,7 @@ func onTheHour(lead string, hour timeField) string {
 	case longStep:
 		return lead + " " + stepClause(hour)
 	}
-	it := hour.items[0]
-	return lead + " every hour from " + clockTime(it.lo, 0, 0) + " thru " + clockTime(it.hi, 0, 0) + " every day"
+	return lead + " every hour " + fromThru(hour.items[0], onHour, onHour) + " every day"
 }
 
 // joinHours joins the hours to inner, the seconds and minutes (R6, R9–R12,
@@ -442,9 +470,11 @@ func joinHours(inner, every string, sec, minute, hour timeField) string {
 	if it, ok := hour.span(); ok && !hour.every() && len(minute.vals) > 1 && !minute.every() &&
 		(it.lo < it.hi || hour.kind() == longRange) {
 		// T5: the first and last run of the day lead.
-		return "from " + clockTime(it.lo, minute.vals[0], sec.vals[0]) + " thru " +
-			clockTime(it.hi, minute.vals[len(minute.vals)-1], sec.vals[len(sec.vals)-1]) +
-			" every day, " + inner + " past each hour"
+		first := func(h uint) string { return clockTime(h, minute.vals[0], sec.vals[0]) }
+		last := func(h uint) string {
+			return clockTime(h, minute.vals[len(minute.vals)-1], sec.vals[len(sec.vals)-1])
+		}
+		return fromThru(it, first, last) + " every day, " + inner + " past each hour"
 	}
 	switch hour.kind() {
 	case everyHour:
@@ -460,16 +490,16 @@ func joinHours(inner, every string, sec, minute, hour timeField) string {
 		return inner + " " + stepClause(hour)
 	}
 	it := hour.items[0]
-	from := " from " + clockTime(it.lo, 0, 0) + " thru "
 	if minute.every() {
 		// R12: the first and last run.
-		last := clockTime(it.hi, 59, 0)
+		var s uint
 		if sec.every() {
-			last = clockTime(it.hi, 59, 59)
+			s = 59
 		}
-		return inner + from + last + " every day"
+		last := func(h uint) string { return clockTime(h, 59, s) }
+		return inner + " " + fromThru(it, onHour, last) + " every day"
 	}
-	return inner + " in every hour" + from + clockTime(it.hi, 0, 0) + " every day" // R9
+	return inner + " in every hour " + fromThru(it, onHour, onHour) + " every day" // R9
 }
 
 // wholeDay reports an hour step over the whole day that divides 24 (R8, R11).
@@ -482,7 +512,8 @@ func wholeDay(it timeItem) bool {
 func stepClause(hour timeField) string {
 	it := hour.items[0]
 	out := fmt.Sprintf("every %d hours ", it.step)
-	first, last := hour.vals[0], hour.vals[len(hour.vals)-1]
+	runs := it.runs(hour.r) // firing order: a wrapped step starts at its low end
+	first, last := runs[0], runs[len(runs)-1]
 	if wholeDay(it) {
 		return out + "starting with the " + clockTime(first, 0, 0) + " hour in every day"
 	}
@@ -514,11 +545,12 @@ func hourStep(s uint, minute, hour timeField) (string, bool) {
 		return "", false
 	}
 	it, m := hour.items[0], minute.vals[0]
+	runs := it.runs(hour.r) // firing order: a wrapped step starts at its low end
 	out := fmt.Sprintf("every %d hours ", it.step)
 	if wholeDay(it) {
-		out += "starting at " + clockTime(hour.vals[0], m, s)
+		out += "starting at " + clockTime(runs[0], m, s)
 	} else {
-		out += "from " + clockTime(hour.vals[0], m, s) + " thru " + clockTime(hour.vals[len(hour.vals)-1], m, s)
+		out += "from " + clockTime(runs[0], m, s) + " thru " + clockTime(runs[len(runs)-1], m, s)
 	}
 	return out + " in every day", true
 }
