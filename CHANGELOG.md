@@ -14,12 +14,8 @@ Originally based on [robfig/cron](https://github.com/robfig/cron).
   up to Saturday (6), as in robfig/cron, instead of up to Sunday as 7. It
   accepts the same specs as the default parser ([PR#443])
 - `DescribeSpec` and `Parser.DescribeSpec` return an English description of a
-  spec's second, minute and hour fields, with `WithClockForm` for 24-hour,
-  24-hour with words, or 12-hour times.
-  Wording, grammar and method: `docs/DESCRIBE.md` (#205)
-- `DescribeSpec` describes the day of month, day of week, month and year
-  fields: "at 00:00 on the 13th of the month when it falls on Friday",
-  "at 09:00 on the 1st of the month in January thru March" (#205)
+  spec's second, minute and hour fields, such as "at 2:05 am, 2:20 am, 2:35 am,
+  and 2:50 am every day". Wording, grammar and method: `docs/DESCRIBE.md` (#205)
 
 ### Fixed
 - `RobfigCompat` now includes `DowStepToSaturday`, so `0 0 * * 1/2` runs on
