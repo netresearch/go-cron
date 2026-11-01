@@ -73,9 +73,7 @@ func (p Parser) DescribeSpec(spec string, _ ...DescribeOption) (string, error) {
 	}
 	if !containsHashExpr(fields) && isWildcard(fields[3]) && isWildcard(fields[4]) &&
 		isWildcard(fields[5]) && (yearField == "" || isWildcard(yearField)) {
-		if out, ok := describeTime(fields); ok {
-			return out, nil
-		}
+		return describeTime(fields), nil
 	}
 	return p.describeLiteral(spec, fields, yearField), nil
 }
@@ -301,48 +299,194 @@ func count(n uint, unit string) string {
 	return fmt.Sprintf("%d %ss", n, unit)
 }
 
+// hourKind sorts an hour field by how it joins what comes before it.
+type hourKind int
+
+const (
+	everyHour  hourKind = iota // every hour
+	namedHours                 // one hour, a list, or a range or range step of up to 6 (R3)
+	stepHours                  // a star step of up to 6 values, or a list with one (R10)
+	longRange                  // one range past 6 values (R9, R12)
+	longStep                   // one step past 6 values (R8, R11)
+)
+
+// kind returns the hour field's kind.
+func (f timeField) kind() hourKind {
+	switch {
+	case f.every():
+		return everyHour
+	case f.named():
+		return namedHours
+	case len(f.items) == 1 && f.items[0].step > 1 && len(f.vals) > valueLimit:
+		return longStep
+	case f.star():
+		return stepHours
+	}
+	return longRange
+}
+
 // describeTime describes the second, minute and hour fields of a spec whose
-// date fields are all wildcards. ok is false for a combination the grammar
-// has no form for.
-func describeTime(fields []string) (out string, ok bool) {
+// date fields are all wildcards: what leads, the minutes joined to it, then
+// the hours (C1).
+func describeTime(fields []string) string {
 	sec := newTimeField(fields[0], "second", "minute", seconds)
 	minute := newTimeField(fields[1], "minute", "hour", minutes)
 	hour := newTimeField(fields[2], "hour", "day", hours)
-	switch {
-	case sec.every():
-		return everySecond(minute, hour)
-	case !sec.single():
-		// R5, R6: several seconds within one minute of every hour.
-		if minute.single() && minute.vals[0] != 0 && hour.every() {
-			text, note := sec.nums()
-			return fmt.Sprintf("at seconds %s within minute %d in every hour", text, minute.vals[0]) + withNote(note), true
+	if sec.single() {
+		if out, ok := clockTimes(sec.vals[0], minute, hour); ok {
+			return out
 		}
-		return "", false
+		if out, ok := hourStep(sec.vals[0], minute, hour); ok {
+			return out
+		}
 	}
-	s := sec.vals[0]
-	if out, ok := clockTimes(s, minute, hour); ok {
-		return out, true
+	var n notes
+	out := n.describe(sec, minute, hour)
+	if len(n) == 0 {
+		return out
 	}
-	if out, ok := hourStep(s, minute, hour); ok {
-		return out, true
-	}
-	if s != 0 {
-		return fixedSecond(s, minute, hour)
-	}
-	return byMinute(minute, hour)
+	return out + " (" + strings.Join(n, "; ") + ")"
 }
 
-// everySecond describes a spec that runs every second of its minutes (T3, R6, J1).
-func everySecond(minute, hour timeField) (string, bool) {
+// notes collects the interval notes of the fields a description cuts short.
+type notes []string
+
+// nums renders f's values and keeps its note.
+func (n *notes) nums(f timeField) string {
+	text, note := f.nums()
+	if note != "" {
+		*n = append(*n, note)
+	}
+	return text
+}
+
+// values names minutes after "within" or "for": "minute 30", "minutes 0 and 30".
+func (n *notes) values(f timeField) string {
+	if f.single() {
+		return fmt.Sprintf("%s %d", f.unit, f.vals[0])
+	}
+	return f.unit + "s " + n.nums(f)
+}
+
+// describe describes the fields by what leads: minutes at second 0, or the
+// seconds.
+func (n *notes) describe(sec, minute, hour timeField) string {
+	switch {
+	case !sec.single() || sec.vals[0] != 0:
+		return n.bySeconds(sec, minute, hour)
+	case minute.single():
+		return onTheHour(minuteAt(minute.vals[0]), hour)
+	case minute.every():
+		return joinHours("every minute", "", sec, minute, hour)
+	}
+	return joinHours("at minutes "+n.nums(minute), "past the hour", sec, minute, hour)
+}
+
+// bySeconds describes fields led by seconds other than 0 (C1): the minutes
+// join with "within", or with "for" after "every second".
+func (n *notes) bySeconds(sec, minute, hour timeField) string {
+	if sec.every() {
+		if minute.every() {
+			return joinHours("every second", "", sec, minute, hour)
+		}
+		return joinHours("every second for "+n.values(minute), "in every hour", sec, minute, hour)
+	}
+	secs := "at " + count(sec.vals[0], "second")
+	if !sec.single() {
+		secs = "at seconds " + n.nums(sec)
+	}
 	switch {
 	case minute.every() && hour.every():
-		return "every second", true
-	case minute.every() && hour.named():
-		return "every second during " + hour.hourNames(), true
-	case minute.single() && minute.vals[0] != 0 && hour.every():
-		return fmt.Sprintf("every second for minute %d in every hour", minute.vals[0]), true
+		return secs + " within a minute"
+	case minute.every():
+		return joinHours(secs+" within every minute", "", sec, minute, hour)
+	case minute.single() && minute.vals[0] == 0:
+		return onTheHour(secs+" past the top of", hour)
 	}
-	return "", false
+	return joinHours(secs+" within "+n.values(minute), "in every hour", sec, minute, hour)
+}
+
+// minuteAt opens one minute on the hour forms: "at the top of" (R4), "at 30
+// minutes past" (R5).
+func minuteAt(m uint) string {
+	if m == 0 {
+		return "at the top of"
+	}
+	return "at " + count(m, "minute") + " past"
+}
+
+// onTheHour joins the hours to one minute, any minute, as lead opens it
+// (R4, R5, R9, R10): "at the top of every hour", "at 30 minutes past every
+// hour from 9 am thru 5 pm every day".
+func onTheHour(lead string, hour timeField) string {
+	switch hour.kind() {
+	case everyHour:
+		if strings.HasSuffix(lead, " past") {
+			return lead + " the hour"
+		}
+		return lead + " every hour"
+	case namedHours:
+		return lead + " " + hour.hourNames()
+	case stepHours:
+		return lead + " " + hour.hourNames() + " in every day"
+	case longStep:
+		return lead + " " + stepClause(hour)
+	}
+	it := hour.items[0]
+	return lead + " every hour from " + clockTime(it.lo, 0, 0) + " thru " + clockTime(it.hi, 0, 0) + " every day"
+}
+
+// joinHours joins the hours to inner, the seconds and minutes (R6, R9–R12,
+// T5). every is the join for every hour.
+func joinHours(inner, every string, sec, minute, hour timeField) string {
+	if it, ok := hour.span(); ok && !hour.every() && len(minute.vals) > 1 && !minute.every() &&
+		(it.lo < it.hi || hour.kind() == longRange) {
+		// T5: the first and last run of the day lead.
+		return "from " + clockTime(it.lo, minute.vals[0], sec.vals[0]) + " thru " +
+			clockTime(it.hi, minute.vals[len(minute.vals)-1], sec.vals[len(sec.vals)-1]) +
+			" every day, " + inner + " past each hour"
+	}
+	switch hour.kind() {
+	case everyHour:
+		if every == "" {
+			return inner
+		}
+		return inner + " " + every
+	case namedHours:
+		return inner + " during " + hour.hourNames()
+	case stepHours:
+		return inner + " during " + hour.hourNames() + " in every day"
+	case longStep:
+		return inner + " " + stepClause(hour)
+	}
+	it := hour.items[0]
+	from := " from " + clockTime(it.lo, 0, 0) + " thru "
+	if minute.every() {
+		// R12: the first and last run.
+		last := clockTime(it.hi, 59, 0)
+		if sec.every() {
+			last = clockTime(it.hi, 59, 59)
+		}
+		return inner + from + last + " every day"
+	}
+	return inner + " in every hour" + from + clockTime(it.hi, 0, 0) + " every day" // R9
+}
+
+// wholeDay reports an hour step over the whole day that divides 24 (R8, R11).
+func wholeDay(it timeItem) bool {
+	return it.lo == hours.min && it.hi == hours.max && 24%it.step == 0
+}
+
+// stepClause names an hour step past 6 values by its hours (R11): "every 2
+// hours starting with the midnight hour in every day".
+func stepClause(hour timeField) string {
+	it := hour.items[0]
+	out := fmt.Sprintf("every %d hours ", it.step)
+	first, last := hour.vals[0], hour.vals[len(hour.vals)-1]
+	if wholeDay(it) {
+		return out + "starting with the " + clockTime(first, 0, 0) + " hour in every day"
+	}
+	return out + "from the " + clockTime(first, 0, 0) + " hour thru the " + clockTime(last, 0, 0) + " hour in every day"
 }
 
 // clockTimes describes a fixed second as clock times: one hour with up to 6
@@ -366,92 +510,17 @@ func clockTimes(s uint, minute, hour timeField) (string, bool) {
 // start, with the minute folded in, and the end unless the step covers the
 // whole day and divides 24.
 func hourStep(s uint, minute, hour timeField) (string, bool) {
-	if !minute.single() || len(hour.items) != 1 || hour.items[0].step < 2 || len(hour.vals) <= valueLimit {
+	if !minute.single() || hour.kind() != longStep {
 		return "", false
 	}
 	it, m := hour.items[0], minute.vals[0]
 	out := fmt.Sprintf("every %d hours ", it.step)
-	if it.lo == hours.min && it.hi == hours.max && 24%it.step == 0 {
+	if wholeDay(it) {
 		out += "starting at " + clockTime(hour.vals[0], m, s)
 	} else {
 		out += "from " + clockTime(hour.vals[0], m, s) + " thru " + clockTime(hour.vals[len(hour.vals)-1], m, s)
 	}
 	return out + " in every day", true
-}
-
-// fixedSecond describes one second other than 0 in every hour (R4, R5, R6).
-func fixedSecond(s uint, minute, hour timeField) (string, bool) {
-	if !hour.every() {
-		return "", false
-	}
-	at := "at " + count(s, "second")
-	switch {
-	case minute.every():
-		return at + " within a minute", true
-	case minute.single() && minute.vals[0] == 0:
-		return at + " past the top of every hour", true
-	case !minute.single():
-		text, note := minute.nums()
-		return at + " within minutes " + text + " in every hour" + withNote(note), true
-	}
-	return "", false
-}
-
-// byMinute describes second 0 by its minutes and hours.
-func byMinute(minute, hour timeField) (string, bool) {
-	switch {
-	case minute.every():
-		// T3, R6
-		if hour.every() {
-			return "every minute", true
-		}
-		if hour.named() {
-			return "every minute during " + hour.hourNames(), true
-		}
-	case minute.single():
-		return oneMinute(minute.vals[0], hour)
-	default:
-		text, note := minute.nums()
-		if it, ok := hour.span(); hour.every() {
-			return "at minutes " + text + " past the hour" + withNote(note), true
-		} else if ok && it.lo < it.hi {
-			// T5: the first and last run of the day lead.
-			return "from " + clockTime(it.lo, minute.vals[0], 0) + " thru " +
-				clockTime(it.hi, minute.vals[len(minute.vals)-1], 0) +
-				" every day, at minutes " + text + " past each hour" + withNote(note), true
-		} else if hour.named() {
-			return "at minutes " + text + " during " + hour.hourNames() + withNote(note), true
-		}
-	}
-	return "", false
-}
-
-// oneMinute describes one minute at second 0 on hours that are not clock
-// times: every hour (R4, R5), an hour step of up to 6 values (R3, R4), or an
-// hour range past 6 values (R9).
-func oneMinute(m uint, hour timeField) (string, bool) {
-	switch {
-	case hour.every() && m == 0:
-		return "at the top of every hour", true
-	case hour.every():
-		return "at " + count(m, "minute") + " past the hour", true
-	case m != 0:
-		return "", false
-	case len(hour.items) == 1 && hour.items[0].star:
-		return "at the top of " + hour.hourNames() + " in every day", true
-	}
-	if it, ok := hour.span(); ok {
-		return "at the top of every hour from " + clockTime(it.lo, 0, 0) + " thru " + clockTime(it.hi, 0, 0) + " every day", true
-	}
-	return "", false
-}
-
-// withNote returns note in parentheses after a space, or "" for no note.
-func withNote(note string) string {
-	if note == "" {
-		return ""
-	}
-	return " (" + note + ")"
 }
 
 // clockTime writes h:m:s on the 12-hour clock: "midnight", "noon", "2 am",
