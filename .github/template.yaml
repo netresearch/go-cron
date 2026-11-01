@@ -2,6 +2,7 @@
 # Drift from the template is blocking CI in this repo (check-template-drift.yml).
 # Record explicit exceptions under intentional-drift[] to unblock.
 template: go-lib
+strict-pins: true
 intentional-drift:
 - path: .github/workflows/ci.yml
   reason: Enables enable-integration-tests=true for the go-check reusable workflow.

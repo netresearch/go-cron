@@ -278,14 +278,18 @@ Saturday or Monday, Wednesday and Friday).
 	0 0 * * H        - midnight on one day of the week (job-a: Saturday)
 	0 0 * * H(1-5)   - midnight on one weekday         (job-a: Friday)
 
-The key comes from Parser.WithHashKey, which sets one key for every spec the
-parser reads, or from Parser.ParseWithHashKey, which sets it for one spec.
-Without a key, or without the Hash option, a spec containing H is an error.
-A Cron does not use the entry name as the key: jobs added with AddFunc and the
-same H spec on a Cron whose parser has WithHashKey all run at the same time.
-To spread several jobs, parse each spec with ParseWithHashKey and the job's
-name, and add the result with Cron.ScheduleJob. AnalyzeSpecWithHash analyzes
-a spec with H for a given key.
+On a Cron with the built-in Parser, a named job uses its name as the key, so
+jobs with the same H spec are spread without further setup:
+
+	c.AddFunc("H * * * *", backup, cron.WithName("job-a")) // minute 54
+	c.AddFunc("H * * * *", report, cron.WithName("job-b")) // minute 23
+
+Renaming a job moves it to other values. An unnamed job uses the key from
+Parser.WithHashKey, which sets one key for every spec the parser reads.
+Parser.ParseWithHashKey sets the key for one spec; add the result with
+Cron.ScheduleJob for a key that differs from the name. Without a key, or
+without the Hash option, a spec containing H is an error.
+AnalyzeSpecWithHash analyzes a spec with H for a given key.
 
 # Predefined schedules
 

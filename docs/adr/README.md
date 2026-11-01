@@ -43,6 +43,7 @@ An Architecture Decision Record captures a significant decision made about the a
 | [ADR-025](ADR-025-locker-interface.md) | Locker Interface for Coordination Between Instances | Accepted | 2026-10 |
 | [ADR-026](ADR-026-aligned-intervals.md) | Aligned Intervals | Accepted | 2026-10 |
 | [ADR-027](ADR-027-fall-back-by-rhythm.md) | DST Fall-Back by Rhythm | Accepted | 2026-10 |
+| [ADR-028](ADR-028-entry-name-as-hash-key.md) | Entry Name as Hash Key | Accepted | 2026-11 |
 
 ## ADR Template
 
