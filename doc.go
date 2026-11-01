@@ -724,6 +724,8 @@ Use BlockUntil for synchronization in tests with multiple timers:
 
 Input Validation:
   - Cron specifications are limited to 1024 characters (MaxSpecLength)
+  - A year field can select at most 100000 years, so 1-99999 parses and
+    1-2147483647 is an error
   - Timezone specifications are validated against Go's time.LoadLocation
   - Path traversal attempts in timezone strings (e.g., "../etc/passwd") are rejected
 
