@@ -11,9 +11,8 @@ Originally based on [robfig/cron](https://github.com/robfig/cron).
 
 ### Added
 - `DescribeSpec` and `Parser.DescribeSpec` return an English description of a
-  spec's second, minute and hour fields, with `WithClockForm` for 24-hour,
-  24-hour with words, or 12-hour times.
-  Wording, grammar and method: `docs/DESCRIBE.md` (#205)
+  spec's second, minute and hour fields, such as "at 2:05 am, 2:20 am, 2:35 am,
+  and 2:50 am every day". Wording, grammar and method: `docs/DESCRIBE.md` (#205)
 
 ### Planned for v2
 - Context-aware Job interface with graceful shutdown support
