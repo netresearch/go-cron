@@ -333,7 +333,7 @@ type timeField struct {
 	container string // the unit a step starts over in; "" for none
 	r         bounds
 	items     []timeItem
-	vals      []uint            // values once each: sorted, except one item of a coarser field in firing order
+	vals      []uint            // values once each: sorted, except one item of a date field in firing order
 	word      func(uint) string // names a value; nil writes the number
 	limit     int               // values listed before a step is cut short; 0 for valueLimit
 	asList    bool              // hours that read by name, as a list (a wrapped range on a named day)
@@ -348,9 +348,10 @@ func (f timeField) w(v uint) string {
 }
 
 // newTimeField parses the field text, which has already parsed as a spec,
-// into its items and the values they fire on, once each. Seconds and
-// minutes sort (T9); a coarser field keeps the firing order of a single
-// item (T6, D4).
+// into its items and the values they fire on, once each. Seconds, minutes
+// and hours sort: a wrapped range is shorthand for two ranges, so it reads
+// in clock order (T6, T9). A date field keeps the firing order of a single
+// item (D4).
 func newTimeField(text, unit, container string, r bounds) timeField {
 	f := timeField{unit: unit, container: container, r: r}
 	for _, expr := range strings.FieldsFunc(text, func(r rune) bool { return r == ',' }) {
@@ -371,7 +372,7 @@ func newTimeField(text, unit, container string, r bounds) timeField {
 		f.items = append(f.items, it)
 		f.vals = append(f.vals, it.fires(r)...)
 	}
-	if len(f.items) > 1 || unit == "second" || unit == "minute" {
+	if len(f.items) > 1 || unit == "second" || unit == "minute" || unit == "hour" {
 		slices.Sort(f.vals) // a list renders the union of its items
 	}
 	f.vals = uniq(f.vals)
@@ -394,6 +395,33 @@ func (it timeItem) fires(r bounds) []uint {
 		vals[i] %= 7
 	}
 	return vals
+}
+
+// parts splits the item's range into the ranges it covers in clock order: a
+// wrapped range is shorthand for two (T9).
+func (it timeItem) parts(r bounds) [][2]uint {
+	if it.lo <= it.hi {
+		return [][2]uint{{it.lo, it.hi}}
+	}
+	return [][2]uint{{r.min, it.hi}, {it.lo, r.max}}
+}
+
+// fromThru names an hour range by its parts (T9): "from 9 am thru 5 pm",
+// "from midnight thru 5 am and 8 pm thru 11 pm". start and end write a
+// part's first and last hour.
+func fromThru(it timeItem, start, end func(h uint) string) string {
+	parts := it.parts(hours)
+	words := make([]string, 0, len(parts))
+	for _, p := range parts {
+		words = append(words, start(p[0])+" thru "+end(p[1]))
+	}
+	return "from " + andList(words)
+}
+
+// onHour writes an hour as its clock time on the hour; midnight is "12 am"
+// on a named day (R2).
+func (d *describer) onHour(h uint) string {
+	return d.clock(h, 0, 0)
 }
 
 // runs lists the values an item fires on, in firing order.
@@ -512,14 +540,20 @@ func (f timeField) named() bool {
 	return f.asList || f.single() || !f.star() && (len(f.items) > 1 || len(f.vals) <= valueLimit)
 }
 
-// hourNames names the hours: "the 9 am hour", "the 9 am and 5 pm hours" (R3).
+// hourNames names the hours: "the 9 am hour", "the 9 am and 5 pm hours", and
+// with no article before a list that starts with midnight, "midnight, 6 am,
+// noon, and 6 pm hours" (R3). On a named day midnight is "12 am" and keeps
+// the article.
 func (d *describer) hourNames(f timeField) string {
 	clocks := make([]string, len(f.vals))
 	for i, h := range f.vals {
-		clocks[i] = d.clock(h, 0, 0)
+		clocks[i] = d.onHour(h)
 	}
-	if len(clocks) == 1 {
+	switch {
+	case len(clocks) == 1:
 		return "the " + clocks[0] + " hour"
+	case clocks[0] == "midnight":
+		return andList(clocks) + " hours"
 	}
 	return "the " + andList(clocks) + " hours"
 }
@@ -618,14 +652,13 @@ func (d *describer) clock(h, m, s uint) string {
 }
 
 // describeTime describes the second, minute and hour fields: what leads, the
-// minutes joined to it, then the hours (C1). On a named day the hours read
-// ascending (T6), and a wrapped hour range reads as a list.
+// minutes joined to it, then the hours (C1). On a named day a wrapped hour
+// range reads as a list (T6).
 func (d *describer) describeTime(fields []string) string {
 	sec := newTimeField(fields[0], "second", "minute", seconds)
 	minute := newTimeField(fields[1], "minute", "hour", minutes)
 	hour := newTimeField(fields[2], "hour", "day", hours)
 	if d.named {
-		slices.Sort(hour.vals)
 		hour.asList = slices.ContainsFunc(hour.items, func(it timeItem) bool { return !it.star && it.lo > it.hi })
 	}
 	if sec.single() {
@@ -697,8 +730,7 @@ func (d *describer) onTheHour(lead string, hour timeField) string {
 	case longStep:
 		return lead + " " + d.stepClause(hour)
 	}
-	it := hour.items[0]
-	return lead + " every hour from " + d.clock(it.lo, 0, 0) + " thru " + d.clock(it.hi, 0, 0) + d.everyDay()
+	return lead + " every hour " + fromThru(hour.items[0], d.onHour, d.onHour) + d.everyDay()
 }
 
 // joinHours joins the hours to inner, the seconds and minutes (R6, R9–R12,
@@ -707,9 +739,11 @@ func (d *describer) joinHours(inner, every string, sec, minute, hour timeField) 
 	if it, ok := hour.span(); ok && !hour.every() && len(minute.vals) > 1 && !minute.every() &&
 		(it.lo < it.hi || hour.kind() == longRange) {
 		// T5: the first and last run of the day lead.
-		return "from " + d.clock(it.lo, minute.vals[0], sec.vals[0]) + " thru " +
-			d.clock(it.hi, minute.vals[len(minute.vals)-1], sec.vals[len(sec.vals)-1]) +
-			d.everyDay() + ", " + inner + " past each hour"
+		first := func(h uint) string { return d.clock(h, minute.vals[0], sec.vals[0]) }
+		last := func(h uint) string {
+			return d.clock(h, minute.vals[len(minute.vals)-1], sec.vals[len(sec.vals)-1])
+		}
+		return fromThru(it, first, last) + d.everyDay() + ", " + inner + " past each hour"
 	}
 	switch hour.kind() {
 	case everyHour:
@@ -725,16 +759,16 @@ func (d *describer) joinHours(inner, every string, sec, minute, hour timeField) 
 		return inner + " " + d.stepClause(hour)
 	}
 	it := hour.items[0]
-	from := " from " + d.clock(it.lo, 0, 0) + " thru "
 	if minute.every() {
 		// R12: the first and last run.
-		last := clockTime(it.hi, 59, 0)
+		var s uint
 		if sec.every() {
-			last = clockTime(it.hi, 59, 59)
+			s = 59
 		}
-		return inner + from + last + d.everyDay()
+		last := func(h uint) string { return d.clock(h, 59, s) }
+		return inner + " " + fromThru(it, d.onHour, last) + d.everyDay()
 	}
-	return inner + " in every hour" + from + d.clock(it.hi, 0, 0) + d.everyDay() // R9
+	return inner + " in every hour " + fromThru(it, d.onHour, d.onHour) + d.everyDay() // R9
 }
 
 // wholeDay reports an hour step over the whole day that divides 24 (R8, R11).
@@ -747,7 +781,8 @@ func wholeDay(it timeItem) bool {
 func (d *describer) stepClause(hour timeField) string {
 	it := hour.items[0]
 	out := fmt.Sprintf("every %d hours ", it.step)
-	first, last := hour.vals[0], hour.vals[len(hour.vals)-1]
+	runs := it.runs(hour.r) // firing order: a wrapped step starts at its low end
+	first, last := runs[0], runs[len(runs)-1]
 	if wholeDay(it) {
 		return out + "starting with the " + d.clock(first, 0, 0) + " hour" + d.inEveryDay()
 	}
@@ -779,11 +814,12 @@ func (d *describer) hourStep(s uint, minute, hour timeField) (string, bool) {
 		return "", false
 	}
 	it, m := hour.items[0], minute.vals[0]
+	runs := it.runs(hour.r) // firing order: a wrapped step starts at its low end
 	out := fmt.Sprintf("every %d hours ", it.step)
 	if wholeDay(it) {
-		out += "starting at " + d.clock(hour.vals[0], m, s)
+		out += "starting at " + d.clock(runs[0], m, s)
 	} else {
-		out += "from " + d.clock(hour.vals[0], m, s) + " thru " + d.clock(hour.vals[len(hour.vals)-1], m, s)
+		out += "from " + d.clock(runs[0], m, s) + " thru " + d.clock(runs[len(runs)-1], m, s)
 	}
 	return out + d.inEveryDay(), true
 }
