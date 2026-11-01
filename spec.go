@@ -10,7 +10,7 @@ import "time"
 type SpecSchedule struct {
 	Second, Minute, Hour, Dom, Month, Dow uint64
 
-	// Year stores valid years using sparse storage for unlimited range.
+	// Year stores valid years using sparse storage.
 	// nil means any year (wildcard). An empty map means no valid years.
 	// Uses map[int]struct{} for O(1) lookup with minimal memory overhead.
 	Year map[int]struct{}
@@ -88,7 +88,8 @@ type bounds struct {
 const YearBase = 1
 
 // YearMax is the maximum valid year for the Year field.
-// With sparse map[int]struct{} storage, there is no technical limit.
+// With sparse map[int]struct{} storage, a single year can be this large, but a
+// year field can select at most 100000 years, because each one is stored.
 // Using math.MaxInt32 (2147483647) ensures compatibility across platforms
 // while being effectively unlimited for any practical scheduling use.
 const YearMax = 1<<31 - 1 // 2147483647

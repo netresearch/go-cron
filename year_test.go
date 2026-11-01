@@ -4,6 +4,7 @@
 package cron
 
 import (
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -384,6 +385,93 @@ func TestYearBounds(t *testing.T) {
 			_, err := parser.Parse(spec)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Parse(%q) error = %v, wantErr %v", spec, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestYearFieldLimit verifies that a year field can select maxYearsPerField
+// years, counted over the whole list, and that the step counts.
+func TestYearFieldLimit(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		field string
+		want  int // years stored; 0 means the limit error
+	}{
+		{"1-99999", 99999},
+		{"1-100000", 100000},
+		{"1-100001", 0},
+		{"1-2000000", 0},
+		{"1-200000/2", 100000},
+		{"1-200001/2", 0},
+		{"1-2147483647/100000", 21475},
+		{"1-50000,50001-100000", 100000},
+		{"1-50000,50001-100001", 0},
+		{"1-60000,1-60000", 0},
+		{"1-50000,1-50000,1-50000", 0},
+		{"2147483647", 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.field, func(t *testing.T) {
+			t.Parallel()
+			got, err := FullParser().Parse("0 0 1 1 * " + tt.field)
+			if tt.want != 0 {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if n := len(got.(*SpecSchedule).Year); n != tt.want {
+					t.Errorf("stored %d years, want %d", n, tt.want)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), "selects more than 100000 years") {
+				t.Errorf("err = %v, want the limit error", err)
+			}
+		})
+	}
+}
+
+// TestYearRangeLimit verifies that a single range is rejected before its years
+// are generated. getYearField would catch it afterwards, at the cost this
+// limit exists to prevent.
+//
+// It is not parallel, because it reads the allocation count of the process. A
+// count of allocations would not do: the years come from one large make.
+func TestYearRangeLimit(t *testing.T) {
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	got, err := getYearRange("1-2000000")
+	runtime.ReadMemStats(&after)
+
+	if err == nil || got != nil {
+		t.Errorf("got %d years, err %v, want the limit error", len(got), err)
+	}
+	if n := after.TotalAlloc - before.TotalAlloc; n > 1<<20 {
+		t.Errorf("allocated %d bytes before the rejection", n)
+	}
+}
+
+// TestYearLimitErrors verifies that a range outside the year bounds reports the
+// bounds, also when it is wide, and that the limit error names the whole field
+// when no single item exceeds the limit.
+func TestYearLimitErrors(t *testing.T) {
+	t.Parallel()
+	tests := []struct{ field, want string }{
+		{"0-2000000", "below minimum"},
+		{"1-3000000000", "above maximum"},
+		{"1-2000000,2030", `selects more than 100000 years: "1-2000000"`},
+		{"1-2000000/2,2030", `selects more than 100000 years: "1-2000000/2"`},
+		{"1-100001,2030", `selects more than 100000 years: "1-100001"`},
+		{"1-100000,2030", `selects more than 100000 years: "1-100000,2030"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.field, func(t *testing.T) {
+			t.Parallel()
+			_, err := FullParser().Parse("0 0 1 1 * " + tt.field)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("err = %v, want %q", err, tt.want)
 			}
 		})
 	}

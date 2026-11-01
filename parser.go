@@ -390,6 +390,11 @@ func (p Parser) WithHashKey(key string) Parser {
 // This limit prevents potential resource exhaustion from extremely long inputs.
 const MaxSpecLength = 1024
 
+// maxYearsPerField is the maximum number of years a year field can select.
+// Every selected year is stored, so MaxSpecLength alone does not bound the cost
+// of a spec: "1-2147483647" is short. All years up to 99999 fit below the limit.
+const maxYearsPerField = 100000
+
 // parseTimezone extracts and validates the timezone from a spec string.
 // Matching single or double quotes around the timezone value are stripped
 // (e.g., TZ="America/New_York" is treated as TZ=America/New_York).
@@ -953,17 +958,28 @@ func getYearField(field string) (map[int]struct{}, error) {
 	}
 
 	yearSet := make(map[int]struct{})
+	selected := 0
 	ranges := strings.FieldsFunc(field, func(r rune) bool { return r == ',' })
 	for _, expr := range ranges {
 		years, err := getYearRange(expr)
 		if err != nil {
 			return nil, err
 		}
+		selected += len(years)
+		if selected > maxYearsPerField {
+			return nil, errTooManyYears(field)
+		}
 		for _, y := range years {
 			yearSet[y] = struct{}{}
 		}
 	}
 	return yearSet, nil
+}
+
+// errTooManyYears returns the error for a year field above maxYearsPerField.
+// It quotes the part of the field that exceeds the limit.
+func errTooManyYears(part string) error {
+	return fmt.Errorf("year field selects more than %d years: %q", maxYearsPerField, part)
 }
 
 // computeHash returns a deterministic hash value from a key.
@@ -992,6 +1008,8 @@ func getFieldWithHash(field string, r bounds, hashKey string, hashEnabled bool) 
 
 // getYearRange parses a single year range expression and returns a slice of years.
 // Supports single years, ranges (2024-2030), and steps (2020-2030/2).
+// It returns an error, before it allocates, if expr selects more than
+// maxYearsPerField years.
 func getYearRange(expr string) ([]int, error) {
 	rangeAndStep := strings.Split(expr, "/")
 	lowAndHigh := strings.Split(rangeAndStep[0], "-")
@@ -1038,9 +1056,14 @@ func getYearRange(expr string) ([]int, error) {
 		return nil, fmt.Errorf("step of range must be a positive number: %q", expr)
 	}
 
+	count := (end-start)/step + 1
+	if count > maxYearsPerField {
+		return nil, errTooManyYears(expr)
+	}
+
 	// Generate list of years.
 	// Conversion is safe: we validated end <= years.max (MaxInt32) above.
-	var result []int
+	result := make([]int, 0, count)
 	for y := start; y <= end; y += step {
 		result = append(result, int(y)) // #nosec G115 -- bounds checked against MaxInt32
 	}

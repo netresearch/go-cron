@@ -3124,6 +3124,8 @@ const MaxSpecLength = 1024
 
 MaxSpecLength is the maximum allowed length for a cron spec string.
 
+A year field has its own limit: it can select at most 100000 years, counted over all items of a list. `1-99999` parses, and `1-2147483647` is an error. A step counts, so `1-2147483647/100000` parses.
+
 ---
 
 ## Errors
