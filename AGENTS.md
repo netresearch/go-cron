@@ -65,6 +65,7 @@ Cron spec parser and job scheduler for Go (successor to robfig/cron).
 | [ADR-025](docs/adr/ADR-025-locker-interface.md) | Locker Interface | `Locker`, `SkipDuplicateRuns`, `SkipWhileLocked` in the library, stores stay out; dedup key = name + scheduled time in UTC, fail closed |
 | [ADR-026](docs/adr/ADR-026-aligned-intervals.md) | Aligned Intervals | `@every_aligned` fires on the epoch grid, `@every_start` from start; `AlignEvery` sets plain `@every`; intervals skip the DST fall-back guard |
 | [ADR-027](docs/adr/ADR-027-fall-back-by-rhythm.md) | Fall-Back by Rhythm | In a repeated fall-back hour, specs that run hourly or more often keep their rhythm; fixed times run once (supersedes the fall-back part of ADR-016) |
+| [ADR-028](docs/adr/ADR-028-entry-name-as-hash-key.md) | Entry Name as Hash Key | A named job on the built-in `Parser` uses its name as the `H` key, then the parser's key; `ScheduleParser` stays unchanged |
 
 When proposing changes that conflict with an ADR, you MUST:
 1. Read the full ADR including alternatives considered
@@ -201,7 +202,7 @@ than chasing it.
 | `docs/OPERATIONS.md` | Production deployment, shutdown, monitoring |
 | `docs/TROUBLESHOOTING.md` | Common issues and debugging techniques |
 | `docs/PROJECT_INDEX.md` | Complete project file index |
-| `docs/adr/` | Architecture Decision Records (28 ADRs) |
+| `docs/adr/` | Architecture Decision Records (29 ADRs) |
 
 ## Releasing
 
