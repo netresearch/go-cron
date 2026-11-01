@@ -95,6 +95,42 @@ var describeGoldens = []struct {
 	{spec: "30 12 * * *", want: "at 12:30 pm every day"},
 	{spec: "0 10,12,14 * * *", want: "at 10 am, noon, and 2 pm every day"},
 
+	// Joins between fields: seconds, minutes, then hours
+	{spec: "* */6 * * *", want: "every minute during the midnight, 6 am, noon, and 6 pm hours in every day"},
+	{spec: "* 9-17 * * *", want: "every minute from 9 am thru 5:59 pm every day"},
+	{spec: "* 0-11 * * *", want: "every minute from midnight thru 11:59 am every day"},
+	{spec: "* */2 * * *", want: "every minute every 2 hours starting with the midnight hour in every day"},
+	{spec: "* 1/3 * * *", want: "every minute every 3 hours from the 1 am hour thru the 10 pm hour in every day"},
+	{spec: "30 */6 * * *", want: "at 30 minutes past the midnight, 6 am, noon, and 6 pm hours in every day"},
+	{spec: "30 9-17 * * *", want: "at 30 minutes past every hour from 9 am thru 5 pm every day"},
+	{spec: "30 0-11 * * *", want: "at 30 minutes past every hour from midnight thru 11 am every day"},
+	{spec: "0,30 */6 * * *", want: "at minutes 0 and 30 during the midnight, 6 am, noon, and 6 pm hours in every day"},
+	{spec: "*/7 20-5 * * *", want: "from 8 pm thru 5:56 am every day, at minutes 0, 7, 14, … 56 past each hour (every 7 minutes, starting over each hour)"},
+	{spec: "*/15 */2 * * *", want: "at minutes 0, 15, 30, and 45 every 2 hours starting with the midnight hour in every day"},
+	{spec: "0,30 1/3 * * *", want: "at minutes 0 and 30 every 3 hours from the 1 am hour thru the 10 pm hour in every day"},
+	{spec: "5 * 9 * * *", opts: []DescribeOption{withSeconds}, want: "at 5 seconds within every minute during the 9 am hour"},
+	{spec: "5 * 9-17 * * *", opts: []DescribeOption{withSeconds}, want: "at 5 seconds within every minute from 9 am thru 5:59 pm every day"},
+	{spec: "5 0 */6 * * *", opts: []DescribeOption{withSeconds}, want: "at 5 seconds past the top of the midnight, 6 am, noon, and 6 pm hours in every day"},
+	{spec: "5 0 9-17 * * *", opts: []DescribeOption{withSeconds}, want: "at 5 seconds past the top of every hour from 9 am thru 5 pm every day"},
+	{spec: "5 30 * * * *", opts: []DescribeOption{withSeconds}, want: "at 5 seconds within minute 30 in every hour"},
+	{spec: "5 30 9-17 * * *", opts: []DescribeOption{withSeconds}, want: "at 5 seconds within minute 30 in every hour from 9 am thru 5 pm every day"},
+	{spec: "5 0,30 9,17 * * *", opts: []DescribeOption{withSeconds}, want: "at 5 seconds within minutes 0 and 30 during the 9 am and 5 pm hours"},
+	{spec: "5 */15 */2 * * *", opts: []DescribeOption{withSeconds}, want: "at 5 seconds within minutes 0, 15, 30, and 45 every 2 hours starting with the midnight hour in every day"},
+	{spec: "*/30 * * * * *", opts: []DescribeOption{withSeconds}, want: "at seconds 0 and 30 within a minute"},
+	{spec: "*/30 0 * * * *", opts: []DescribeOption{withSeconds}, want: "at seconds 0 and 30 past the top of every hour"},
+	{spec: "*/30 0,30 * * * *", opts: []DescribeOption{withSeconds}, want: "at seconds 0 and 30 within minutes 0 and 30 in every hour"},
+	{spec: "*/30 30 9 * * *", opts: []DescribeOption{withSeconds}, want: "at seconds 0 and 30 within minute 30 during the 9 am hour"},
+	{spec: "*/30 0,30 9-17 * * *", opts: []DescribeOption{withSeconds}, want: "from 9 am thru 5:30:30 pm every day, at seconds 0 and 30 within minutes 0 and 30 past each hour"},
+	{spec: "* * */6 * * *", opts: []DescribeOption{withSeconds}, want: "every second during the midnight, 6 am, noon, and 6 pm hours in every day"},
+	{spec: "* * 9-17 * * *", opts: []DescribeOption{withSeconds}, want: "every second from 9 am thru 5:59:59 pm every day"},
+	{spec: "* 0,30 * * * *", opts: []DescribeOption{withSeconds}, want: "every second for minutes 0 and 30 in every hour"},
+	{spec: "* 30 9 * * *", opts: []DescribeOption{withSeconds}, want: "every second for minute 30 during the 9 am hour"},
+	{spec: "* 0 * * * *", opts: []DescribeOption{withSeconds}, want: "every second for minute 0 in every hour"},
+	{spec: "* 30 9-17 * * *", opts: []DescribeOption{withSeconds}, want: "every second for minute 30 in every hour from 9 am thru 5 pm every day"},
+	{spec: "*/30 0 9 * * *", opts: []DescribeOption{withSeconds}, want: "at seconds 0 and 30 past the top of the 9 am hour"},
+	{spec: "*/30 0 */2 * * *", opts: []DescribeOption{withSeconds}, want: "at seconds 0 and 30 past the top of every 2 hours starting with the midnight hour in every day"},
+	{spec: "*/7 */7 * * * *", opts: []DescribeOption{withSeconds}, want: "at seconds 0, 7, 14, … 56 within minutes 0, 7, 14, … 56 in every hour (every 7 seconds, starting over each minute; every 7 minutes, starting over each hour)"},
+
 	// Literal fallback: the whole spec renders field by field
 	{spec: "0 9 * * 1-5", want: "minute 0, hour 9, day of month *, month *, day of week 1-5", literal: true},
 	{spec: "15 0 9 1 * *", opts: []DescribeOption{withSeconds}, want: "second 15, minute 0, hour 9, day of month 1, month *, day of week *", literal: true},
@@ -134,27 +170,36 @@ func describeGrammar() *regexp.Regexp {
 	hourrange := "from " + clock + " thru " + clock
 	everyday := " every day"
 	inevery := " in every day"
-	note := ` \(every ` + alt(unit, num+" "+units) + opt(", starting over each "+unit) + `\)`
+	ival := "every " + alt(unit, num+" "+units) + opt(", starting over each "+unit)
+	note := ` \(` + ival + "(?:; " + ival + `)*\)`
+	hstep := "every " + num + " hours " + alt("starting with "+hours, "from the "+clock+" hour thru the "+clock+" hour") + opt(inevery)
+
+	// C1: what leads, with the minutes joined to the seconds
+	secs := alt("at "+num+" seconds?", "at seconds "+vlist)
+	inner := alt(
+		secs+opt(" within "+alt("a minute", "every minute", "minute "+num, "minutes "+vlist)),
+		"at minutes "+vlist,
+		"every minute",
+		"every second"+opt(" for "+alt("minute "+num, "minutes "+vlist)),
+	)
+	// R4, R5, R9, R10: one minute, any minute, on the hour forms
+	top := alt("at the top of", "at "+num+" minutes? past", secs+" past the top of")
+	tophours := alt("the hour", "every hour"+opt(" "+hourrange)+opt(everyday), hours+opt(inevery), hstep)
+	// R6, R9, R10, R11: the hours joined to what comes before
+	hourjoin := alt("past the hour", "in every hour"+opt(" "+hourrange+opt(everyday)), "during "+hours+opt(inevery), hstep)
 
 	time := alt(
 		// clocktime
 		"at "+list(clock)+opt(everyday),
-		// toptime
-		"at the top of every hour"+opt(" "+hourrange)+opt(everyday),
-		"at the top of "+hours+inevery,
-		// perunit
-		"at "+num+" minutes? past the hour",
-		"at minutes "+vlist+" "+alt("past the hour", "during "+hours)+opt(note),
-		"at "+num+" seconds? within a minute",
-		"at "+num+" seconds? past the top of every hour",
-		"at "+num+" seconds? within minutes "+vlist+" in every hour",
-		"at seconds "+vlist+" within minute "+num+" in every hour",
 		// span
-		hourrange+opt(everyday)+", at minutes "+vlist+" past each hour",
-		// lead
-		"every "+alt("minute", "second")+opt(" "+alt("during "+hours, "for minute "+num+" in every hour")),
+		hourrange+opt(everyday)+", "+inner+" past each hour",
 		// hourstep
 		"every "+num+" hours "+alt("starting at "+clock, hourrange)+opt(inevery),
+		// parts
+		inner+opt(" "+hourjoin),
+		top+" "+tophours,
+		"every "+alt("minute", "second")+" "+hourrange+opt(everyday),
+		secs+" within every minute "+hourrange+opt(everyday),
 	)
 	return regexp.MustCompile("^" + time + opt(note) + "$")
 }
