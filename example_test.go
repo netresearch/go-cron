@@ -1499,8 +1499,8 @@ func ExampleWithPriority() {
 	// 0
 }
 
-// ExampleDescribeSpec shows a description in the default 24-hour clock form
-// and in the 12-hour form.
+// ExampleDescribeSpec shows clock times and the span form, which leads with
+// the first and last run of the day.
 func ExampleDescribeSpec() {
 	desc, err := cron.DescribeSpec("0 22-2/2 * * *")
 	if err != nil {
@@ -1508,9 +1508,9 @@ func ExampleDescribeSpec() {
 	}
 	fmt.Println(desc)
 
-	desc, _ = cron.DescribeSpec("*/7 9-17 * * *", cron.WithClockForm(cron.Clock12))
+	desc, _ = cron.DescribeSpec("*/7 9-17 * * *")
 	fmt.Println(desc)
 	// Output:
-	// at 22:00, 00:00 and 02:00 every day
-	// from 9 am thru 5:56 pm every day, at 0, 7, 14, … 56 minutes past each hour (every 7 minutes, starting over each hour)
+	// at 10 pm, midnight, and 2 am every day
+	// from 9 am thru 5:56 pm every day, at minutes 0, 7, 14, … 56 past each hour (every 7 minutes, starting over each hour)
 }
