@@ -16,6 +16,9 @@ Originally based on [robfig/cron](https://github.com/robfig/cron).
 - `DescribeSpec` and `Parser.DescribeSpec` return an English description of a
   spec's second, minute and hour fields, such as "at 2:05 am, 2:20 am, 2:35 am,
   and 2:50 am every day". Wording, grammar and method: `docs/DESCRIBE.md` (#205)
+- `DescribeSpec` describes the day of month, day of week, month and year
+  fields: "at 12 am on the 13th of the month when it falls on Friday",
+  "at 9 am on the 1st of the month in January thru March" (#205)
 
 ### Fixed
 - `RobfigCompat` now includes `DowStepToSaturday`, so `0 0 * * 1/2` runs on
