@@ -1511,6 +1511,6 @@ func ExampleDescribeSpec() {
 	desc, _ = cron.DescribeSpec("*/7 9-17 * * *")
 	fmt.Println(desc)
 	// Output:
-	// at 10 pm, midnight, and 2 am every day
+	// at midnight, 2 am, and 10 pm every day
 	// from 9 am thru 5:56 pm every day, at minutes 0, 7, 14, … 56 past each hour (every 7 minutes, starting over each hour)
 }
