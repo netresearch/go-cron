@@ -11,6 +11,7 @@ import (
 	"maps"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -802,6 +803,12 @@ func WithPriority(p int) JobOption {
 //	if err := c.ValidateSpec("0 30 * * * *"); err != nil {
 //	    return fmt.Errorf("invalid cron expression: %w", err)
 //	}
+//
+// A spec with H passes without a hash key if the parser is the built-in Parser
+// with the Hash option, because a named job provides the key; it is checked with
+// a stand-in key then. An unnamed job still needs the parser's key, and any other
+// ScheduleParser needs its own key. With StrictDays, a spec whose
+// validity depends on the chosen value can pass or fail for another key.
 func (c *Cron) ValidateSpec(spec string) error {
 	if c == nil {
 		return errors.New("cron: called ValidateSpec on nil Cron instance")
@@ -810,7 +817,49 @@ func (c *Cron) ValidateSpec(spec string) error {
 		return errors.New("cron: parser is nil; ensure cron.New is not configured with a nil parser")
 	}
 	_, err := c.parser.Parse(spec)
+	if errors.Is(err, errHashKeyRequired) {
+		// The name of the job is unknown here, and AddFunc accepts this spec
+		// for a named job.
+		_, err = c.parseNamed(spec, "validate")
+	}
 	return err
+}
+
+// parseNamed parses spec for the entry called name. With the built-in Parser,
+// the name is the hash key of a spec with an H expression; an unnamed entry
+// uses the parser's own key. Any other ScheduleParser gets Parse: a type
+// assertion on ParseWithHashKey would also match a wrapper that embeds Parser
+// and bypass the wrapper's own Parse.
+func (c *Cron) parseNamed(spec, name string) (Schedule, error) {
+	if name == "" || !containsHashExpr(strings.Fields(spec)) {
+		return c.parser.Parse(spec)
+	}
+	switch p := c.parser.(type) {
+	case Parser:
+		return p.ParseWithHashKey(spec, name)
+	case *Parser:
+		return p.ParseWithHashKey(spec, name)
+	}
+	return c.parser.Parse(spec)
+}
+
+// parseWithOptions parses spec for a job created with opts. A spec without an
+// H expression needs no name, so its options are not evaluated here.
+func (c *Cron) parseWithOptions(spec string, opts []JobOption) (Schedule, error) {
+	if !containsHashExpr(strings.Fields(spec)) {
+		return c.parser.Parse(spec)
+	}
+	return c.parseNamed(spec, extractName(opts))
+}
+
+// parseForEntry parses spec for the existing entry id.
+// It returns ErrEntryNotFound if no entry with the given id exists.
+func (c *Cron) parseForEntry(id EntryID, spec string) (Schedule, error) {
+	e := c.Entry(id)
+	if !e.Valid() {
+		return nil, ErrEntryNotFound
+	}
+	return c.parseNamed(spec, e.Name)
 }
 
 // AddFunc adds a func to the Cron to be run on the given schedule.
@@ -860,10 +909,14 @@ func (c *Cron) AddOnceJob(spec string, cmd Job, opts ...JobOption) (EntryID, err
 //
 //	c.AddJob("@every 1h", myJob, cron.WithName("my-job"), cron.WithTags("critical"))
 //
+// The name of a named job is the hash key of its H expressions, so named jobs
+// with the same H spec are spread over the field. This needs the built-in
+// Parser; another ScheduleParser gets Parse.
+//
 // Returns ErrMaxEntriesReached if the maximum entry limit has been reached.
 // Returns ErrDuplicateName if a name is provided and already exists.
 func (c *Cron) AddJob(spec string, cmd Job, opts ...JobOption) (EntryID, error) {
-	schedule, err := c.parser.Parse(spec)
+	schedule, err := c.parseWithOptions(spec, opts)
 	if err != nil {
 		return 0, err
 	}
@@ -969,7 +1022,9 @@ func (c *Cron) scheduleJob(schedule Schedule, cmd Job, opts ...JobOption) (Entry
 
 	// Apply job options
 	for _, opt := range opts {
-		opt(entry)
+		if opt != nil {
+			opt(entry)
+		}
 	}
 
 	// Mark entry as triggered if using a TriggeredSchedule
@@ -1859,7 +1914,7 @@ func (c *Cron) setPaused(req *pauseRequest) error {
 // Returns ErrEntryNotFound if the id does not correspond to an existing entry.
 // Returns a parse error if spec is invalid for the configured parser.
 func (c *Cron) UpdateJob(id EntryID, spec string) error {
-	schedule, err := c.parser.Parse(spec)
+	schedule, err := c.parseForEntry(id, spec)
 	if err != nil {
 		return err
 	}
@@ -1910,7 +1965,7 @@ func (c *Cron) UpdateScheduleByName(name string, schedule Schedule) error {
 // entry. Returns a parse error if the spec is invalid for the configured
 // parser.
 func (c *Cron) UpdateJobByName(name, spec string) error {
-	schedule, err := c.parser.Parse(spec)
+	schedule, err := c.parseNamed(spec, name)
 	if err != nil {
 		return err
 	}
@@ -1971,7 +2026,7 @@ func (c *Cron) UpdateEntryByName(name string, schedule Schedule, job Job) error 
 // Returns ErrEntryNotFound if the id does not correspond to an existing entry.
 // Returns ErrNilJob if job is nil.
 func (c *Cron) UpdateEntryJob(id EntryID, spec string, job Job) error {
-	schedule, err := c.parser.Parse(spec)
+	schedule, err := c.parseForEntry(id, spec)
 	if err != nil {
 		return err
 	}
@@ -1986,7 +2041,7 @@ func (c *Cron) UpdateEntryJob(id EntryID, spec string, job Job) error {
 // Returns ErrEntryNotFound if the name does not correspond to an existing entry.
 // Returns ErrNilJob if job is nil.
 func (c *Cron) UpdateEntryJobByName(name, spec string, job Job) error {
-	schedule, err := c.parser.Parse(spec)
+	schedule, err := c.parseNamed(spec, name)
 	if err != nil {
 		return err
 	}
@@ -2170,9 +2225,17 @@ func (c *Cron) TriggerEntryWithInfoByName(name string, info RunInfo) error {
 func extractName(opts []JobOption) string {
 	var e Entry
 	for _, opt := range opts {
-		opt(&e)
+		probeOption(opt, &e)
 	}
 	return e.Name
+}
+
+// probeOption applies opt to the temporary Entry of extractName. That Entry has
+// no Schedule yet, so an option that reads one panics here. It ignores the panic,
+// and a nil option's too: the option runs again on the real Entry.
+func probeOption(opt JobOption, e *Entry) {
+	defer func() { _ = recover() }()
+	opt(e)
 }
 
 // UpsertJob creates or updates a named job entry. If an entry with the given
@@ -2200,7 +2263,7 @@ func (c *Cron) UpsertJob(spec string, cmd Job, opts ...JobOption) (EntryID, erro
 		return 0, ErrNameRequired
 	}
 
-	schedule, err := c.parser.Parse(spec)
+	schedule, err := c.parseNamed(spec, name)
 	if err != nil {
 		return 0, err
 	}
@@ -2261,7 +2324,7 @@ func (c *Cron) DrainAndUpsertJob(spec string, cmd Job, opts ...JobOption) (Entry
 		return 0, ErrNameRequired
 	}
 
-	schedule, err := c.parser.Parse(spec)
+	schedule, err := c.parseNamed(spec, name)
 	if err != nil {
 		return 0, err
 	}
@@ -2777,7 +2840,7 @@ func (c *Cron) AddWorkflow(w *Workflow) error {
 
 	// Validate all specs parse with this Cron's parser.
 	for _, s := range w.steps {
-		if _, err := c.parser.Parse(s.spec); err != nil {
+		if _, err := c.parseNamed(s.spec, s.name); err != nil {
 			return err
 		}
 	}
