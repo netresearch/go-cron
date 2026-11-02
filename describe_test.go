@@ -215,6 +215,10 @@ var describeGoldens = []struct {
 	{spec: "* 20-10/2 * * *", want: "every minute every 2 hours from the midnight hour thru the 10 am hour and the 8 pm hour thru the 10 pm hour in every day"},
 	{spec: "0 22-10/2 * * *", want: "every 2 hours from midnight thru 10 am and at 10 pm in every day"},
 	{spec: "0 4-0/2 * * *", want: "every 2 hours at midnight and from 4 am thru 10 pm in every day"},
+	{spec: "* 22-10/2 * * *", want: "every minute every 2 hours from the midnight hour thru the 10 am hour and during the 10 pm hour in every day"},
+	{spec: "* 4-0/2 * * *", want: "every minute every 2 hours during the midnight hour and from the 4 am hour thru the 10 pm hour in every day"},
+	{spec: "30 23-5 * * *", want: "at 30 minutes past every hour from midnight thru 5 am and at 11:30 pm every day"},
+	{spec: "30 18-0 * * *", want: "at 12:30 am and at 30 minutes past every hour from 6 pm thru 11 pm every day"},
 
 	// Literal fallback: the whole spec renders field by field
 	{spec: "0 0 L * *", opts: []DescribeOption{WithParseOptions(Minute | Hour | Dom | Month | Dow | DomL)}, want: "minute 0, hour 0, day of month L, month *, day of week *", literal: true},
@@ -261,7 +265,10 @@ func describeGrammar() *regexp.Regexp {
 	inevery := " in every day"
 	ival := "every " + alt(unit, num+" "+units) + opt(", starting over each "+unit)
 	note := ` \(` + ival + "(?:; " + ival + `)*\)`
-	hstep := "every " + num + " hours " + alt("starting with "+hours, "from "+list("the "+clock+" hour thru the "+clock+" hour")) + opt(inevery)
+	hcrange := "the " + clock + " hour thru the " + clock + " hour"
+	hone := "during the " + clock + " hour"
+	hstep := "every " + num + " hours " + alt("starting with "+hours, "from "+list(hcrange),
+		"from "+hcrange+" and "+hone, hone+" and from "+hcrange) + opt(inevery)
 
 	// C1: what leads, with the minutes joined to the seconds
 	secs := alt("at "+num+" seconds?", "at seconds "+vlist)
@@ -273,7 +280,9 @@ func describeGrammar() *regexp.Regexp {
 	)
 	// R4, R5, R9, R10: one minute, any minute, on the hour forms
 	top := alt("at the top of", "at "+num+" minutes? past", secs+" past the top of")
-	tophours := alt("the hour", "every hour"+opt(" "+hourrange)+opt(everyday), hours+opt(inevery), hstep)
+	crange := clock + " thru " + clock
+	tophours := alt("the hour", "every hour"+opt(" "+hourrange)+opt(everyday), hours+opt(inevery), hstep,
+		"every hour from "+crange+" and at "+clock+opt(everyday))
 	// R6, R9, R10, R11: the hours joined to what comes before
 	hourjoin := alt("past the hour", "in every hour"+opt(" "+hourrange+opt(everyday)), "during "+hours+opt(inevery), hstep)
 
@@ -288,6 +297,7 @@ func describeGrammar() *regexp.Regexp {
 		// parts
 		inner+opt(" "+hourjoin),
 		top+" "+tophours,
+		"at "+clock+" and "+top+" every hour from "+crange+opt(everyday),
 		"every "+alt("minute", "second")+" "+hourrange+opt(everyday),
 		secs+" within every minute "+hourrange+opt(everyday),
 	)
