@@ -18,8 +18,9 @@ Fix release with one feature. Most changes correct `Next` and `Prev` around DST
 transitions and unusual time zones, and the hash (`H`) syntax. The minimum Go
 version stays at 1.26. Three changes can alter results of existing code:
 
-- A named job on a `Cron` uses its name as the `H` hash key. A job that has a
-  name and a parser key gets new `H` values ([PR#471]).
+- A named job on a `Cron` with the built-in `Parser` uses its name as the `H`
+  hash key. A job that has a name and a parser key gets new `H` values
+  ([PR#471]).
 - `H/1`, `H` in the day-of-week field and an `H` step larger than its range
   select other values than before ([PR#459]).
 - A year field that selects more than 100,000 years is a parse error
@@ -27,11 +28,14 @@ version stays at 1.26. Three changes can alter results of existing code:
 
 ### Added
 - On a `Cron` with the built-in `Parser`, a named job uses its name as the hash
-  key for `H`. `AddFunc("H * * * *", f, WithName("job-a"))` works without a
-  parser key, and named jobs with the same spec are spread over the field, as in
+  key for `H`. The parser still needs the `Hash` option, which `FullParser()`
+  includes and the default parser of `New()` does not. With
+  `New(WithParser(FullParser()))`, `AddFunc("H * * * *", f,
+  WithName("job-a"))` works without a parser key, and named jobs with the same spec are spread over the field, as in
   Jenkins. An unnamed job keeps the parser's `WithHashKey`. A job with both a
   name and a parser key gets new `H` values, and renaming a job moves it.
-  ADR-028 records the decision ([PR#471])
+  A custom `ScheduleParser` is unchanged and needs its own key. ADR-028
+  records the decision ([PR#471])
 - `DowStepToSaturday` parse option: a day-of-week `N/step` (such as `1/2`) runs
   up to Saturday (6), as in robfig/cron, instead of up to Sunday as 7. It
   accepts the same specs as the default parser. Contributed by [@mrueg]
@@ -68,8 +72,9 @@ version stays at 1.26. Three changes can alter results of existing code:
   mean time before 1972 ([PR#454])
 - `H/1` selects every value like `*/1`. `H` in the day-of-week field chooses
   each of the seven days equally often; before, Sunday was chosen twice as
-  often. An `H` step larger than its range selects one value; before, `Next`
-  could return the zero time. A plain day-of-week wraparound with a step,
+  often. An `H` step at or above the size of its range selects one value;
+  before, a step larger than the range could leave the field empty, and `Next`
+  returned the zero time. A plain day-of-week wraparound with a step,
   such as `5-1/2`, no longer counts Sunday twice ([PR#459])
 - `Next` starts each new year, month and day at its first instant. Before, it
   skipped matching times where a date starts at a skipped or repeated midnight:
