@@ -336,7 +336,6 @@ type timeField struct {
 	vals      []uint            // values once each: sorted, except one item of a date field in firing order
 	word      func(uint) string // names a value; nil writes the number
 	limit     int               // values listed before a step is cut short; 0 for valueLimit
-	asList    bool              // hours that read by name, as a list (a wrapped range on a named day)
 }
 
 // w names the value v: "5", "5th", "Friday" or "May".
@@ -537,7 +536,7 @@ func (f timeField) rangeWords(lo, hi uint) []string {
 // named reports hours that read by name ("the 9 am and 5 pm hours"): one
 // hour, hours written as a list, or a range of up to 6 hours (R3, T4).
 func (f timeField) named() bool {
-	return f.asList || f.single() || !f.star() && (len(f.items) > 1 || len(f.vals) <= valueLimit)
+	return f.single() || !f.star() && (len(f.items) > 1 || len(f.vals) <= valueLimit)
 }
 
 // hourNames names the hours: "the 9 am hour", "the 9 am and 5 pm hours", and
@@ -652,15 +651,11 @@ func (d *describer) clock(h, m, s uint) string {
 }
 
 // describeTime describes the second, minute and hour fields: what leads, the
-// minutes joined to it, then the hours (C1). On a named day a wrapped hour
-// range reads as a list (T6).
+// minutes joined to it, then the hours (C1).
 func (d *describer) describeTime(fields []string) string {
 	sec := newTimeField(fields[0], "second", "minute", seconds)
 	minute := newTimeField(fields[1], "minute", "hour", minutes)
 	hour := newTimeField(fields[2], "hour", "day", hours)
-	if d.named {
-		hour.asList = slices.ContainsFunc(hour.items, func(it timeItem) bool { return !it.star && it.lo > it.hi })
-	}
 	if sec.single() {
 		if out, ok := d.clockTimes(sec.vals[0], minute, hour); ok {
 			return out
@@ -781,12 +776,37 @@ func wholeDay(it timeItem) bool {
 func (d *describer) stepClause(hour timeField) string {
 	it := hour.items[0]
 	out := fmt.Sprintf("every %d hours ", it.step)
-	runs := it.runs(hour.r) // firing order: a wrapped step starts at its low end
-	first, last := runs[0], runs[len(runs)-1]
 	if wholeDay(it) {
-		return out + "starting with the " + d.clock(first, 0, 0) + " hour" + d.inEveryDay()
+		return out + "starting with the " + d.onHour(it.lo) + " hour" + d.inEveryDay()
 	}
-	return out + "from the " + d.clock(first, 0, 0) + " hour thru the " + d.clock(last, 0, 0) + " hour" + d.inEveryDay()
+	words := make([]string, 0, 2)
+	for _, p := range stepParts(it, hour.r) {
+		words = append(words, "the "+d.onHour(p[0])+" hour thru the "+d.onHour(p[1])+" hour")
+	}
+	return out + "from " + andList(words) + d.inEveryDay()
+}
+
+// stepParts returns the first and last run of an hour step. A wrapped step
+// splits at midnight into two parts in clock order, each from its first
+// run to its last (T9). A part of one run is left unsplit, in firing order.
+func stepParts(it timeItem, r bounds) [][2]uint {
+	runs := it.runs(r)
+	whole := [][2]uint{{runs[0], runs[len(runs)-1]}}
+	if it.lo <= it.hi {
+		return whole
+	}
+	var am, pm []uint
+	for _, v := range runs {
+		if v < it.lo {
+			am = append(am, v)
+		} else {
+			pm = append(pm, v)
+		}
+	}
+	if len(am) < 2 || len(pm) < 2 {
+		return whole
+	}
+	return [][2]uint{{am[0], am[len(am)-1]}, {pm[0], pm[len(pm)-1]}}
 }
 
 // clockTimes describes a fixed second as clock times: one hour with up to 6
@@ -814,12 +834,15 @@ func (d *describer) hourStep(s uint, minute, hour timeField) (string, bool) {
 		return "", false
 	}
 	it, m := hour.items[0], minute.vals[0]
-	runs := it.runs(hour.r) // firing order: a wrapped step starts at its low end
 	out := fmt.Sprintf("every %d hours ", it.step)
 	if wholeDay(it) {
-		out += "starting at " + d.clock(runs[0], m, s)
+		out += "starting at " + d.clock(it.lo, m, s)
 	} else {
-		out += "from " + d.clock(runs[0], m, s) + " thru " + d.clock(runs[len(runs)-1], m, s)
+		words := make([]string, 0, 2)
+		for _, p := range stepParts(it, hour.r) {
+			words = append(words, d.clock(p[0], m, s)+" thru "+d.clock(p[1], m, s))
+		}
+		out += "from " + andList(words)
 	}
 	return out + d.inEveryDay(), true
 }

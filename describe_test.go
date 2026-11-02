@@ -206,11 +206,13 @@ var describeGoldens = []struct {
 	{spec: "0 */6 * * 1", want: "at the top of the 12 am, 6 am, noon, and 6 pm hours on Monday"},
 	{spec: "*/15 */2 * * 1", want: "at minutes 0, 15, 30, and 45 every 2 hours starting with the 12 am hour on Monday"},
 	{spec: "0 0 13 * 1-5", want: "at 12 am on the 13th of the month when it falls on Monday thru Friday"},
-	{spec: "*/30 20-5 * * 1", want: "at minutes 0 and 30 during the 12 am, 1 am, 2 am, 3 am, 4 am, 5 am, 8 pm, 9 pm, 10 pm, and 11 pm hours on Monday"},
+	{spec: "*/30 20-5 * * 1", want: "from 12 am thru 5:30 am and 8 pm thru 11:30 pm, at minutes 0 and 30 past each hour on Monday"},
 
 	// Wrapped hour spans: two parts in clock order (T9)
 	{spec: "* 20-5 * * *", want: "every minute from midnight thru 5:59 am and 8 pm thru 11:59 pm every day"},
 	{spec: "30 20-5 * * *", want: "at 30 minutes past every hour from midnight thru 5 am and 8 pm thru 11 pm every day"},
+	{spec: "0 20-10/2 * * *", want: "every 2 hours from midnight thru 10 am and 8 pm thru 10 pm in every day"},
+	{spec: "* 20-10/2 * * *", want: "every minute every 2 hours from the midnight hour thru the 10 am hour and the 8 pm hour thru the 10 pm hour in every day"},
 
 	// Literal fallback: the whole spec renders field by field
 	{spec: "0 0 L * *", opts: []DescribeOption{WithParseOptions(Minute | Hour | Dom | Month | Dow | DomL)}, want: "minute 0, hour 0, day of month L, month *, day of week *", literal: true},
@@ -257,7 +259,7 @@ func describeGrammar() *regexp.Regexp {
 	inevery := " in every day"
 	ival := "every " + alt(unit, num+" "+units) + opt(", starting over each "+unit)
 	note := ` \(` + ival + "(?:; " + ival + `)*\)`
-	hstep := "every " + num + " hours " + alt("starting with "+hours, "from the "+clock+" hour thru the "+clock+" hour") + opt(inevery)
+	hstep := "every " + num + " hours " + alt("starting with "+hours, "from "+list("the "+clock+" hour thru the "+clock+" hour")) + opt(inevery)
 
 	// C1: what leads, with the minutes joined to the seconds
 	secs := alt("at "+num+" seconds?", "at seconds "+vlist)
