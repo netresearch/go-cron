@@ -9,18 +9,90 @@ Originally based on [robfig/cron](https://github.com/robfig/cron).
 
 ## [Unreleased]
 
+### Planned for v2
+- Context-aware Job interface with graceful shutdown support
+
+## [0.19.0] - 2026-11-02
+
+Fix release with one feature. Most changes correct `Next` and `Prev` around DST
+transitions and unusual time zones, and the hash (`H`) syntax. The minimum Go
+version stays at 1.26. Three changes can alter results of existing code:
+
+- A named job on a `Cron` with the built-in `Parser` uses its name as the `H`
+  hash key. A job that has a name and a parser key gets new `H` values
+  ([PR#471]).
+- `H/1`, `H` in the day-of-week field and an `H` step larger than its range
+  select other values than before ([PR#459]).
+- A year field that selects more than 100,000 years is a parse error
+  ([PR#473]).
+
 ### Added
+- On a `Cron` with the built-in `Parser`, a named job uses its name as the hash
+  key for `H`. The parser still needs the `Hash` option, which `FullParser()`
+  includes and the default parser of `New()` does not. With
+  `New(WithParser(FullParser()))`, `AddFunc("H * * * *", f,
+  WithName("job-a"))` works without a parser key, and named jobs with the same spec are spread over the field, as in
+  Jenkins. An unnamed job keeps the parser's `WithHashKey`. A job with both a
+  name and a parser key gets new `H` values, and renaming a job moves it.
+  A custom `ScheduleParser` is unchanged and needs its own key. ADR-028
+  records the decision ([PR#471])
 - `DowStepToSaturday` parse option: a day-of-week `N/step` (such as `1/2`) runs
   up to Saturday (6), as in robfig/cron, instead of up to Sunday as 7. It
-  accepts the same specs as the default parser ([PR#443])
+  accepts the same specs as the default parser. Contributed by [@mrueg]
+  ([PR#443])
+
+### Changed
+- A year field selects at most 100,000 years, counted over all items of a list.
+  A spec above the limit returns an error at once; before, `1-20000000` took
+  3.6 s and 2 GiB to parse. All years up to 99999 fit, and a step counts, so
+  `1-2147483647/100000` still parses. Reported by [@norman-abramovitz]
+  ([PR#473])
 
 ### Fixed
 - `RobfigCompat` now includes `DowStepToSaturday`, so `0 0 * * 1/2` runs on
   Monday, Wednesday and Friday as in robfig/cron v3, and no longer also on
-  Sunday as in v0.18.0 ([PR#443])
+  Sunday as in v0.18.0. Contributed by [@mrueg] ([PR#443])
+- On a DST fall-back day, a spec that runs hourly or more often keeps its
+  rhythm through both copies of the repeated hour, and a spec at fixed times
+  runs each of them once. Before, `0,30 1 * * *` in America/New_York ran 01:00
+  and 01:30 in both EDT and EST. ADR-027 supersedes the fall-back part of
+  ADR-016. Reported by [@norman-abramovitz] ([PR#448])
+- A job in a DST spring-forward gap runs once on the transition day for gaps of
+  any length and at any hour, and `Next` reports that run from any start time
+  before it. `15 2 * * *` in Australia/Lord_Howe and `30 0 * * *` in
+  America/Santiago had no run on their transition days. Reported by
+  [@norman-abramovitz] ([PR#449])
+- `WithMissedPolicy` computes catch-up times in the cron location, also when the
+  `WithPrev` value carries another location. A last run time restored in UTC no
+  longer shifts the catch-ups or repeats a day that already ran ([PR#452])
+- `Prev` returns at a month that starts in a repeated fall-back period. Before,
+  it looped forever there, for example at `Asia/Gaza` 2004-10-01 ([PR#453])
+- `Next` and `Prev` return the right times in a zone whose UTC offset is not a
+  whole number of minutes, such as a `time.FixedZone` with seconds or local
+  mean time before 1972 ([PR#454])
+- `H/1` selects every value like `*/1`. `H` in the day-of-week field chooses
+  each of the seven days equally often; before, Sunday was chosen twice as
+  often. An `H` step at or above the size of its range selects one value;
+  before, a step larger than the range could leave the field empty, and `Next`
+  returned the zero time. A plain day-of-week wraparound with a step,
+  such as `5-1/2`, no longer counts Sunday twice ([PR#459])
+- `Next` starts each new year, month and day at its first instant. Before, it
+  skipped matching times where a date starts at a skipped or repeated midnight:
+  `TZ=America/Asuncion 0 0 25 11 *` skipped November 2023 ([PR#461])
+- `L`, `L-n`, `#L`, `LW` and `nW` match the right day in zones that skip the
+  midnight of a month's last day, because month length and weekday come from
+  the calendar. Before, `L` in Atlantic/Azores ran on 2024-03-30 instead of
+  2024-03-31 ([PR#465])
+- With `WithCache()`, the parse cache key holds the spec and every parser
+  setting that changes the result, including the hash key. Before,
+  `ParseWithHashKey` returned the schedule cached for another key, and derived
+  parsers received results parsed under other settings ([PR#466])
 
-### Planned for v2
-- Context-aware Job interface with graceful shutdown support
+### Documentation
+- `doc.go` and `docs/API_REFERENCE.md` describe the hash (`H`) syntax:
+  `H`, `H/n`, `H(a-b)`, `H(a-b)/n`, where the key comes from, and which fields
+  accept it. New `Example` functions check every value the documentation
+  quotes ([PR#464])
 
 ## [0.18.0] - 2026-10-28
 
@@ -812,7 +884,21 @@ This fork includes all features from robfig/cron v3 plus:
    _, err := cron.ParseStandard("*/60 * * * *") // Error: step (60) must be less than range size (60)
    ```
 
-[Unreleased]: https://github.com/netresearch/go-cron/compare/v0.18.0...HEAD
+[Unreleased]: https://github.com/netresearch/go-cron/compare/v0.19.0...HEAD
+[0.19.0]: https://github.com/netresearch/go-cron/compare/v0.18.0...v0.19.0
+[PR#448]: https://github.com/netresearch/go-cron/pull/448
+[PR#449]: https://github.com/netresearch/go-cron/pull/449
+[PR#452]: https://github.com/netresearch/go-cron/pull/452
+[PR#453]: https://github.com/netresearch/go-cron/pull/453
+[PR#454]: https://github.com/netresearch/go-cron/pull/454
+[PR#459]: https://github.com/netresearch/go-cron/pull/459
+[PR#461]: https://github.com/netresearch/go-cron/pull/461
+[PR#464]: https://github.com/netresearch/go-cron/pull/464
+[PR#465]: https://github.com/netresearch/go-cron/pull/465
+[PR#466]: https://github.com/netresearch/go-cron/pull/466
+[PR#471]: https://github.com/netresearch/go-cron/pull/471
+[PR#473]: https://github.com/netresearch/go-cron/pull/473
+[@norman-abramovitz]: https://github.com/norman-abramovitz
 [0.18.0]: https://github.com/netresearch/go-cron/compare/v0.17.0...v0.18.0
 [PR#419]: https://github.com/netresearch/go-cron/pull/419
 [PR#420]: https://github.com/netresearch/go-cron/pull/420
