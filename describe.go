@@ -75,8 +75,8 @@ func (p Parser) DescribeSpec(spec string, _ ...DescribeOption) (string, error) {
 		return "never runs", nil
 	}
 	var d describer
-	day, short := p.describeDays(&d, fields[3], fields[5])
-	d.named = day != ""
+	day, short, dayName := p.describeDays(&d, fields[3], fields[5])
+	d.named, d.dayName = day != "", dayName
 	parts := []string{d.describeTime(fields)}
 	for _, clause := range []string{day, d.describeMonths(fields[4]), d.describeYears(yearField)} {
 		if clause != "" {
@@ -89,7 +89,8 @@ func (p Parser) DescribeSpec(spec string, _ ...DescribeOption) (string, error) {
 // describer builds one description: whether it names a day, and the notes
 // of the fields it cuts short.
 type describer struct {
-	named     bool     // a day clause follows the time (D7)
+	named     bool     // a day clause follows the time (J1)
+	dayName   bool     // the day clause names a day of the week (R2, D7)
 	notes     []string // the time fields' notes
 	dateNotes []string // the date fields' notes, after the time's (G7)
 }
@@ -117,7 +118,8 @@ func (p Parser) neverRuns(fields []string, yearField string) bool {
 // describeDays describes the day of month and day of week, "" when neither
 // is restricted (D2, D4, D5). short names the days above the 28th that the
 // day of month fires on: "; the 31st runs only in months that have one" (D3).
-func (p Parser) describeDays(d *describer, domField, dowField string) (day, short string) {
+// dayName reports a day of the week in the clause (D7).
+func (p Parser) describeDays(d *describer, domField, dowField string) (day, short string, named bool) {
 	md := newTimeField(domField, "day", "month", dom)
 	md.word, md.limit = ordinal, 12
 	wd := newTimeField(dowField, "day", "week", p.dowBounds())
@@ -128,7 +130,7 @@ func (p Parser) describeDays(d *describer, domField, dowField string) (day, shor
 	domAll, dowAll := len(md.vals) == 31, len(wd.vals) == 7
 	switch {
 	case or && (domAll || dowAll):
-		return "", "" // T3: one side of the OR is every day
+		return "", "", false // T3: one side of the OR is every day
 	case domAll:
 		domSet = false
 	case dowAll:
@@ -143,7 +145,7 @@ func (p Parser) describeDays(d *describer, domField, dowField string) (day, shor
 	if dowSet {
 		dowWords = wd.runWords(wd.vals)
 	}
-	return dayClause(domText, dowWords, or), short
+	return dayClause(domText, dowWords, or), short, dowWords != nil
 }
 
 // dayClause joins the day of month and the days of the week, either of which
@@ -647,9 +649,10 @@ func (d *describer) inEveryDay() string {
 	return inEveryDaySuffix
 }
 
-// clock writes a clock time; midnight is "12 am" on a named day (R2).
+// clock writes a clock time; midnight is "12 am" on a named day, Sunday
+// thru Saturday (R2, D7).
 func (d *describer) clock(h, m, s uint) string {
-	if d.named && h == 0 && m == 0 && s == 0 {
+	if d.dayName && h == 0 && m == 0 && s == 0 {
 		return "12 am"
 	}
 	return clockTime(h, m, s)
