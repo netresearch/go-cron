@@ -395,7 +395,8 @@ func (n *notes) describe(sec, minute, hour timeField) string {
 	case !sec.single() || sec.vals[0] != 0:
 		return n.bySeconds(sec, minute, hour)
 	case minute.single():
-		return onTheHour(minuteAt(minute.vals[0]), hour)
+		m := minute.vals[0]
+		return onTheHour(minuteAt(m), hour, func(h uint) string { return clockTime(h, m, 0) })
 	case minute.every():
 		return joinHours("every minute", "", sec, minute, hour)
 	}
@@ -421,7 +422,7 @@ func (n *notes) bySeconds(sec, minute, hour timeField) string {
 	case minute.every():
 		return joinHours(secs+" within every minute", "", sec, minute, hour)
 	case minute.single() && minute.vals[0] == 0:
-		return onTheHour(secs+" past the top of", hour)
+		return onTheHour(secs+" past the top of", hour, nil)
 	}
 	return joinHours(secs+" within "+n.values(minute), "in every hour", sec, minute, hour)
 }
@@ -438,7 +439,11 @@ func minuteAt(m uint) string {
 // onTheHour joins the hours to one minute, any minute, as lead opens it
 // (R4, R5, R9, R10): "at the top of every hour", "at 30 minutes past every
 // hour from 9 am thru 5 pm every day".
-func onTheHour(lead string, hour timeField) string {
+//
+// at writes the run in hour h when the lead is one minute at second 0; a
+// part of one hour of a wrapped range then reads "at" that run (R9, T9):
+// "from midnight thru 5 am and at 11:30 pm". Otherwise at is nil.
+func onTheHour(lead string, hour timeField, at func(h uint) string) string {
 	switch hour.kind() {
 	case everyHour:
 		if strings.HasSuffix(lead, " past") {
@@ -452,7 +457,16 @@ func onTheHour(lead string, hour timeField) string {
 	case longStep:
 		return lead + " " + stepClause(hour)
 	}
-	return lead + " every hour " + fromThru(hour.items[0], onHour, onHour) + " every day"
+	it := hour.items[0]
+	if p := it.parts(hours); at != nil && len(p) == 2 {
+		switch {
+		case p[1][0] == p[1][1]:
+			return lead + " every hour from " + onHour(p[0][0]) + " thru " + onHour(p[0][1]) + " and at " + at(p[1][0]) + " every day"
+		case p[0][0] == p[0][1]:
+			return "at " + at(p[0][0]) + " and " + lead + " every hour from " + onHour(p[1][0]) + " thru " + onHour(p[1][1]) + " every day"
+		}
+	}
+	return lead + " every hour " + fromThru(it, onHour, onHour) + " every day"
 }
 
 // joinHours joins the hours to inner, the seconds and minutes (R6, R9–R12,
@@ -506,11 +520,22 @@ func stepClause(hour timeField) string {
 	if wholeDay(it) {
 		return out + "starting with the " + onHour(it.lo) + " hour in every day"
 	}
-	words := make([]string, 0, 2)
-	for _, p := range stepParts(it, hour.r, false) {
-		words = append(words, "the "+onHour(p[0])+" hour thru the "+onHour(p[1])+" hour")
+	// T9: the parts, the first range after "from"; a part of one run is
+	// "during" its hour.
+	parts := stepParts(it, hour.r, true)
+	words := make([]string, 0, len(parts))
+	for i, p := range parts {
+		if p[0] == p[1] {
+			words = append(words, "during the "+onHour(p[0])+" hour")
+			continue
+		}
+		w := "the " + onHour(p[0]) + " hour thru the " + onHour(p[1]) + " hour"
+		if i == 0 || parts[0][0] == parts[0][1] {
+			w = "from " + w
+		}
+		words = append(words, w)
 	}
-	return out + "from " + andList(words) + " in every day"
+	return out + andList(words) + " in every day"
 }
 
 // stepParts returns the first and last run of an hour step. A wrapped step
