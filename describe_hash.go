@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -73,7 +74,10 @@ func readHash(it string, r bounds) (x hashed, isHash bool) {
 		lo, hi, _ := strings.Cut(strings.TrimSuffix(inner, ")"), "-")
 		x.lo, _ = mustParseInt(lo)
 		x.hi, _ = mustParseInt(hi)
-		x.whole = x.lo == r.min && (x.hi == r.max || isDowBounds(r) && x.hi == 6)
+		// The whole range when it covers every value, wrapped or not
+		// (H10): on the day of week's seven-day cycle, 0-6 and 1-0 too.
+		clo, chi, cr := dowCycle(x.lo, x.hi, r)
+		x.whole = cyclicRangeSize(clo, chi, cr) == cr.max-cr.min+1
 	}
 	if hasStep {
 		x.step, _ = mustParseInt(step)
@@ -131,14 +135,30 @@ func (h hashField) fixedShape(f timeField) hashShape {
 }
 
 // between names the range of a hashed value or step: "between minutes 0 and
-// 29", "between minutes 0 and 10 or 50 and 59" (H3, T9).
-func between(unit string, x hashed, r bounds) string {
+// 29", "between minutes 0 and 10 or 50 and 59", "between minutes 0 and 5 or
+// 59" (H3, T9). ok is false for a wrapped range of one value per part.
+func between(unit string, x hashed, r bounds) (string, bool) {
+	parts, ok := rangeParts(x, r, func(v uint) string { return strconv.FormatUint(uint64(v), 10) }, "")
+	return "between " + unit + "s " + parts, ok
+}
+
+// rangeParts writes a hashed range as its parts, low to high (T9), "the"
+// before each: "0 and 10 or 50 and 59", "the 1st and 5th or the 31st"; a
+// part of one value reads as that value. ok is false for a wrapped range
+// whose parts are each one value (H17, H20).
+func rangeParts(x hashed, r bounds, word func(uint) string, the string) (string, bool) {
 	parts := timeItem{lo: x.lo, hi: x.hi}.parts(r)
 	words := make([]string, len(parts))
+	ones := 0
 	for i, p := range parts {
-		words[i] = fmt.Sprintf("%d and %d", p[0], p[1])
+		words[i] = the + word(p[0])
+		if p[0] == p[1] {
+			ones++
+			continue
+		}
+		words[i] += " and " + word(p[1])
 	}
-	return "between " + unit + "s " + strings.Join(words, " or ")
+	return strings.Join(words, " or "), ones < 2
 }
 
 // fixed names a hashed value: "a fixed minute", "a fixed minute between
@@ -150,7 +170,8 @@ func (d *describer) fixed(unit string, x hashed, r bounds) (string, bool) {
 	case x.whole:
 		return w, true
 	case unit != unitHour:
-		return w + " " + between(unit, x, r), true
+		b, ok := between(unit, x, r)
+		return w + " " + b, ok
 	case x.lo > x.hi:
 		return "", false
 	}
@@ -236,6 +257,19 @@ func hashUnits(h []hashField, names []string) []string {
 	return units
 }
 
+// onesOnly reports a hashed second or minute range that wraps into parts of
+// one value each, which has no form (H17).
+func onesOnly(h [3]hashField) bool {
+	for i, r := range []bounds{seconds, minutes} {
+		for _, x := range append(slices.Clone(h[i].fixed), h[i].steps...) {
+			if _, ok := between("", x, r); !ok {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // describeHashTime describes second, minute and hour fields with H items
 // (H1–H16). ok is false for the combinations without a form, which render
 // field by field (G10).
@@ -244,6 +278,9 @@ func (d *describer) describeHashTime(h [3]hashField) (string, bool) {
 	minute := newTimeField(h[1].plain, unitMinute, unitHour, minutes)
 	hour := newTimeField(h[2].plain, unitHour, "day", hours)
 	ss, ms, hs := h[0].shape(sec), h[1].shape(minute), h[2].shape(hour)
+	if onesOnly(h) {
+		return "", false
+	}
 	switch {
 	case ss == hashFixed:
 		return d.hashSecond(h[0].fixed[0], h[1], minute, ms, hour, hs)
@@ -274,7 +311,8 @@ func (d *describer) stepPlace(unit string, x hashed, r bounds, hour timeField) (
 	case k == everyHour && x.whole:
 		return "", true
 	case k == everyHour:
-		return " " + between(unit, x, r), true
+		b, ok := between(unit, x, r)
+		return " " + b, ok
 	case !x.whole:
 		return "", false
 	case k == namedHours || k == stepHours:
@@ -469,14 +507,18 @@ func hashDate(h hashField, f timeField, noun, the string, runs func(hashed) (int
 }
 
 // dateBetween names the range of a hashed date value or step by its values:
-// " between Monday and Friday", " between the 1st and 15th" (H3, H18). ok is
-// false for a wrapped range, which has no form (H20).
+// " between Monday and Friday", " between the 1st and 15th" (H3, H18). A
+// wrapped day of the month splits low to high: " between the 1st and 5th or
+// the 25th and 31st"; a wrapped week or year reads in its order: " between
+// Friday and Monday", " between November and February". ok is false for a
+// wrapped day of the month of one value per part (H20).
 func dateBetween(x hashed, f timeField, the string) (string, bool) {
 	switch {
 	case x.whole:
 		return "", true
-	case x.lo > x.hi:
-		return "", false
+	case x.lo > x.hi && f.container == unitMonth:
+		parts, ok := rangeParts(x, f.r, f.w, the)
+		return " between " + parts, ok
 	}
 	return " between " + the + f.w(x.lo) + " and " + f.w(x.hi), true
 }
@@ -485,14 +527,29 @@ func dateBetween(x hashed, f timeField, the string) (string, bool) {
 // on in a month, over each start the hash can pick and each month length
 // (H19): H/10 runs on 9, 19 and 29, or on 2 days in February.
 func dayRange(x hashed) (lo, hi int) {
+	size, span := cyclicRangeSize(x.lo, x.hi, dom), dom.max-dom.min+1
 	lo = int(dom.max)
-	for o := range x.step {
+	count := func(vals []uint) {
 		for days := dom.max - 3; days <= dom.max; days++ {
 			n := 0
-			for v := x.lo + o; v <= min(x.hi, days); v += x.step {
-				n++
+			for _, v := range vals {
+				if v <= days {
+					n++
+				}
 			}
 			lo, hi = min(lo, n), max(hi, n)
+		}
+	}
+	// Each start the hash can pick, as runRange; a wrapped range steps on
+	// past the 31st into the 1st, whatever the month's length.
+	for o := range x.step {
+		if o < size {
+			start := (x.lo+o-dom.min)%span + dom.min
+			count(timeItem{lo: start, hi: x.hi, step: x.step}.runs(dom))
+			continue
+		}
+		for v := range size {
+			count([]uint{(x.lo+v-dom.min)%span + dom.min})
 		}
 	}
 	return lo, hi

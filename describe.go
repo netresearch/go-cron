@@ -98,7 +98,7 @@ func (p Parser) DescribeSpec(spec string, _ ...DescribeOption) (string, error) {
 		h[i] = splitHash(fields[i], r)
 	}
 	hd, dates, ok := p.splitDates(fields)
-	units := hashUnits(append(h[:], hd[:]...), []string{unitSecond, unitMinute, unitHour, "day", "day", "month"})
+	units := hashUnits(append(h[:], hd[:]...), []string{unitSecond, unitMinute, unitHour, "day", "day", unitMonth})
 	var d describer
 	day, month, short, dok := p.describeDates(&d, hd, dates)
 	if !ok || !dok {
@@ -279,7 +279,7 @@ func (p Parser) describeDays(d *describer, domField, dowField string, hd, hw has
 
 // newDomField is the day of month: ordinals, up to 12 listed (D2).
 func newDomField(text string) timeField {
-	md := newTimeField(text, "day", "month", dom)
+	md := newTimeField(text, "day", unitMonth, dom)
 	md.word, md.limit = ordinal, 12
 	return md
 }
@@ -293,7 +293,7 @@ func (p Parser) newDowField(text string) timeField {
 
 // newMonthField is the month: names, up to 12 listed (D6).
 func newMonthField(text string) timeField {
-	m := newTimeField(text, "month", "year", months)
+	m := newTimeField(text, unitMonth, "year", months)
 	m.word, m.limit = func(v uint) string { return time.Month(v).String() }, 12
 	return m
 }
@@ -649,6 +649,7 @@ const (
 	unitSecond       = "second"
 	unitMinute       = "minute"
 	unitHour         = "hour"
+	unitMonth        = "month"
 	thruSep          = " thru "
 	everyDaySuffix   = " every day"
 	inEveryDaySuffix = " in every day"

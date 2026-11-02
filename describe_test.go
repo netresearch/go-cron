@@ -419,6 +419,25 @@ var describeGoldens = []struct {
 	{spec: "0 9 H(1-15) * 1-5", opts: []DescribeOption{withHash}, want: "at 9 am on a fixed day of the month between the 1st and 15th when it falls on Monday thru Friday; the hash key fixes the day"},
 	{spec: "0 0 H * 0-6", opts: []DescribeOption{withHash}, want: "at midnight on a fixed day of the month; the hash key fixes the day"},
 
+	// Wrapped hashed ranges: a day of the month and minutes split low to
+	// high, a part of one value read as that value; a day of the week and a
+	// month read in week and year order (H3, H18, H19)
+	{spec: "0 0 H(25-5) * *", opts: []DescribeOption{withHash}, want: "at midnight on a fixed day of the month between the 1st and 5th or the 25th and 31st; the hash key fixes the day"},
+	{spec: "0 0 H(25-5)/7 * *", opts: []DescribeOption{withHash}, want: "at midnight on 0 to 2 days in every month between the 1st and 5th or the 25th and 31st, 7 days apart, starting from a fixed day; the hash key fixes the day"},
+	{spec: "0 9 * * H(5-1)", opts: []DescribeOption{withHash}, want: "at 9 am on a fixed day of the week between Friday and Monday; the hash key fixes the day"},
+	{spec: "0 9 * * H(5-1)/2", opts: []DescribeOption{withHash}, want: "at 9 am on 2 days in every week between Friday and Monday, 2 days apart, starting from a fixed day; the hash key fixes the day"},
+	{spec: "0 0 1 H(11-2) *", opts: []DescribeOption{withHash}, want: "at midnight on the 1st of the month in a fixed month between November and February; the hash key fixes the month"},
+	{spec: "0 0 1 H(11-2)/2 *", opts: []DescribeOption{withHash}, want: "at midnight on the 1st of the month in 2 months in every year between November and February, 2 months apart, starting from a fixed month; the hash key fixes the month"},
+	{spec: "H(59-5) * * * *", opts: []DescribeOption{withHash}, want: "at a fixed minute between minutes 0 and 5 or 59 past the hour; the hash key fixes the minute"},
+	{spec: "H(1-0)/2 * * * *", opts: []DescribeOption{withHash}, want: "30 runs in every hour, 2 minutes apart, starting from a fixed minute; the hash key fixes the minute"},
+	{spec: "0 9 * * H(1-0)", opts: []DescribeOption{withHash}, want: "at 9 am on a fixed day of the week; the hash key fixes the day"},
+	{spec: "H(50-0) * * * *", opts: []DescribeOption{withHash}, want: "at a fixed minute between minutes 0 or 50 and 59 past the hour; the hash key fixes the minute"},
+	{spec: "0 0 H(31-5) * *", opts: []DescribeOption{withHash}, want: "at midnight on a fixed day of the month between the 1st and 5th or the 31st; the hash key fixes the day"},
+	{spec: "0 0 H(10-1) * *", opts: []DescribeOption{withHash}, want: "at midnight on a fixed day of the month between the 1st or the 10th and 31st; the hash key fixes the day"},
+	{spec: "0 9 * * H(6-1)", opts: []DescribeOption{withHash}, want: "at 9 am on a fixed day of the week between Saturday and Monday; the hash key fixes the day"},
+	{spec: "0 9 * * H(6-0)", opts: []DescribeOption{withHash}, want: "at 9 am on a fixed day of the week between Saturday and Sunday; the hash key fixes the day"},
+	{spec: "0 0 1 H(12-2) *", opts: []DescribeOption{withHash}, want: "at midnight on the 1st of the month in a fixed month between December and February; the hash key fixes the month"},
+
 	// Descriptors: the cron equivalent's description (P2)
 	{spec: "@yearly", want: "at midnight on the 1st of the month in January"},
 	{spec: "@annually", want: "at midnight on the 1st of the month in January"},
@@ -453,9 +472,8 @@ var describeGoldens = []struct {
 	{spec: "0 0 H/10 * 1", opts: []DescribeOption{withHash}, want: "minute 0, hour 0, day of month H/10, month *, day of week 1", literal: true},
 	{spec: "0 0 1 * H/2", opts: []DescribeOption{withHash}, want: "minute 0, hour 0, day of month 1, month *, day of week H/2", literal: true},
 	{spec: "0 0 H * 0-6", opts: []DescribeOption{withHashOr}, want: "minute 0, hour 0, day of month H, month *, day of week 0-6", literal: true},
-	{spec: "0 0 H(25-5) * *", opts: []DescribeOption{withHash}, want: "minute 0, hour 0, day of month H(25-5), month *, day of week *", literal: true},
-	{spec: "0 9 * * H(5-1)", opts: []DescribeOption{withHash}, want: "minute 0, hour 9, day of month *, month *, day of week H(5-1)", literal: true},
-	{spec: "0 0 1 H(11-2) *", opts: []DescribeOption{withHash}, want: "minute 0, hour 0, day of month 1, month H(11-2), day of week *", literal: true},
+	{spec: "0 0 H(31-1) * *", opts: []DescribeOption{withHash}, want: "minute 0, hour 0, day of month H(31-1), month *, day of week *", literal: true},
+	{spec: "H(59-0) * * * *", opts: []DescribeOption{withHash}, want: "minute H(59-0), hour *, day of month *, month *, day of week *", literal: true},
 	{spec: "0 0 1,H/10 * *", opts: []DescribeOption{withHash}, want: "minute 0, hour 0, day of month 1,H/10, month *, day of week *", literal: true},
 	{spec: "0 0 1,15,H * *", opts: []DescribeOption{withHash}, want: "minute 0, hour 0, day of month 1,15,H, month *, day of week *", literal: true},
 	{spec: "0 0 H,H(1-15) * *", opts: []DescribeOption{withHash}, want: "minute 0, hour 0, day of month H,H(1-15), month *, day of week *", literal: true},
@@ -527,7 +545,9 @@ func describeGrammar() *regexp.Regexp {
 		"from "+hcrange+" and "+hone, hone+" and from "+hcrange) + opt(inevery)
 
 	// H1, H3: a value the hash key fixes
-	fixed := "a fixed " + unit + opt(" between "+alt(units+" "+num+" and "+num+opt(" or "+num+" and "+num), hours))
+	// H3, T9: a wrapped range in two parts, a part of one value as that value
+	nrange := alt(num+" and "+num+opt(" or "+num+opt(" and "+num)), num+" or "+num+" and "+num)
+	fixed := "a fixed " + unit + opt(" between "+alt(units+" "+nrange, hours))
 
 	// C1: what leads, with the minutes joined to the seconds
 	secs := alt("at "+num+" seconds?", "at seconds "+vlist, "at "+fixed)
@@ -578,7 +598,7 @@ func describeGrammar() *regexp.Regexp {
 		"at "+fixed+" and "+fixed+" during "+hours+opt(everyday),                     // H12
 		// H2, H14, H15: the count forms
 		opt(alt("at the top of the hour", "at "+num+" minutes? past the hour")+", ")+cnt+" runs? in every "+unit+
-			opt(" "+alt("between "+units+" "+num+" and "+num+opt(" or "+num+" and "+num), hourrange, "during "+hours))+apart,
+			opt(" "+alt("between "+units+" "+nrange, hourrange, "during "+hours))+apart,
 		"every minute during "+cnt+" hours in every day"+apart,
 		cnt+" runs in every "+unit+", at "+alt("the top of the hour and "+fixed+" past it", fixed+" and "+fixed,
 			"the top of the hour and every "+num+" "+units+" starting from "+fixed, clock+" and the top of "+fixed),
@@ -610,11 +630,14 @@ func describeGrammar() *regexp.Regexp {
 		b := opt(" between " + lo + " and " + hi)
 		return alt(noun+b, plain+" and "+noun, hcnt+" "+unit+"s? in every "+in+b+hapart(unit))
 	}
-	hday := alt(hform("a fixed day of the month", "the "+ord, "day", "month", "the "+ord, ord),
+	// H18: a wrapped day of the month in two parts, low to high
+	domhi := ord + opt(" or the "+ord+opt(" and "+ord))
+	domlo := "the " + ord + opt(" or the "+ord)
+	hday := alt(hform("a fixed day of the month", "the "+ord, "day", "month", domlo, domhi),
 		hform("a fixed day of the week", dayname, "day", "week", dayname, dayname))
 	hmonth := hform("a fixed month", monthname, "month", "year", monthname, monthname)
 	// H18, D5: a fixed day joins the other day field
-	hdomfix := alt("a fixed day of the month"+opt(" between the "+ord+" and "+ord), "the "+ord+" and a fixed day of the month")
+	hdomfix := alt("a fixed day of the month"+opt(" between "+domlo+" and "+domhi), "the "+ord+" and a fixed day of the month")
 	hdowfix := alt("a fixed day of the week"+opt(" between "+dayname+" and "+dayname), dayname+" and a fixed day of the week")
 	andor := alt(" when it falls on "+alt(dow, hdowfix), " or on "+alt(list("any "+alt(dayrange, nth+" "+dayname)), hdowfix))
 	day := alt(alt(dom, "on "+hdomfix)+opt(andor), "on "+dow, "on "+hday)
