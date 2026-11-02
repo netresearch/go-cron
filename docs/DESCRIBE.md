@@ -336,7 +336,7 @@ vitem: INT ["thru" INT]
 
 CLOCK12: /(1[0-2]|[1-9])(:[0-5][0-9]){1,2} [ap]m|(1[01]|[1-9]) [ap]m|12 am/   // T12, R2
 INT: /[0-9]+/
-DURATION: /[-+]?([0-9]*\.?[0-9]+(ns|us|µs|μs|ms|s|m|h))+/              // P3: Go's duration
+DURATION: /[-+]?((([0-9]+\.?[0-9]*|\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+|0)/   // P3: Go's duration
 ORD: /[0-9]+(st|nd|rd|th)/
 NTH: "first" | "second" | "third" | "fourth" | "fifth" | "last"
 DAYNAME: "Sunday" | "Monday" | "Tuesday" | "Wednesday" | "Thursday" | "Friday" | "Saturday"

@@ -462,6 +462,7 @@ var describeGoldens = []struct {
 	{spec: "@every 500ms", opts: []DescribeOption{withRoundUp}, want: "every 1s from when scheduling started (written as 500ms, rounded up to the 1s minimum)"},
 	{spec: "@every 30s", parser: minEvery(time.Minute, true), want: "every 1m from when scheduling started (written as 30s, rounded up to the 1m minimum)"},
 	{spec: "@every 1.5s", want: "every 1s from when scheduling started (written as 1.5s, cut to whole seconds)"},
+	{spec: "@every 01.s.1s", want: "every 1s from when scheduling started (written as 01.s.1s, cut to whole seconds)"},
 	{spec: "@every 500ms", parser: minEvery(0, false), want: "every 500ms from when scheduling started"},
 	{spec: "@every_start 15m", opts: []DescribeOption{withAlign}, want: "every 15m from when scheduling started"},
 	{spec: "@every_aligned 1h", want: "every 1h from Unix epoch"},
@@ -785,7 +786,7 @@ func describeGrammars() (descRe, noteRe *regexp.Regexp) {
 	hashkey := "; the hash key fixes " + alt(list("the "+unit), "both "+units) // H1
 	schedule := time + opt(" "+day) + opt(" "+month) + opt(" "+year) + opt(note) + "(?:" + short + ")*" + opt(hashkey)
 	// P3: an interval as it runs, from its anchor
-	dur := `[-+]?(?:\d*\.?\d+(?:ns|us|µs|μs|ms|s|m|h))+`
+	dur := `[-+]?(?:(?:(?:\d+\.?\d*|\.\d+)(?:ns|us|µs|μs|ms|s|m|h))+|0)` // Go's duration: "1.s", ".5m", "0"
 	interval := "every " + dur + " from " + alt("when scheduling started", "Unix epoch") +
 		opt(` \(written as `+dur+", "+alt("rounded up to the "+dur+" minimum", "rounded up to whole seconds", "cut to whole seconds")+`\)`)
 	descRe = regexp.MustCompile("^" + alt(schedule, "never runs", "only when triggered", interval) + "$")
