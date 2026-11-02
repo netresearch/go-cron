@@ -67,7 +67,7 @@ which form a spec gets. Each has an ID, which the grammar cites.
 | T5 | Span form: several minutes over one hour range open with the first and last run of the day: "from 9 am thru 5:56 pm every day, at minutes 0, 7, 14, … 56 past each hour" |
 | T6 | Hours read in clock order: a wrapped range is shorthand for two ranges ("at midnight, 2 am, and 10 pm") |
 | J1 | "for" joins a value. "in every …" follows a step. Plain "every day" follows clock times, the span and an hour range |
-| T9 | A range reads "thru". Two adjacent values name both ("5 and 6"). A wrapped range reads in two parts and a wrapped step lists in full, sorted low to high: "at minutes 0 thru 10 and 50 thru 59 past the hour". An hour range's two parts share one "from": "from midnight thru 5:56 am and 8 pm thru 11:56 pm every day" |
+| T9 | A range reads "thru". Two adjacent values name both ("5 and 6"). A wrapped range reads in two parts and a wrapped step lists in full, sorted low to high: "at minutes 0 thru 10 and 50 thru 59 past the hour". An hour range's two parts share one "from": "from midnight thru 5:56 am and 8 pm thru 11:56 pm every day". So do a wrapped hour step's, each from its first run to its last: "every 2 hours from midnight thru 10 am and 8 pm thru 10 pm in every day" |
 | T11 | A range starting with `*` or `?`, and a list with a star item, read as the star |
 | T12 | A time on the hour drops the minutes ("2 am"); "12:30 am", "12:30 pm"; never "12 pm" |
 
@@ -82,10 +82,10 @@ which form a spec gets. Each has an ID, which the grammar cites.
 | R5 | A single value keeps its unit after the number ("at 5 minutes past the hour"); a list puts the unit first ("at minutes 0 and 30 …") |
 | R6 | Seconds fall "within" a minute. Minutes of the generic hour are "past the hour"; in a named hour they fall "during" it |
 | R7 | A fixed second under a fixed minute and hour reads as a clock time ("at 2:30:15 am") |
-| R8 | An hour step past 6 values reads as the step. It states the start, with the minute folded in ("every 2 hours starting at 12:30 am in every day"), and the end when the range isn't the whole day or the step doesn't divide 24 ("every 2 hours from 9:15 am thru 11:15 pm in every day") |
+| R8 | An hour step past 6 values reads as the step. It states the start, with the minute folded in ("every 2 hours starting at 12:30 am in every day"), and the end when the range isn't the whole day or the step doesn't divide 24 ("every 2 hours from 9:15 am thru 11:15 pm in every day"). A wrapped step reads in two parts (T9) |
 | R9 | One minute on an hour range past 6 values states the range's start and end: "at the top of every hour from 9 am thru 5 pm every day", "at 30 minutes past every hour from 9 am thru 5 pm every day". A wrapped range reads in two parts (T9) |
 | R10 | An hour step of up to 6 values (`*/6`) names its hours, followed by "in every day": "at the top of midnight, 6 am, noon, and 6 pm hours in every day", "at minutes 0 and 30 during … hours in every day" |
-| R11 | Several minutes, or every minute, on an hour step past 6 values: the minutes, then the step: "at minutes 0, 15, 30, and 45 every 2 hours starting with the midnight hour in every day", "every minute every 3 hours from the 1 am hour thru the 10 pm hour in every day" |
+| R11 | Several minutes, or every minute, on an hour step past 6 values: the minutes, then the step: "at minutes 0, 15, 30, and 45 every 2 hours starting with the midnight hour in every day", "every minute every 3 hours from the 1 am hour thru the 10 pm hour in every day". A wrapped step reads in two parts (T9) |
 | R12 | Every minute or every second on an hour range past 6 values states the first and last run: "every minute from 9 am thru 5:59 pm every day". Several minutes on a wrapped range past 6 values take the span form. A wrapped range reads in two parts (T9) |
 | C1 | Seconds other than 0 lead: "every second", "at 5 seconds", "at seconds 0 and 30". The minutes join with "within" ("within a minute", "within every minute", "within minute 30", "within minutes 0 and 30"), minute 0 with "past the top of", and after "every second" with "for" ("for minute 30"). The hours then join as for minutes: "in every hour", "during the 9 am hour", R9–R12 |
 
@@ -149,7 +149,8 @@ hourjoin: "past" "the" "hour"                                             // R6
         | "in" "every" "hour" [hourrange [everyday]]                      // J1, R9
         | "during" hours [inevery]                                        // R6, R10
         | hstep                                                           // R11
-hstep: "every" INT "hours" ("starting" "with" hours | "from" "the" clock "hour" "thru" "the" clock "hour") [inevery]   // R11
+hstep: "every" INT "hours" ("starting" "with" hours | "from" list{hcrange}) [inevery]   // R11
+hcrange: "the" clock "hour" "thru" "the" clock "hour"                    // R11, T9: a wrapped step is two, in clock order
 
 hours: "the" clock "hour" | "the" (CLOCK12 | "noon") hourtail | "midnight" hourtail   // R3
 hourtail: ("and" clock | ("," clock)+ "," "and" clock) "hours"            // R3: no article before a list that starts with midnight

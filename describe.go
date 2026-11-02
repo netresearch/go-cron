@@ -503,12 +503,37 @@ func wholeDay(it timeItem) bool {
 func stepClause(hour timeField) string {
 	it := hour.items[0]
 	out := fmt.Sprintf("every %d hours ", it.step)
-	runs := it.runs(hour.r) // firing order: a wrapped step starts at its low end
-	first, last := runs[0], runs[len(runs)-1]
 	if wholeDay(it) {
-		return out + "starting with the " + clockTime(first, 0, 0) + " hour in every day"
+		return out + "starting with the " + onHour(it.lo) + " hour in every day"
 	}
-	return out + "from the " + clockTime(first, 0, 0) + " hour thru the " + clockTime(last, 0, 0) + " hour in every day"
+	words := make([]string, 0, 2)
+	for _, p := range stepParts(it, hour.r) {
+		words = append(words, "the "+onHour(p[0])+" hour thru the "+onHour(p[1])+" hour")
+	}
+	return out + "from " + andList(words) + " in every day"
+}
+
+// stepParts returns the first and last run of an hour step. A wrapped step
+// splits at midnight into two parts in clock order, each from its first
+// run to its last (T9). A part of one run is left unsplit, in firing order.
+func stepParts(it timeItem, r bounds) [][2]uint {
+	runs := it.runs(r)
+	whole := [][2]uint{{runs[0], runs[len(runs)-1]}}
+	if it.lo <= it.hi {
+		return whole
+	}
+	var am, pm []uint
+	for _, v := range runs {
+		if v < it.lo {
+			am = append(am, v)
+		} else {
+			pm = append(pm, v)
+		}
+	}
+	if len(am) < 2 || len(pm) < 2 {
+		return whole
+	}
+	return [][2]uint{{am[0], am[len(am)-1]}, {pm[0], pm[len(pm)-1]}}
 }
 
 // clockTimes describes a fixed second as clock times: one hour with up to 6
@@ -536,12 +561,15 @@ func hourStep(s uint, minute, hour timeField) (string, bool) {
 		return "", false
 	}
 	it, m := hour.items[0], minute.vals[0]
-	runs := it.runs(hour.r) // firing order: a wrapped step starts at its low end
 	out := fmt.Sprintf("every %d hours ", it.step)
 	if wholeDay(it) {
-		out += "starting at " + clockTime(runs[0], m, s)
+		out += "starting at " + clockTime(it.lo, m, s)
 	} else {
-		out += "from " + clockTime(runs[0], m, s) + " thru " + clockTime(runs[len(runs)-1], m, s)
+		words := make([]string, 0, 2)
+		for _, p := range stepParts(it, hour.r) {
+			words = append(words, clockTime(p[0], m, s)+" thru "+clockTime(p[1], m, s))
+		}
+		out += "from " + andList(words)
 	}
 	return out + " in every day", true
 }
