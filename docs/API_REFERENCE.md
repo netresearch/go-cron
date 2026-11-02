@@ -3002,7 +3002,9 @@ method uses the parser's own settings and ignores `WithParseOptions`. Times are 
 valid spec always gets a description; one that never runs is "never runs".
 Specs outside the fields covered so far, and combinations of `H` without a
 form, get each written field by name ("minute 0, hour 0, day of month H/10,
-month *, day of week 1"); a descriptor is returned as written. `H` needs no hash key. The
+month *, day of week 1"). A descriptor reads as its cron equivalent, and
+`@triggered`, `@manual` and `@none` read "only when triggered"; an interval
+such as `@every 1h` is returned as written. `H` needs no hash key. The
 wording and its grammar are in [DESCRIBE.md](DESCRIBE.md).
 
 **Example:**
@@ -3013,6 +3015,8 @@ desc, err = cron.DescribeSpec("*/15 * * * *")
 // "at minutes 0, 15, 30, and 45 past the hour"
 desc, err = cron.DescribeSpec("0 9 13 * 5")
 // "at 9 am on the 13th of the month when it falls on Friday"
+desc, err = cron.DescribeSpec("@weekly")
+// "at 12 am on Sunday"
 ```
 
 ### WorkflowExecutionID

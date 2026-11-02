@@ -61,7 +61,9 @@ func DescribeSpec(spec string, opts ...DescribeOption) (string, error) {
 // always gets a description and a nil error; one that never runs is "never
 // runs". Specs outside the fields covered so far (see docs/DESCRIBE.md) get
 // each written field by name, as written: "minute 0, hour 0, day of month
-// H/10, month *, day of week 1". A descriptor such as "@daily" is returned as
+// H/10, month *, day of week 1". A descriptor reads as its cron equivalent
+// ("@weekly" is "at 12 am on Sunday"), and "@triggered", "@manual" and "@none"
+// read "only when triggered"; an interval such as "@every 1h" is returned as
 // written. H needs no hash key here: the description does not depend on it.
 // With no key, StrictDays does not check a spec with H in the day of the
 // month or the month, as the value the key picks decides that check.
@@ -79,8 +81,9 @@ func (p Parser) DescribeSpec(spec string, _ ...DescribeOption) (string, error) {
 	}
 	// The spec parsed, so the split cannot fail.
 	_, descriptor, fields, yearField, _ := p.specFields(spec)
-	if descriptor != "" {
-		return descriptor, nil
+	fields, text := expandDescriptor(descriptor, fields)
+	if text != "" {
+		return text, nil
 	}
 	if !allDescribable(fields) || !describable(yearField) {
 		return p.describeLiteral(spec, fields, yearField), nil
@@ -115,6 +118,34 @@ func (p Parser) DescribeSpec(spec string, _ ...DescribeOption) (string, error) {
 		}
 	}
 	return strings.Join(parts, " ") + d.noteText() + short + hashKeyClause(units), nil
+}
+
+// descriptorFields holds the fields, second to day of week, that each
+// calendar descriptor runs as (parseDescriptor).
+var descriptorFields = map[string][]string{
+	descriptorYearly:   {"0", "0", "0", "1", "1", "*"},
+	descriptorAnnually: {"0", "0", "0", "1", "1", "*"},
+	descriptorMonthly:  {"0", "0", "0", "1", "*", "*"},
+	descriptorWeekly:   {"0", "0", "0", "*", "*", "0"},
+	descriptorDaily:    {"0", "0", "0", "*", "*", "*"},
+	descriptorMidnight: {"0", "0", "0", "*", "*", "*"},
+	descriptorHourly:   {"0", "0", "*", "*", "*", "*"},
+}
+
+// expandDescriptor returns the fields a calendar descriptor runs as, or the
+// whole description of any other descriptor: "only when triggered" for a
+// trigger, an interval as written. Without a descriptor it returns fields.
+func expandDescriptor(descriptor string, fields []string) (expanded []string, text string) {
+	switch descriptor {
+	case "":
+		return fields, ""
+	case descriptorTriggered, descriptorManual, descriptorNone:
+		return nil, "only when triggered"
+	}
+	if f, ok := descriptorFields[descriptor]; ok {
+		return f, ""
+	}
+	return nil, descriptor
 }
 
 // describer builds one description: whether it names a day, and the notes

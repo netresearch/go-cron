@@ -31,7 +31,8 @@ func WithParseOptions(o ParseOption) DescribeOption // package function only
   Specs outside the fields covered so far and combinations of `H` that
   have no form (H17, H20) get the literal form: each written field by
   name, as written ("minute 0, hour 9, day of month H/10, month *, day
-  of week 1-5"). A descriptor such as `@daily` is returned as written.
+  of week 1-5"). A descriptor reads as its cron equivalent (P2); an
+  interval such as `@every 1h` is returned as written.
 - `H` needs no hash key: the description does not depend on it. With no
   key, `StrictDays` does not check a spec with `H` in the day of the month
   or the month, as the value the key picks decides that check.
@@ -43,7 +44,8 @@ func WithParseOptions(o ParseOption) DescribeOption // package function only
   of week, month and year written as values, ranges, steps and lists; the
   `L` and `W` days of month (`DomL`, `DomW`) and the `#` days of week
   (`DowNth`, `DowLast`); `H` in the second, minute, hour, day of month, day
-  of week and month fields (`Hash`).
+  of week and month fields (`Hash`); the descriptors `@yearly` thru
+  `@hourly`, `@triggered`, `@manual` and `@none` (`Descriptor`).
 
 ## Rules
 
@@ -143,6 +145,12 @@ which form a spec gets. Each has an ID, which the grammar cites.
 | H19 | A hashed date step counts its days or months, as H14: "on 3 or 4 days in every week, 2 days apart, starting from a fixed day", "in 4 months in every year, 3 months apart, starting from a fixed month". In the day of month the count covers every month length: "on 2 to 4 days in every month, 10 days apart, starting from a fixed day" |
 | H20 | Other combinations in the date fields render field by field (G10): a hashed day step beside a restricted other day field, `H` beside `L`, `W` or `#`, a hashed day ORed with a day field that is every day, a wrapped hashed range, several hashed items, a hashed step beside a value, or more than one value beside `H` |
 
+### Descriptors
+
+| ID | Rule |
+|---|---|
+| P2 | A descriptor reads as its cron equivalent: `@weekly` as `0 0 * * 0`, "at 12 am on Sunday"; `@hourly` as `0 * * * *`, "at the top of every hour". `@triggered`, `@manual` and `@none` read "only when triggered" |
+
 ## Grammar (EBNF)
 
 The productions below are what `DescribeSpec` produces, in
@@ -150,7 +158,7 @@ The productions below are what `DescribeSpec` produces, in
 `describe_test.go` is the same grammar as a regular expression:
 `TestDescribeSpecGrammar` checks every golden description against it, and
 `FuzzDescribeSpec` checks the descriptions of generated specs. The literal
-form (G10) and descriptors are outside the grammar.
+form (G10) and interval descriptors are outside the grammar.
 
 What a context-free grammar can't check is kept by the goldens: the value
 limits (T1, T4, R8–R12), the hour order (T6) and the values themselves (G1).
@@ -161,6 +169,7 @@ limits (T1, T4, R8–R12), the hour order (T6) and the values themselves (G1).
 
 start: schedule
      | "never" "runs"                                                     // G11
+     | "only" "when" "triggered"                                          // P2
 
 schedule: time [day] [month] [year] [note] short* [hashkey]               // G7, H1
 

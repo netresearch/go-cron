@@ -403,8 +403,22 @@ var describeGoldens = []struct {
 	{spec: "0 9 H(1-15) * 1-5", opts: []DescribeOption{withHash}, want: "at 9 am on a fixed day of the month between the 1st and 15th when it falls on Monday thru Friday; the hash key fixes the day"},
 	{spec: "0 0 H * 0-6", opts: []DescribeOption{withHash}, want: "at midnight on a fixed day of the month; the hash key fixes the day"},
 
+	// Descriptors: the cron equivalent's description (P2)
+	{spec: "@yearly", want: "at midnight on the 1st of the month in January"},
+	{spec: "@annually", want: "at midnight on the 1st of the month in January"},
+	{spec: "@monthly", want: "at midnight on the 1st of the month"},
+	{spec: "@weekly", want: "at 12 am on Sunday"},
+	{spec: "@daily", want: "at midnight every day"},
+	{spec: "@midnight", want: "at midnight every day"},
+	{spec: "@hourly", want: "at the top of every hour"},
+	{spec: "@triggered", want: "only when triggered"},
+	{spec: "@manual", want: "only when triggered"},
+	{spec: "@none", want: "only when triggered"},
+	{spec: "CRON_TZ=Europe/Berlin @daily", want: "at midnight every day"},
+	{spec: "@daily", opts: []DescribeOption{withSeconds}, want: "at midnight every day"},
+
 	// Literal fallback: the whole spec renders field by field
-	{spec: "@daily", want: "@daily", literal: true},
+	{spec: "@every 1h30m", want: "@every 1h30m", literal: true},
 	// H in the date fields without a form (H20)
 	{spec: "0 0 H/10 * 1", opts: []DescribeOption{withHash}, want: "minute 0, hour 0, day of month H/10, month *, day of week 1", literal: true},
 	{spec: "0 0 1 * H/2", opts: []DescribeOption{withHash}, want: "minute 0, hour 0, day of month 1, month *, day of week H/2", literal: true},
@@ -579,7 +593,7 @@ func describeGrammar() *regexp.Regexp {
 
 	hashkey := "; the hash key fixes " + alt(list("the "+unit), "both "+units) // H1
 	schedule := time + opt(" "+day) + opt(" "+month) + opt(" "+year) + opt(note) + "(?:" + short + ")*" + opt(hashkey)
-	return regexp.MustCompile("^" + alt(schedule, "never runs") + "$")
+	return regexp.MustCompile("^" + alt(schedule, "never runs", "only when triggered") + "$")
 }
 
 func TestDescribeSpecGrammar(t *testing.T) {
@@ -798,7 +812,7 @@ func FuzzDescribeSpec(f *testing.F) {
 			}
 			_, descriptor, fields, _, _ := p.specFields(spec)
 			literal := literalForm.MatchString(got)
-			want := descriptor != ""
+			want := strings.HasPrefix(descriptor, "@every")
 			if literal != want && (!literal || !containsHashExpr(fields)) {
 				t.Fatalf("DescribeSpec(%q) = %q: literal form %v, want %v", spec, got, literal, want)
 			}
