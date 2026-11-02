@@ -40,7 +40,9 @@ func WithParseOptions(o ParseOption) DescribeOption // package function only
   written (`*/15` and `0,15,30,45` parse the same, but only one has a step).
 - Descriptions carry no time zone; callers show the location beside them.
 - **Coverage:** the second, minute and hour fields, and the day of month, day
-  of week, month and year written as values, ranges, steps and lists.
+  of week, month and year written as values, ranges, steps and lists; the
+  `L` and `W` days of month (`DomL`, `DomW`) and the `#` days of week
+  (`DowNth`, `DowLast`).
 
 ## Rules
 
@@ -103,7 +105,18 @@ which form a spec gets. Each has an ID, which the grammar cites.
 | D4 | Days of the week are names, from the values the parser selects. Sunday appears once. A step walks the seven days as the parser does (`DowStepToSaturday` included). A wrapped range reads unsplit, in week order: "on Friday thru Monday"; two days name both, "on Saturday and Sunday"; a wrapped step lists in week order: "on Friday and Sunday" |
 | D5 | Both day fields: "when it falls on" (AND, the default), "or on any" (`DowOrDom`). With `StepWildcard`, a field starting with `*` or `?` is unrestricted |
 | D6 | Months are names. A wrapped range reads unsplit, in year order: "in November thru February"; two months name both, "in December and January"; a wrapped step lists in year order: "in November and January". Years name the unit ("in year 2027", "in years 2026 thru 2028") and list up to 6 values |
-| D7 | A named day is Sunday thru Saturday: a day of the week in the day clause, alone, in a list or range, or with "any". A day of the week field that covers the week is every day, not a named day (T3). A day of the month or a month is not a named day: "at midnight on the 1st of the month", "at 12 am on the 13th of the month when it falls on Friday" |
+| D7 | A named day is Sunday thru Saturday: a day of the week that runs, alone, in a list or range, with "any", or as "the third Friday" or "the last Friday". A day of the week field that covers the week is every day, not a named day (T3). A day of the month, `L`, `W`, `L-n` or a month is not a named day: "at midnight on the 1st of the month", "at 12 am on the 13th of the month when it falls on Friday" |
+
+### L, W and #
+
+| ID | Rule |
+|---|---|
+| X1 | "the last day of the month", "the last weekday of the month", "the weekday nearest the 15th", "the third Friday", "the last Friday" |
+| X2 | `L-n`: "N days before the last day of the month", with no "on" |
+| X3 | A mixed list follows D2: the ordinals and the last day share one "the" ("the 1st, 15th, and last day of the month"). An item of another kind keeps its own words ("the weekday nearest the 15th and the last day of the month"). Items read in the order of the days they name, with the days before the last day at the end, closest first. A list starting with one takes no "on" |
+| X4 | Both day fields join as D5; an ORed item takes "any" ("any Monday and any last Friday") |
+| X5 | A nearest weekday above the 28th gets the short-month clause (D3): "; the 31st runs only in months that have one" |
+| X6 | `L-n` with n ≥ 28 runs only in months of more than n days. As the whole day clause, not ORed: "; it runs only in months of 31 days". In a list or ORed, the item is named: "; 30 days before the last day runs only in months of 31 days" |
 
 ## Grammar (EBNF)
 
@@ -187,19 +200,27 @@ inevery: "in" "every" "day"                                               // J1
 clock: CLOCK12 | "midnight" | "noon"                                      // R1, R2, T12
 
 // D1–D7: the date clauses
-day: "on" dom [andor] | "on" dow                                          // D5, D7
+day: "on" dom [andor] | before [andor] | "on" dow                         // D5, D7, X2
 andor: "when" "it" "falls" "on" dow                                       // D5 AND
-     | "or" "on" list{anyitem}                                            // D5 OR
-anyitem: "any" dowitem
+     | "or" "on" list{anyitem}                                            // D5 OR, X4
+anyitem: "any" (DAYNAME ["thru" DAYNAME] | NTH DAYNAME)
 dom: "the" olist "of" ("the" | "every") "month"                           // D2
+   | "the" "weekday" "nearest" "the" ORD                                  // X1
+   | domlist "of" "the" "month"                                           // X1, X3
+domlist: domel | domel "and" anyel | domel ("," anyel)+ "," "and" anyel   // G8
+domel: "the" olist | "the" "last" "weekday" | "the" "weekday" "nearest" "the" ORD
+anyel: domel | beforeitem
 olist: list{oitem} | ORD "," ORD "," ORD "," "…" ORD
-oitem: ORD ["thru" ORD]
+oitem: ORD ["thru" ORD] | "last" "day"                                    // X1, X3
+before: list{beforeitem} "of" "the" "month"                               // X2
+beforeitem: INT ("day" | "days") "before" "the" "last" "day"
 dow: list{dowitem}                                                        // D4
-dowitem: DAYNAME ["thru" DAYNAME]
+dowitem: DAYNAME ["thru" DAYNAME] | "the" NTH DAYNAME                     // X1
 month: "in" list{mitem}                                                   // D6
 mitem: MONTHNAME ["thru" MONTHNAME]
 year: "in" "year" INT | "in" "years" vlist                                // D6
-short: ";" "the" list{ORD} ("runs" | "run") "only" "in" "months" "that" "have" ("one" | "them")   // D3
+short: ";" "the" list{ORD} ("runs" | "run") "only" "in" "months" "that" "have" ("one" | "them")   // D3, X5
+     | ";" ("it" | beforeitem) "runs" "only" "in" "months" "of" INT "days" ["or" "more"]           // X6
 
 note: "(" ival (";" ival)* ")"                                            // T1
 ival: "every" (unit | INT units) ["," "starting" "over" "each" unit]
@@ -213,6 +234,7 @@ vitem: INT ["thru" INT]
 CLOCK12: /(1[0-2]|[1-9])(:[0-5][0-9]){1,2} [ap]m|(1[01]|[1-9]) [ap]m|12 am/   // T12, R2
 INT: /[0-9]+/
 ORD: /[0-9]+(st|nd|rd|th)/
+NTH: "first" | "second" | "third" | "fourth" | "fifth" | "last"
 DAYNAME: "Sunday" | "Monday" | "Tuesday" | "Wednesday" | "Thursday" | "Friday" | "Saturday"
 MONTHNAME: "January" | "February" | "March" | "April" | "May" | "June" | "July"
          | "August" | "September" | "October" | "November" | "December"

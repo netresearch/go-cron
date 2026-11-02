@@ -18,6 +18,8 @@ var withSeconds = WithParseOptions(Second | Minute | Hour | Dom | Month | Dow | 
 var (
 	withDowOrDom = WithParseOptions(Minute | Hour | Dom | Month | Dow | DowOrDom)
 	withYear     = WithParseOptions(Minute | Hour | Dom | Month | Dow | Year)
+	withExt      = WithParseOptions(Minute | Hour | Dom | Month | Dow | Extended)
+	withExtOr    = WithParseOptions(Minute | Hour | Dom | Month | Dow | Extended | DowOrDom)
 )
 
 // describeGoldens are the binding descriptions (docs/DESCRIBE.md). literal
@@ -258,10 +260,52 @@ var describeGoldens = []struct {
 	// D2: the values decide, step or list
 	{spec: "0 0 1,8,15 * *", want: "at midnight on the 1st, 8th, and 15th of every month"},
 	{spec: "0 0 1-28/14 * *", want: "at midnight on the 1st and 15th of the month"},
+	// L, W and # (X1–X6)
+	{spec: "0 0 L * *", opts: []DescribeOption{withExt}, want: "at midnight on the last day of the month"},
+	{spec: "0 0 LW * *", opts: []DescribeOption{withExt}, want: "at midnight on the last weekday of the month"},
+	{spec: "0 0 L-3 * *", opts: []DescribeOption{withExt}, want: "at midnight 3 days before the last day of the month"},
+	{spec: "0 0 L-1 * *", opts: []DescribeOption{withExt}, want: "at midnight 1 day before the last day of the month"},
+	{spec: "0 0 15W * *", opts: []DescribeOption{withExt}, want: "at midnight on the weekday nearest the 15th"},
+	{spec: "0 0 31W * *", opts: []DescribeOption{withExt}, want: "at midnight on the weekday nearest the 31st; the 31st runs only in months that have one"},
+	{spec: "0 0 1,15,L * *", opts: []DescribeOption{withExt}, want: "at midnight on the 1st, 15th, and last day of the month"},
+	{spec: "0 0 L,1-7 * *", opts: []DescribeOption{withExt}, want: "at midnight on the 1st thru 7th and last day of the month"},
+	{spec: "0 0 1,15,L-3 * *", opts: []DescribeOption{withExt}, want: "at midnight on the 1st and 15th and 3 days before the last day of the month"},
+	{spec: "0 0 15W,L * *", opts: []DescribeOption{withExt}, want: "at midnight on the weekday nearest the 15th and the last day of the month"},
+	{spec: "0 0 L,l * *", opts: []DescribeOption{withExt}, want: "at midnight on the last day of the month"},
+	{spec: "0 0 L * 5", opts: []DescribeOption{withExt}, want: "at 12 am on the last day of the month when it falls on Friday"},
+	{spec: "0 0 L-3 * 5", opts: []DescribeOption{withExt}, want: "at 12 am 3 days before the last day of the month when it falls on Friday"},
+	{spec: "0 0 L * 5", opts: []DescribeOption{withExtOr}, want: "at 12 am on the last day of the month or on any Friday"},
+	{spec: "0 0 L-27 * *", opts: []DescribeOption{withExt}, want: "at midnight 27 days before the last day of the month"},
+	{spec: "0 0 L-28 * *", opts: []DescribeOption{withExt}, want: "at midnight 28 days before the last day of the month; it runs only in months of 29 days or more"},
+	{spec: "0 0 L-29 * *", opts: []DescribeOption{withExt}, want: "at midnight 29 days before the last day of the month; it runs only in months of 30 days or more"},
+	{spec: "0 0 L-30 * *", opts: []DescribeOption{withExt}, want: "at midnight 30 days before the last day of the month; it runs only in months of 31 days"},
+	{spec: "0 0 L-30,l-+30 * *", opts: []DescribeOption{withExt}, want: "at midnight 30 days before the last day of the month; it runs only in months of 31 days"},
+	{spec: "0 0 L-30 * 5", opts: []DescribeOption{withExt}, want: "at 12 am 30 days before the last day of the month when it falls on Friday; it runs only in months of 31 days"},
+	{spec: "0 0 L-30 1-3 *", opts: []DescribeOption{withExt}, want: "at midnight 30 days before the last day of the month in January thru March; it runs only in months of 31 days"},
+	{spec: "0 0 1,L-30 * *", opts: []DescribeOption{withExt}, want: "at midnight on the 1st and 30 days before the last day of the month; 30 days before the last day runs only in months of 31 days"},
+	{spec: "0 0 L-28,29 * *", opts: []DescribeOption{withExt}, want: "at midnight on the 29th and 28 days before the last day of the month; the 29th runs only in months that have one; 28 days before the last day runs only in months of 29 days or more"},
+	{spec: "0 0 L-29,L-30 * *", opts: []DescribeOption{withExt}, want: "at midnight 29 days before the last day and 30 days before the last day of the month; 29 days before the last day runs only in months of 30 days or more; 30 days before the last day runs only in months of 31 days"},
+	{spec: "0 0 L-30 * 5", opts: []DescribeOption{withExtOr}, want: "at 12 am 30 days before the last day of the month or on any Friday; 30 days before the last day runs only in months of 31 days"},
+	{spec: "0 0 * * FRI#3", opts: []DescribeOption{withExt}, want: "at 12 am on the third Friday"},
+	{spec: "0 0 * * 5#L", opts: []DescribeOption{withExt}, want: "at 12 am on the last Friday"},
+	{spec: "0 0 * * 7#1", opts: []DescribeOption{withExt}, want: "at 12 am on the first Sunday"},
+	{spec: "0 0 * * MON,FRI#3", opts: []DescribeOption{withExt}, want: "at 12 am on Monday and the third Friday"},
+	{spec: "0 0 * * FRI#3,5#3", opts: []DescribeOption{withExt}, want: "at 12 am on the third Friday"},
+	{spec: "0 0 13 * FRI#2", opts: []DescribeOption{withExt}, want: "at 12 am on the 13th of the month when it falls on the second Friday"},
+	{spec: "0 0 13 * MON,FRI#L", opts: []DescribeOption{withExtOr}, want: "at 12 am on the 13th of the month or on any Monday and any last Friday"},
+	{spec: "0 0 LW,L * *", opts: []DescribeOption{withExt}, want: "at midnight on the last weekday and the last day of the month"},
+	{spec: "0 0 1,LW * *", opts: []DescribeOption{withExt}, want: "at midnight on the 1st and the last weekday of the month"},
+	{spec: "0 0 1,15W * *", opts: []DescribeOption{withExt}, want: "at midnight on the 1st and the weekday nearest the 15th of the month"},
+	{spec: "0 0 1W,15W * *", opts: []DescribeOption{withExt}, want: "at midnight on the weekday nearest the 1st and the weekday nearest the 15th of the month"},
+	{spec: "0 0 15W,L-3 * *", opts: []DescribeOption{withExt}, want: "at midnight on the weekday nearest the 15th and 3 days before the last day of the month"},
+	{spec: "0 0 1,L,L-3 * *", opts: []DescribeOption{withExt}, want: "at midnight on the 1st and last day and 3 days before the last day of the month"},
+	{spec: "0 0 L-3,L-1,L-2 * *", opts: []DescribeOption{withExt}, want: "at midnight 1 day before the last day, 2 days before the last day, and 3 days before the last day of the month"},
+	{spec: "0 0 */2,L * *", opts: []DescribeOption{withExt}, want: "at midnight on the 1st, 3rd, 5th, … 31st and the last day of the month (every 2 days, starting over each month); the 29th and 31st run only in months that have them"},
+	{spec: "0 0 15W * 5", opts: []DescribeOption{withExtOr}, want: "at 12 am on the weekday nearest the 15th or on any Friday"},
+	{spec: "0 0 L-3 * FRI#3", opts: []DescribeOption{withExtOr}, want: "at 12 am 3 days before the last day of the month or on any third Friday"},
+	{spec: "0 0 L-29,L-28,L-29 * *", opts: []DescribeOption{withExt}, want: "at midnight 28 days before the last day and 29 days before the last day of the month; 28 days before the last day runs only in months of 29 days or more; 29 days before the last day runs only in months of 30 days or more"},
 
 	// Literal fallback: the whole spec renders field by field
-	{spec: "0 0 L * *", opts: []DescribeOption{WithParseOptions(Minute | Hour | Dom | Month | Dow | DomL)}, want: "minute 0, hour 0, day of month L, month *, day of week *", literal: true},
-	{spec: "0 0 * * 5#3", opts: []DescribeOption{WithParseOptions(Minute | Hour | Dom | Month | Dow | DowNth)}, want: "minute 0, hour 0, day of month *, month *, day of week 5#3", literal: true},
 	{spec: "@daily", want: "@daily", literal: true},
 	{spec: "H/15 * * * *", opts: []DescribeOption{WithParseOptions(Minute | Hour | Dom | Month | Dow | Hash)}, want: "minute H/15, hour *, day of month *, month *, day of week *", literal: true},
 }
@@ -350,15 +394,29 @@ func describeGrammar() *regexp.Regexp {
 	dayname := alt("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")
 	monthname := alt("January", "February", "March", "April", "May", "June", "July",
 		"August", "September", "October", "November", "December")
-	olist := alt(list(ord+opt(" thru "+ord)), ord+", "+ord+", "+ord+", … "+ord)
-	dom := "the " + olist + " of " + alt("the", "every") + " month"
-	dowitem := dayname + opt(" thru "+dayname)
-	dow := list(dowitem)
-	andor := alt(" when it falls on "+dow, " or on "+list("any "+dowitem))
-	day := alt("on "+dom+opt(andor), "on "+dow)
+	nth := alt("first", "second", "third", "fourth", "fifth", "last")
+	olist := alt(list(alt(ord+opt(" thru "+ord), "last day")), ord+", "+ord+", "+ord+", … "+ord)
+	// X1–X3: the ordinals share one "the"; other kinds keep their own words,
+	// and a list that starts with a day before the last day takes no "on".
+	before := num + " days? before the last day"
+	domel := alt("the "+olist, "the last weekday", "the weekday nearest the "+ord)
+	anyel := alt(domel, before)
+	dom := alt(
+		"on the "+olist+" of "+alt("the", "every")+" month",
+		"on the weekday nearest the "+ord,
+		"on "+alt(domel, domel+" and "+anyel, domel+"(?:, "+anyel+")+, and "+anyel)+" of the month",
+		list(before)+" of the month",
+	)
+	dayrange := dayname + opt(" thru "+dayname)
+	dow := list(alt(dayrange, "the "+nth+" "+dayname))
+	andor := alt(" when it falls on "+dow, " or on "+list("any "+alt(dayrange, nth+" "+dayname)))
+	day := alt(dom+opt(andor), "on "+dow)
 	month := "in " + list(monthname+opt(" thru "+monthname))
 	year := alt("in year "+num, "in years "+vlist)
-	short := "; the " + list(ord) + " " + alt("runs", "run") + " only in months that have " + alt("one", "them")
+	short := "; " + alt(
+		"the "+list(ord)+" "+alt("runs", "run")+" only in months that have "+alt("one", "them"),
+		alt("it", before)+" runs only in months of "+num+" days"+opt(" or more"),
+	)
 
 	schedule := time + opt(" "+day) + opt(" "+month) + opt(" "+year) + opt(note) + "(?:" + short + ")*"
 	return regexp.MustCompile("^" + alt(schedule, "never runs") + "$")
@@ -390,6 +448,20 @@ func TestDescribeGrammarRejects(t *testing.T) {
 		if g.MatchString(s) {
 			t.Errorf("grammar accepts %q", s)
 		}
+	}
+}
+
+// TestDescribableGate checks that each day field takes only its own special
+// syntax: "#" belongs to the day of week, "L" and "W" to the day of month.
+func TestDescribableGate(t *testing.T) {
+	if allDescribable([]string{"0", "0", "0", "5#3", "*", "*"}) {
+		t.Error(`"#" accepted in the day of month`)
+	}
+	if allDescribable([]string{"0", "0", "0", "*", "*", "L"}) {
+		t.Error(`"L" accepted in the day of week`)
+	}
+	if !allDescribable([]string{"0", "0", "0", "L", "*", "5#3"}) {
+		t.Error("the day fields' own syntax refused")
 	}
 }
 
@@ -433,19 +505,19 @@ func TestParserDescribeSpec(t *testing.T) {
 	}
 
 	// SecondOptional: a second that was not written is not listed.
-	got, err = FullParser().DescribeSpec("0 0 L * *")
+	got, err = FullParser().DescribeSpec("0 0 H * *")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "minute 0, hour 0, day of month L, month *, day of week *"; got != want {
+	if want := "minute 0, hour 0, day of month H, month *, day of week *"; got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
 
-	got, err = FullParser().DescribeSpec("0 0 0 L * * 2027")
+	got, err = FullParser().DescribeSpec("0 0 0 H * * 2027")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "second 0, minute 0, hour 0, day of month L, month *, day of week *, year 2027"; got != want {
+	if want := "second 0, minute 0, hour 0, day of month H, month *, day of week *, year 2027"; got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
 
@@ -530,22 +602,19 @@ func wideRange(spec string) bool {
 }
 
 // literalSyntax reports the syntax DescribeSpec renders literally: H in any
-// field, L or W in the day of month, L or # in the day of week. An item that
-// starts with "*" or "?" is the star, whatever follows it, as the parser
-// reads it. It is written apart from the describer's own check, so a spec
+// field. An item that starts with "*" or "?" is the star, whatever follows
+// it, as the parser reads it. It is written apart from the describer's own check, so a spec
 // that falls back for another reason fails FuzzDescribeSpec.
 func literalSyntax(fields []string, yearField string) bool {
 	if yearField != "" {
 		fields = append(slices.Clone(fields), yearField)
 	}
-	for i, f := range fields {
+	for _, f := range fields {
 		for item := range strings.SplitSeq(f, ",") {
 			if strings.HasPrefix(item, "*") || strings.HasPrefix(item, "?") {
 				continue
 			}
-			u := strings.ToUpper(item)
-			if strings.HasPrefix(item, "H") ||
-				(i == 3 && strings.ContainsAny(u, "LW")) || (i == 5 && strings.ContainsAny(u, "L#")) {
+			if strings.HasPrefix(item, "H") {
 				return true
 			}
 		}

@@ -4,6 +4,7 @@
 package cron
 
 import (
+	"cmp"
 	"fmt"
 	"regexp"
 	"slices"
@@ -59,7 +60,7 @@ func DescribeSpec(spec string, opts ...DescribeOption) (string, error) {
 // leaves out the time zone; callers show the location beside it. A valid spec
 // always gets a description and a nil error; one that never runs is "never
 // runs". Specs outside the fields covered so far (see docs/DESCRIBE.md) get
-// each written field by name, as written: "minute 0, hour 0, day of month L,
+// each written field by name, as written: "minute 0, hour 0, day of month H,
 // month *, day of week *". A descriptor such as "@daily" is returned as
 // written. H needs no hash key here: the description does not depend on it.
 // With no key, StrictDays does not check a spec with H in the day of the
@@ -81,7 +82,7 @@ func (p Parser) DescribeSpec(spec string, _ ...DescribeOption) (string, error) {
 	if descriptor != "" {
 		return descriptor, nil
 	}
-	if containsHashExpr(fields) || !allDescribable(fields) || !describable(yearField) {
+	if containsHashExpr(fields) || !allDescribable(fields) || !describable(yearField, nil) {
 		return p.describeLiteral(spec, fields, yearField), nil
 	}
 	if p.dayMissing(sch) {
@@ -139,13 +140,16 @@ func (p Parser) dayMissing(sch Schedule) bool {
 }
 
 // describeDays describes the day of month and day of week, "" when neither
-// is restricted (D2, D4, D5). short names the days above the 28th that the
-// day of month fires on: "; the 31st runs only in months that have one" (D3).
+// is restricted (D2, D4, D5, X1–X4). short names the days above the 28th that
+// the day of month fires on: "; the 31st runs only in months that have one"
+// (D3, X5), then the days before the last day that short months lack (X6).
 // dayName reports a day of the week in the clause (D7).
 func (p Parser) describeDays(d *describer, domField, dowField string) (day, short string, named bool) {
-	md := newTimeField(domField, "day", "month", dom)
+	domPlain, domSpecial := splitItems(domField, domSpecialItem)
+	dowPlain, dowNth := splitItems(dowField, dowNthItem)
+	md := newTimeField(strings.Join(domPlain, ","), "day", "month", dom)
 	md.word, md.limit = ordinal, 12
-	wd := newTimeField(dowField, "day", "week", p.dowBounds())
+	wd := newTimeField(strings.Join(dowPlain, ","), "day", "week", p.dowBounds())
 	wd.word = func(v uint) string { return time.Weekday(v).String() }
 	domSet := !isWildcard(domField)
 	dowSet := !isWildcard(dowField)
@@ -160,56 +164,221 @@ func (p Parser) describeDays(d *describer, domField, dowField string) (day, shor
 
 	var domText string
 	if domSet {
-		domText, short = d.describeDom(md)
+		domText, short = d.describeDom(md, domSpecial, !or)
 	}
-	var dowWords []string
+	var days, nth []string
 	if dowSet {
-		dowWords = wd.runWords(wd.vals)
+		days, nth = wd.runWords(wd.vals), nthDays(dowNth)
 	}
+	dowWords := dowItems(days, nth, or)
 	return dayClause(domText, dowWords, or), short, dowWords != nil
 }
 
-// dayClause joins the day of month and the days of the week, either of which
-// may be missing: "and" (D5 AND) or "or on any" (D5 OR).
+// dayClause joins the day of month, a clause with its own "on" or none
+// (X2), and the days of the week, either of which may be missing: "when it
+// falls on" (D5 AND) or "or on any" (D5 OR).
 func dayClause(domText string, dowWords []string, or bool) string {
 	switch {
 	case or:
-		for i, w := range dowWords {
-			dowWords[i] = "any " + w
-		}
-		return "on " + domText + " or on " + andList(dowWords)
+		return domText + " or on " + andList(dowWords)
 	case domText != "" && dowWords != nil:
-		return "on " + domText + " when it falls on " + andList(dowWords)
+		return domText + " when it falls on " + andList(dowWords)
 	case domText != "":
-		return "on " + domText
+		return domText
 	case dowWords != nil:
 		return "on " + andList(dowWords)
 	}
 	return ""
 }
 
-// describeDom describes the day of month, "the 1st and 15th of the month"
-// (D2), and the clause naming its days above the 28th (D3).
-func (d *describer) describeDom(md timeField) (text, short string) {
-	text = d.dateNums(md)
+// dowItems names the days of the week for their place in the clause:
+// "Monday and the third Friday", or each with "any" when ORed (X4).
+func dowItems(days, nth []string, or bool) []string {
+	out := make([]string, 0, len(days)+len(nth))
+	for _, w := range days {
+		if or {
+			w = "any " + w
+		}
+		out = append(out, w)
+	}
+	for _, w := range nth {
+		if or {
+			w = "any " + w
+		} else {
+			w = "the " + w
+		}
+		out = append(out, w)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// domSpecialItem is the day-of-month syntax of DomL and DomW: L, LW, L-n and
+// nW. dowNthItem is the day-of-week syntax of DowNth and DowLast: a day with
+// "#" and its occurrence, or "#L" for the last. Numbers read as strconv.Atoi
+// reads them, as the parser does, so "-0" is Sunday.
+var (
+	domSpecialItem = regexp.MustCompile(`^(?i:L|LW|L-\+?\d+|\+?\d+W)$`)
+	dowNthItem     = regexp.MustCompile(`^(?:[+-]?\d+|[A-Za-z]{3})#(?:\+?\d+|[Ll])$`)
+)
+
+// splitItems splits field into its plain items and those that special
+// matches, each in written order.
+func splitItems(field string, special *regexp.Regexp) (plain, matched []string) {
+	for _, it := range strings.FieldsFunc(field, func(r rune) bool { return r == ',' }) {
+		if special.MatchString(it) {
+			matched = append(matched, it)
+		} else {
+			plain = append(plain, it)
+		}
+	}
+	return plain, matched
+}
+
+var nthNames = []string{"", "first", "second", "third", "fourth", "fifth"}
+
+// nthDays names "#" items, "third Friday" or "last Friday", once each, in
+// written order (X1).
+func nthDays(items []string) []string {
+	var out []string
+	for _, it := range items {
+		day, n, _ := strings.Cut(it, "#")
+		// The spec parsed, so the day and the occurrence are valid.
+		v, _ := parseIntOrName(day, dow.names)
+		word := "last"
+		if !strings.EqualFold(n, "L") {
+			i, _ := mustParseInt(n)
+			word = nthNames[i]
+		}
+		if w := word + " " + time.Weekday(v%7).String(); !slices.Contains(out, w) {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+// domPart is one element of a day-of-month list and the day it sorts by.
+type domPart struct {
+	key    uint
+	text   string
+	before bool // "N days before the last day" (X2)
+}
+
+// describeDom describes the day of month as a clause: "on the 1st and 15th
+// of the month" (D2), "on the last day of the month", "3 days before the
+// last day of the month" (X1–X3); and the short-month clauses (D3, X5, X6).
+// whole is false when the day of week is ORed with it.
+func (d *describer) describeDom(md timeField, special []string, whole bool) (text, short string) {
+	if len(special) == 0 {
+		text = d.dateNums(md)
+		of := " of the month"
+		if _, even := md.gap(); even && !slices.ContainsFunc(md.vals, func(v uint) bool { return v > 28 }) {
+			of = " of every month"
+		}
+		return "on the " + text + of, lateClause(md.vals)
+	}
+	parts, lacking, late := d.domParts(md, special)
+	words := make([]string, len(parts))
+	for i, p := range parts {
+		words[i] = p.text
+	}
+	switch {
+	case len(parts) == 1 && strings.HasPrefix(parts[0].text, "the weekday nearest"):
+		text = "on " + parts[0].text
+	case parts[0].before:
+		text = andList(words) + " of the month"
+	default:
+		text = "on " + andList(words) + " of the month"
+	}
+	clauses := []string{lateClause(late)}
+	for _, p := range lacking {
+		subject := p.text
+		if whole && len(parts) == 1 {
+			subject = "it"
+		}
+		clauses = append(clauses, "; "+subject+" runs only in "+monthsOf(p.key))
+	}
+	return text, strings.Join(clauses, "")
+}
+
+// domParts lists the day-of-month items in the order of the days they name,
+// once each (X3), the L-n items short months lack, keyed by the fewest days
+// they need (X6), and the days the items name, for the short-month clause
+// (D3, X5).
+func (d *describer) domParts(md timeField, special []string) (parts, lacking []domPart, late []uint) {
+	late = slices.Clone(md.vals)
+	var last bool
+	for _, it := range special {
+		u := strings.ToUpper(it)
+		// The spec parsed, so the numbers are valid.
+		switch {
+		case u == "L":
+			last = true
+		case u == "LW":
+			parts = append(parts, domPart{key: 32, text: "the last weekday"})
+		case strings.HasPrefix(u, "L-"):
+			n, _ := mustParseInt(u[2:])
+			text := count(n, "day") + " before the last day"
+			parts = append(parts, domPart{key: 33 + n, text: text, before: true})
+			if n >= 28 {
+				lacking = append(lacking, domPart{key: n + 1, text: text})
+			}
+		default:
+			n, _ := mustParseInt(strings.TrimSuffix(u, "W"))
+			parts = append(parts, domPart{key: n, text: "the weekday nearest the " + ordinal(n)})
+			late = append(late, n)
+		}
+	}
+	// X3: the ordinals, with the last day, share one "the".
+	if len(md.vals) > 0 {
+		words := md.runWords(md.vals)
+		if t, note := md.nums(); note != "" {
+			// T1: cut short, so the last day keeps its own "the".
+			words = []string{t}
+			d.dateNotes = append(d.dateNotes, note)
+		} else if last {
+			words, last = append(words, "last day"), false
+		}
+		parts = append(parts, domPart{key: slices.Min(md.vals), text: "the " + andList(words)})
+	}
+	if last {
+		parts = append(parts, domPart{key: 32, text: "the last day"})
+	}
+	// Sorted, a repeated item sits next to itself.
+	byKey := func(a, b domPart) int { return cmp.Compare(a.key, b.key) }
+	sameText := func(a, b domPart) bool { return a.text == b.text }
+	slices.SortStableFunc(parts, byKey)
+	slices.SortStableFunc(lacking, byKey)
+	return slices.CompactFunc(parts, sameText), slices.CompactFunc(lacking, sameText), late
+}
+
+// lateClause names the days above the 28th: "; the 31st runs only in months
+// that have one" (D3, X5).
+func lateClause(days []uint) string {
 	var late []string
-	for _, v := range slices.Sorted(slices.Values(md.vals)) {
+	for _, v := range slices.Compact(slices.Sorted(slices.Values(days))) {
 		if v > 28 {
 			late = append(late, ordinal(v))
 		}
 	}
-	of := " of the month"
-	if _, even := md.gap(); even && len(late) == 0 {
-		of = " of every month"
-	}
 	switch len(late) {
 	case 0:
+		return ""
 	case 1:
-		short = "; the " + late[0] + " runs only in months that have one"
-	default:
-		short = "; the " + andList(late) + " run only in months that have them"
+		return "; the " + late[0] + " runs only in months that have one"
 	}
-	return "the " + text + of, short
+	return "; the " + andList(late) + " run only in months that have them"
+}
+
+// monthsOf names the months of at least days days: "months of 29 days or
+// more", "months of 31 days" (X6).
+func monthsOf(days uint) string {
+	if days == 31 {
+		return "months of 31 days"
+	}
+	return fmt.Sprintf("months of %d days or more", days)
 }
 
 // dowOrDom reports a spec whose restricted day fields are ORed, as the parser
@@ -289,15 +458,32 @@ func isWildcard(field string) bool {
 // name, or a range of them, each with an optional step. Any other item renders the spec field by field (G10).
 var describableItem = regexp.MustCompile(`^(?:[*?]|(?:\+?[0-9]+|[A-Za-z]{3})(?:-(?:\+?[0-9]+|[A-Za-z]{3}))?)(?:/\+?[0-9]+)?$`)
 
-// describable reports a field whose items all have the covered syntax.
-func describable(field string) bool {
+// describable reports a field whose items all have the covered syntax, or
+// the field's own (special): L and W in the day of month, # in the day of
+// week. special is nil for the other fields.
+func describable(field string, special *regexp.Regexp) bool {
 	items := strings.FieldsFunc(field, func(r rune) bool { return r == ',' })
-	return !slices.ContainsFunc(items, func(it string) bool { return !describableItem.MatchString(it) })
+	return !slices.ContainsFunc(items, func(it string) bool {
+		return !describableItem.MatchString(it) && (special == nil || !special.MatchString(it))
+	})
 }
 
-// allDescribable reports fields that are all describable.
+// allDescribable reports fields, second to day of week, that are all
+// describable.
 func allDescribable(fields []string) bool {
-	return !slices.ContainsFunc(fields, func(f string) bool { return !describable(f) })
+	for i, f := range fields {
+		var special *regexp.Regexp
+		switch i {
+		case 3:
+			special = domSpecialItem
+		case 5:
+			special = dowNthItem
+		}
+		if !describable(f, special) {
+			return false
+		}
+	}
+	return true
 }
 
 var literalNames = []string{seconds.name, minutes.name, hours.name, dom.name, months.name, dow.name}
@@ -329,6 +515,7 @@ func (p Parser) describeLiteral(spec string, fields []string, yearField string) 
 
 // Phrases the descriptions repeat.
 const (
+	unitSecond       = "second"
 	thruSep          = " thru "
 	everyDaySuffix   = " every day"
 	inEveryDaySuffix = " in every day"
@@ -692,7 +879,7 @@ func (d *describer) clock(h, m, s uint) string {
 // describeTime describes the second, minute and hour fields: what leads, the
 // minutes joined to it, then the hours (C1).
 func (d *describer) describeTime(fields []string) string {
-	sec := newTimeField(fields[0], "second", "minute", seconds)
+	sec := newTimeField(fields[0], unitSecond, "minute", seconds)
 	minute := newTimeField(fields[1], "minute", "hour", minutes)
 	hour := newTimeField(fields[2], "hour", "day", hours)
 	if sec.single() {
@@ -724,7 +911,7 @@ func (d *describer) bySeconds(sec, minute, hour timeField) string {
 		}
 		return d.joinHours("every second for "+d.values(minute), "in every hour", sec, minute, hour)
 	}
-	secs := "at " + count(sec.vals[0], "second")
+	secs := "at " + count(sec.vals[0], unitSecond)
 	if !sec.single() {
 		secs = "at seconds " + d.nums(sec)
 	}
