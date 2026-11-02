@@ -507,16 +507,17 @@ func stepClause(hour timeField) string {
 		return out + "starting with the " + onHour(it.lo) + " hour in every day"
 	}
 	words := make([]string, 0, 2)
-	for _, p := range stepParts(it, hour.r) {
+	for _, p := range stepParts(it, hour.r, false) {
 		words = append(words, "the "+onHour(p[0])+" hour thru the "+onHour(p[1])+" hour")
 	}
 	return out + "from " + andList(words) + " in every day"
 }
 
 // stepParts returns the first and last run of an hour step. A wrapped step
-// splits at midnight into two parts in clock order, each from its first
-// run to its last (T9). A part of one run is left unsplit, in firing order.
-func stepParts(it timeItem, r bounds) [][2]uint {
+// splits at midnight into its parts in clock order, each from its first run
+// to its last (T9). With oneRun false, a step with a part of one run is
+// left whole, in firing order.
+func stepParts(it timeItem, r bounds, oneRun bool) [][2]uint {
 	runs := it.runs(r)
 	whole := [][2]uint{{runs[0], runs[len(runs)-1]}}
 	if it.lo <= it.hi {
@@ -530,10 +531,36 @@ func stepParts(it timeItem, r bounds) [][2]uint {
 			pm = append(pm, v)
 		}
 	}
-	if len(am) < 2 || len(pm) < 2 {
-		return whole
+	parts := make([][2]uint, 0, 2)
+	for _, half := range [][]uint{am, pm} {
+		switch {
+		case len(half) == 0:
+		case len(half) == 1 && !oneRun:
+			return whole
+		default:
+			parts = append(parts, [2]uint{half[0], half[len(half)-1]})
+		}
 	}
-	return [][2]uint{{am[0], am[len(am)-1]}, {pm[0], pm[len(pm)-1]}}
+	return parts
+}
+
+// partWords names the parts of an hour step (R8, T9): "from 9 am thru 5 pm",
+// "from midnight thru 10 am and 8 pm thru 10 pm", and a part of one run at
+// its time: "from midnight thru 10 am and at 10 pm", "at midnight and from 4
+// am thru 10 pm". at writes an hour.
+func partWords(parts [][2]uint, at func(h uint) string) string {
+	if len(parts) == 2 && parts[0][0] == parts[0][1] {
+		return "at " + at(parts[0][0]) + " and from " + at(parts[1][0]) + " thru " + at(parts[1][1])
+	}
+	words := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p[0] == p[1] {
+			words = append(words, "at "+at(p[0]))
+			continue
+		}
+		words = append(words, at(p[0])+" thru "+at(p[1]))
+	}
+	return "from " + andList(words)
 }
 
 // clockTimes describes a fixed second as clock times: one hour with up to 6
@@ -565,11 +592,8 @@ func hourStep(s uint, minute, hour timeField) (string, bool) {
 	if wholeDay(it) {
 		out += "starting at " + clockTime(it.lo, m, s)
 	} else {
-		words := make([]string, 0, 2)
-		for _, p := range stepParts(it, hour.r) {
-			words = append(words, clockTime(p[0], m, s)+" thru "+clockTime(p[1], m, s))
-		}
-		out += "from " + andList(words)
+		at := func(h uint) string { return clockTime(h, m, s) }
+		out += partWords(stepParts(it, hour.r, true), at)
 	}
 	return out + " in every day", true
 }
