@@ -99,7 +99,7 @@ const (
 	hashNone      hashShape = iota // no H item selects by the hash
 	hashFixed                      // one fixed value, nothing else
 	hashFixedPlus                  // one fixed value of the whole range and one plain value (H15)
-	hashTwoFixed                   // a fixed value of the whole range and one of a part (H6)
+	hashTwoFixed                   // two fixed values, nothing else (H6, H21)
 	hashStep                       // one hashed step, nothing else (H2)
 	hashStepPlus                   // one hashed step of the whole range and plain 0 (H5)
 	hashOther                      // no form: the spec renders field by field
@@ -128,10 +128,42 @@ func (h hashField) fixedShape(f timeField) hashShape {
 		return hashFixed
 	case len(h.fixed) == 1 && f.single() && h.fixed[0].whole:
 		return hashFixedPlus
-	case len(h.fixed) == 2 && len(f.vals) == 0 && h.fixed[0].whole && !h.fixed[1].whole:
+	case len(h.fixed) == 2 && len(f.vals) == 0:
 		return hashTwoFixed
 	}
 	return hashOther
+}
+
+// fixedPair names the two fixed values of h, the whole range first, then by
+// their ranges, and counts their runs (H6, H21): "1 or 2 runs" when the two
+// can fall on one value, "2 runs" when they cannot. Both values come from one
+// hash, so the count enumerates the hash over the lengths of both ranges, as
+// the parser picks them.
+func (d *describer) fixedPair(h hashField, unit string, r bounds) (count, words string, ok bool) {
+	a, b := h.fixed[0], h.fixed[1]
+	if !a.whole && b.lo < a.lo {
+		a, b = b, a
+	}
+	na, nb := uint64(cyclicRangeSize(a.lo, a.hi, r)), uint64(cyclicRangeSize(b.lo, b.hi, r))
+	lo, hi := 2, 1
+	for v := range na * nb / gcd(na, nb) {
+		n := 1
+		if getHashSingleBit(a.lo, a.hi, r, v) != getHashSingleBit(b.lo, b.hi, r, v) {
+			n = 2
+		}
+		lo, hi = min(lo, n), max(hi, n)
+	}
+	aw, okA := d.fixed(unit, a, r)
+	bw, okB := d.fixed(unit, b, r)
+	return counted(lo, hi, "run"), aw + " and " + bw, okA && okB
+}
+
+// gcd is the greatest common divisor of a and b.
+func gcd(a, b uint64) uint64 {
+	for b != 0 {
+		a, b = b, a%b
+	}
+	return a
 }
 
 // between names the range of a hashed value or step: "between minutes 0 and
@@ -275,33 +307,64 @@ func onesOnly(h [3]hashField) bool {
 }
 
 // describeHashTime describes second, minute and hour fields with H items
-// (H1–H16). ok is false for the combinations without a form, which render
-// field by field (G10).
+// (H1–H16, H21–H24). ok is false for the combinations without a form, which
+// render field by field (G10).
 func (d *describer) describeHashTime(h [3]hashField) (string, bool) {
 	sec := newTimeField(h[0].plain, unitSecond, unitMinute, seconds)
 	minute := newTimeField(h[1].plain, unitMinute, unitHour, minutes)
 	hour := newTimeField(h[2].plain, unitHour, "day", hours)
 	ss, ms, hs := h[0].shape(sec), h[1].shape(minute), h[2].shape(hour)
-	if onesOnly(h) {
-		return "", false
-	}
 	switch {
-	case ss == hashFixed:
-		return d.hashSecond(h[0].fixed[0], h[1], minute, ms, hour, hs)
-	case ss == hashStep && ms == hashNone && hs == hashNone && minute.every():
-		x := h[0].steps[0]
-		place, ok := d.stepPlace(unitSecond, x, seconds, hour)
-		return runCount(x, seconds, nil) + " in every minute" + place + stepTail(x, unitSecond), ok
-	case ss != hashNone || !sec.single() || sec.vals[0] != 0:
+	case onesOnly(h):
+		return "", false
+	case ss != hashNone:
+		return d.hashSeconds(h, ss, minute, ms, hour, hs)
+	case !sec.single() || sec.vals[0] != 0:
 		return "", false
 	case hs == hashNone:
 		return d.hashMinute(h[1], minute, ms, hour)
 	case ms == hashNone:
 		return d.hashHour(h[2], hour, hs, minute)
+	}
+	return d.hashMinuteHour(h, ms, hs)
+}
+
+// hashSeconds describes H in the second field (H1, H2, H8, H12, H21, H24).
+func (d *describer) hashSeconds(h [3]hashField, ss hashShape, minute timeField, ms hashShape, hour timeField, hs hashShape) (string, bool) {
+	plain := ms == hashNone && hs == hashNone
+	switch {
+	case ss == hashFixed:
+		return d.hashSecond(h[0].fixed[0], h[1], minute, ms, h[2], hour, hs)
+	case ss == hashTwoFixed && plain && minute.every() && hour.every():
+		runs, words, ok := d.fixedPair(h[0], unitSecond, seconds)
+		return runs + " in every minute, at " + words, ok // H21
+	case ss != hashStep || !plain:
+		return "", false
+	}
+	x := h[0].steps[0]
+	switch {
+	case minute.every():
+		place, ok := d.stepPlace(unitSecond, x, seconds, hour)
+		return runCount(x, seconds, nil) + " in every minute" + place + stepTail(x, unitSecond), ok
+	case minute.single() && x.whole:
+		return d.joinSeconds(runCount(x, seconds, nil), nil, timeField{}, minute, hour) + stepTail(x, unitSecond), true // H24
+	}
+	return "", false
+}
+
+// hashMinuteHour describes H in both the minute and the hour field (H16,
+// H22).
+func (d *describer) hashMinuteHour(h [3]hashField, ms, hs hashShape) (string, bool) {
+	switch {
 	case ms == hashFixed && hs == hashFixed:
 		mw, _ := d.fixed(unitMinute, h[1].fixed[0], minutes)
 		hw, ok := d.fixed(unitHour, h[2].fixed[0], hours)
 		return "at " + mw + " at " + hw + d.everyDay(), ok // H16
+	case ms == hashFixed && hs == hashStep && h[2].steps[0].whole:
+		x := h[2].steps[0]
+		mw, ok := d.fixed(unitMinute, h[1].fixed[0], minutes)
+		lo, hi := runRange(x, hours, nil)
+		return "at " + mw + " during " + counted(lo, hi, unitHour) + " in every day" + stepTail(x, unitHour), ok // H22
 	}
 	return "", false
 }
@@ -323,21 +386,43 @@ func (d *describer) stepPlace(unit string, x hashed, r bounds, hour timeField) (
 		return " during " + d.hourNames(hour), true
 	case k == longRange && unit == unitMinute:
 		return " " + fromThru(hour.items[0], d.onHour, d.onHour), true
+	case k == longRange:
+		// R12: seconds run in every minute, so the last run is minute 59.
+		last := func(h uint) string { return d.clock(h, 59, 0) }
+		return " " + fromThru(hour.items[0], d.onHour, last), true // H24
 	}
 	return "", false
 }
 
-// hashSecond describes a fixed second (H1, H8, H12): "at a fixed second
-// within a minute", "at a fixed second at 9 am every day".
-func (d *describer) hashSecond(x hashed, mh hashField, minute timeField, ms hashShape, hour timeField, hs hashShape) (string, bool) {
+// hashSecond describes a fixed second (H1, H8, H12, H24): "at a fixed second
+// within a minute", "at a fixed second at 9 am every day", "at a fixed
+// second within minute 30 in every hour".
+func (d *describer) hashSecond(x hashed, mh hashField, minute timeField, ms hashShape, hh hashField, hour timeField, hs hashShape) (string, bool) {
 	sw, _ := d.fixed(unitSecond, x, seconds)
 	lead := "at " + sw
 	switch {
+	case hs == hashFixed && ms == hashNone && minute.single() && minute.vals[0] == 0:
+		hw, ok := d.fixed(unitHour, hh.fixed[0], hours)
+		return lead + " at the top of " + hw + d.everyDay(), ok // H24, H16
 	case hs != hashNone:
+		return "", false
 	case ms == hashFixed && hour.kind() == namedHours:
 		mw, _ := d.fixed(unitMinute, mh.fixed[0], minutes)
 		return lead + " and " + mw + " during " + d.hourNames(hour) + d.everyDay(), true // H12
+	case ms == hashFixed:
+		mw, _ := d.fixed(unitMinute, mh.fixed[0], minutes)
+		return d.joinHours(lead+" within "+mw, "in every hour", timeField{}, minute, hour), true // H24
 	case ms != hashNone:
+		return "", false
+	}
+	return d.secondPlain(lead, minute, hour)
+}
+
+// secondPlain joins plain minutes and hours to a fixed second (C1, H8,
+// H24). ok is false for the span form (T5), whose runs are clock times.
+func (d *describer) secondPlain(lead string, minute, hour timeField) (string, bool) {
+	_, span := spanForm(minute, hour)
+	switch {
 	case minute.every() && hour.every():
 		return lead + " within a minute", true
 	case minute.every():
@@ -349,6 +434,8 @@ func (d *describer) hashSecond(x hashed, mh hashField, minute timeField, ms hash
 			clocks[i] = d.clock(hv, minute.vals[0], 0)
 		}
 		return lead + " at " + andList(clocks) + d.everyDay(), true // H8
+	case !span:
+		return d.joinSeconds(lead, nil, timeField{}, minute, hour), true // H24
 	}
 	return "", false
 }
@@ -372,8 +459,15 @@ func (d *describer) hashMinute(mh hashField, minute timeField, ms hashShape, hou
 		return lead + " past every hour " + fromThru(hour.items[0], d.onHour, d.onHour) + d.everyDay(), true // R9
 	case hashStep:
 		x := mh.steps[0]
+		if hour.kind() == longStep && x.whole {
+			return runCount(x, minutes, nil) + " in every hour" + stepTail(x, unitMinute) + ", " + d.stepClause(hour), true // H23
+		}
 		place, ok := d.stepPlace(unitMinute, x, minutes, hour)
 		return runCount(x, minutes, nil) + " in every hour" + place + stepTail(x, unitMinute), ok
+	case hashTwoFixed:
+		place, ok := d.stepPlace(unitMinute, hashed{whole: true}, minutes, hour)
+		runs, words, okWords := d.fixedPair(mh, unitMinute, minutes)
+		return runs + " in every hour" + place + ", at " + words, ok && okWords // H6, H21
 	}
 	if !hour.every() {
 		return "", false
@@ -381,9 +475,6 @@ func (d *describer) hashMinute(mh hashField, minute timeField, ms hashShape, hou
 	switch {
 	case ms == hashFixedPlus && minute.vals[0] == 0:
 		return runCount(mh.fixed[0], minutes, minute.vals) + " in every hour, at the top of the hour and a fixed minute past it", true // H4, H15
-	case ms == hashTwoFixed:
-		part, _ := d.fixed(unitMinute, mh.fixed[1], minutes)
-		return "1 or 2 runs in every hour, at a fixed minute and " + part, true // H6
 	case ms == hashStepPlus:
 		x := mh.steps[0]
 		return runCount(x, minutes, minute.vals) + fmt.Sprintf(" in every hour, at the top of the hour and every %d minutes starting from a fixed minute", x.step), true // H5
@@ -392,7 +483,7 @@ func (d *describer) hashMinute(mh hashField, minute timeField, ms hashShape, hou
 }
 
 // hashHour describes H in the hour field under plain minutes (H1, H13, H14,
-// H16).
+// H16, H21, H22).
 func (d *describer) hashHour(hh hashField, hour timeField, hs hashShape, minute timeField) (string, bool) {
 	switch hs {
 	case hashFixed:
@@ -411,21 +502,35 @@ func (d *describer) hashHour(hh hashField, hour timeField, hs hashShape, minute 
 			return "", false
 		}
 		return runCount(hh.fixed[0], hours, hour.vals) + " in every day, at " + d.clock(hour.vals[0], 0, 0) + " and the top of a fixed hour", true // H13, H15
-	case hashStep:
-		x := hh.steps[0]
-		tail := runCount(x, hours, nil) + " in every day" + stepTail(x, unitHour)
-		switch {
-		case !x.whole:
-		case minute.every():
-			lo, hi := runRange(x, hours, nil)
-			return "every minute during " + counted(lo, hi, unitHour) + " in every day" + stepTail(x, unitHour), true // H14
-		case minute.single() && minute.vals[0] == 0:
-			return "at the top of the hour, " + tail, true
-		case minute.single():
-			return "at " + count(minute.vals[0], unitMinute) + " past the hour, " + tail, true
+	case hashTwoFixed:
+		if !minute.single() || minute.vals[0] != 0 {
+			return "", false
 		}
+		runs, words, ok := d.fixedPair(hh, unitHour, hours)
+		return runs + " in every day, at the top of " + words, ok // H21
+	case hashStep:
+		return d.hashHourStep(hh.steps[0], minute)
 	}
 	return "", false
+}
+
+// hashHourStep describes a hashed hour step under plain minutes (H2, H14, H22).
+// ok is false for a ranged step, which has no form (H17).
+func (d *describer) hashHourStep(x hashed, minute timeField) (string, bool) {
+	tail := runCount(x, hours, nil) + " in every day" + stepTail(x, unitHour)
+	lo, hi := runRange(x, hours, nil)
+	during := " during " + counted(lo, hi, unitHour) + " in every day" + stepTail(x, unitHour)
+	switch {
+	case !x.whole:
+		return "", false
+	case minute.every():
+		return "every minute" + during, true // H14
+	case minute.single() && minute.vals[0] == 0:
+		return "at the top of the hour, " + tail, true
+	case minute.single():
+		return "at " + count(minute.vals[0], unitMinute) + " past the hour, " + tail, true
+	}
+	return "at minutes " + d.nums(minute) + during, true // H22
 }
 
 // hashes reports a field with H items that select by the hash.

@@ -148,10 +148,14 @@ which form a spec gets. Each has an ID, which the grammar cites.
 | H14 | Every minute in a hashed hour step: "every minute during 4 hours in every day, 6 hours apart, starting from a fixed hour" |
 | H15 | A plain value beside a hashed one in a field states the count, as the two can coincide: "1 or 2 runs in every hour, at the top of the hour and a fixed minute past it" |
 | H16 | Minutes under a fixed hour join with "at": "at minutes 0 and 30 at a fixed hour every day", "at minute 30 at a fixed hour every day"; minute 0 keeps R4: "at the top of a fixed hour every day" |
-| H17 | Other combinations in the time fields render field by field (G10): `H` with a plain second other than 0, several hashed steps, a hashed step beside a fixed value or in a field with a fixed hour, a wrapped fixed hour range, a wrapped range of one value per part (`H(59-0)`), a ranged hour step, or a ranged step with restricted hours |
+| H17 | Other combinations of H in the time fields render field by field (G10): H with a plain second other than 0, several hashed steps in a field, a hashed step beside a fixed value or with a fixed hour, a wrapped fixed hour range, a wrapped range whose parts are each one value (`H(59-0)`), a ranged hour step, a ranged step under a written minute or restricted hours, a fixed value beside a plain one other than H15's, two hashed values outside the H21 forms, a hashed second step beside several minutes or under an hour step past 6 values, a hashed second in the span form (T5), and a hashed second beside a hashed minute or hour other than H12's and H24's |
 | H18 | A hashed day or month: "on a fixed day of the month", "on a fixed day of the week", "in a fixed month"; a range by its values: "between the 1st and 15th", "between Monday and Friday", "between January and June". A wrapped day of the month splits low to high: "between the 1st and 5th or the 25th and 31st", "between the 1st and 5th or the 31st"; a wrapped week or year reads in its order: "between Friday and Monday", "between November and February"; one plain value first: "on the 1st and a fixed day of the month". Beside a restricted other day field a fixed day joins as D5: "at 12 am on a fixed day of the month when it falls on Monday", "on the 1st of the month or on a fixed day of the week" |
 | H19 | A hashed date step counts its days or months, as H14: "on 3 or 4 days in every week, 2 days apart, starting from a fixed day", "in 4 months in every year, 3 months apart, starting from a fixed month". In the day of month the count covers every month length: "on 2 to 4 days in every month, 10 days apart, starting from a fixed day" |
 | H20 | Other combinations in the date fields render field by field (G10): a hashed day step beside a restricted other day field, `H` beside `L`, `W` or `#`, a hashed day ORed with a day field that is every day, a wrapped day of the month of one value per part (`H(31-1)`), several hashed items, a hashed step beside a value, or more than one value beside `H` |
+| H21 | Two hashed values in one field, and nothing else, read as H6, each in its own words, the whole range first, then low to high. The count (H2) is "1 or 2 runs" when they can fall on one value, "2 runs" when they cannot: "2 runs in every hour, at a fixed minute between minutes 0 and 9 and a fixed minute between minutes 20 and 29". Minutes take the hours as H2 does: "1 or 2 runs in every hour during the 9 am hour, at a fixed minute and a fixed minute between minutes 0 and 29". Hours take minute 0: "1 or 2 runs in every day, at the top of a fixed hour and a fixed hour between midnight and 5 am hours". Seconds take every minute of every hour |
+| H22 | Minutes other than one plain value on a hashed hour step read as H14: "at minutes 0 and 30 during 4 hours in every day, 6 hours apart, starting from a fixed hour", "at a fixed minute during 4 hours in every day, 6 hours apart, starting from a fixed hour" |
+| H23 | A hashed minute step under an hour step past 6 values: the step as H2, then the hours as R11: "4 runs in every hour, 15 minutes apart, starting from a fixed minute, every 2 hours starting with the midnight hour in every day" |
+| H24 | A hashed second takes C1's joins in place of a value: "at a fixed second past the top of every hour", "at a fixed second within minute 30 in every hour", "at a fixed second within a fixed minute in every hour"; at minute 0 of a fixed hour, "at a fixed second at the top of a fixed hour every day". A hashed second step under one minute keeps H2's count: "4 runs within minute 5 in every hour, 15 seconds apart, starting from a fixed second", "4 runs past the top of every hour, 15 seconds apart, starting from a fixed second"; under an hour range it names the last run (R12): "4 runs in every minute from 9 am thru 5:59 pm, 15 seconds apart, starting from a fixed second" |
 
 ### Descriptors
 
@@ -221,7 +225,7 @@ inner: secs [minjoin]
      | "every" "minute"                                                   // T3
      | "every" "second" [forjoin]                                         // T3, J1
 secs: "at" INT ("second" | "seconds") | "at" "seconds" vlist | "at" fixed  // C1, R5, H1
-minjoin: "within" ("a" "minute" | "every" "minute" | "minute" INT | "minutes" vlist)   // C1, R6
+minjoin: "within" ("a" "minute" | "every" "minute" | "minute" INT | "minutes" vlist | fixed)   // C1, R6, H24
 forjoin: "for" ("minute" INT | "minutes" vlist)                           // C1, J1
 
 // R4, R5, R9, R10: one minute, any minute, on the hour forms
@@ -256,9 +260,12 @@ hashed: "at" fixed "past" "every" "hour" hourrange [everyday]             // R9
       | "every" "minute" "during" fixed                                   // R6
       | "at" fixed "at" list{clock} [everyday]                            // H8
       | "at" fixed "and" fixed "during" hours [everyday]                  // H12
+      | "at" fixed "at" "the" "top" "of" fixed [everyday]                 // H24, H16
 counted: [toplead ","] count "in" "every" unit [cplace] apart             // H2
-       | "every" "minute" "during" cnt "hours" "in" "every" "day" apart   // H14
-       | count "in" "every" unit "," "at" overlap                         // H15
+       | ("every" "minute" | "at" "minutes" vlist | "at" fixed) "during" cnt "hours" "in" "every" "day" apart   // H14, H22
+       | count "in" "every" unit [hourrange | "during" hours] "," "at" overlap   // H6, H15, H21
+       | count "in" "every" unit apart "," hstep                        // H23
+       | count ("within" ("minute" INT | "minutes" vlist) [hourjoin] | "past" "the" "top" "of" tophours) apart   // H24
 toplead: "at" "the" "top" "of" "the" "hour" | "at" INT ("minute" | "minutes") "past" "the" "hour"
 cnt: INT | INT "or" INT
 count: cnt ("run" | "runs")
@@ -268,6 +275,7 @@ overlap: "the" "top" "of" "the" "hour" "and" fixed "past" "it"             // H4
        | fixed "and" fixed                                                // H6
        | "the" "top" "of" "the" "hour" "and" "every" INT units "starting" "from" fixed   // H5
        | clock "and" "the" "top" "of" fixed                               // H13
+       | "the" "top" "of" fixed "and" fixed                               // H21
 fixed: "a" "fixed" unit [between | "between" hours]                       // H1, H3
 between: "between" units (INT "and" INT ["or" INT ["and" INT]] | INT "or" INT "and" INT)   // H3, T9
 hashkey: ";" "the" "hash" "key" "fixes" (list{"the" unit} | "both" units)   // H1

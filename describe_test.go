@@ -471,6 +471,34 @@ var describeGoldens = []struct {
 	{spec: "@every 500ms", parser: minEvery(1500*time.Millisecond, true), want: "every 2s from when scheduling started (written as 500ms, rounded up to the 1.5s minimum)"},
 	{spec: "@every 0s", parser: minEvery(0, false), want: "every 1s from when scheduling started (written as 0s, rounded up to whole seconds)"},
 
+	// H21: several hashed items without a step
+	{spec: "H,H(0-29) 9 * * *", opts: []DescribeOption{withHash}, want: "1 or 2 runs in every hour during the 9 am hour, at a fixed minute and a fixed minute between minutes 0 and 29; the hash key fixes both minutes"},
+	{spec: "H,H(0-29) 9-17 * * *", opts: []DescribeOption{withHash}, want: "1 or 2 runs in every hour from 9 am thru 5 pm, at a fixed minute and a fixed minute between minutes 0 and 29; the hash key fixes both minutes"},
+	{spec: "H(0-9),H(5-29) * * * *", opts: []DescribeOption{withHash}, want: "1 or 2 runs in every hour, at a fixed minute between minutes 0 and 9 and a fixed minute between minutes 5 and 29; the hash key fixes both minutes"},
+	{spec: "H(0-9),H(20-29) * * * *", opts: []DescribeOption{withHash}, want: "2 runs in every hour, at a fixed minute between minutes 0 and 9 and a fixed minute between minutes 20 and 29; the hash key fixes both minutes"},
+	{spec: "0 H,H(0-5) * * *", opts: []DescribeOption{withHash}, want: "1 or 2 runs in every day, at the top of a fixed hour and a fixed hour between midnight and 5 am hours; the hash key fixes both hours"},
+	{spec: "H,H(0-29) * * * * *", opts: []DescribeOption{withSecHash}, want: "1 or 2 runs in every minute, at a fixed second and a fixed second between seconds 0 and 29; the hash key fixes both seconds"},
+	// H22: a hashed hour step beside minutes
+	{spec: "0,30 H/6 * * *", opts: []DescribeOption{withHash}, want: "at minutes 0 and 30 during 4 hours in every day, 6 hours apart, starting from a fixed hour; the hash key fixes the hour"},
+	{spec: "*/15 H/6 * * *", opts: []DescribeOption{withHash}, want: "at minutes 0, 15, 30, and 45 during 4 hours in every day, 6 hours apart, starting from a fixed hour; the hash key fixes the hour"},
+	{spec: "0-30 H/6 * * *", opts: []DescribeOption{withHash}, want: "at minutes 0 thru 30 during 4 hours in every day, 6 hours apart, starting from a fixed hour; the hash key fixes the hour"},
+	{spec: "H H/6 * * *", opts: []DescribeOption{withHash}, want: "at a fixed minute during 4 hours in every day, 6 hours apart, starting from a fixed hour; the hash key fixes the minute and the hour"},
+	{spec: "H(0-29) H/6 * * *", opts: []DescribeOption{withHash}, want: "at a fixed minute between minutes 0 and 29 during 4 hours in every day, 6 hours apart, starting from a fixed hour; the hash key fixes the minute and the hour"},
+	// H23: a hashed minute step under an hour step past 6 values
+	{spec: "H/15 */2 * * *", opts: []DescribeOption{withHash}, want: "4 runs in every hour, 15 minutes apart, starting from a fixed minute, every 2 hours starting with the midnight hour in every day; the hash key fixes the minute"},
+	{spec: "H/7 */2 * * *", opts: []DescribeOption{withHash}, want: "8 or 9 runs in every hour, 7 minutes apart, starting from a fixed minute, every 2 hours starting with the midnight hour in every day; the hash key fixes the minute"},
+	{spec: "H/40 */2 * * *", opts: []DescribeOption{withHash}, want: "1 or 2 runs in every hour, 40 minutes apart, starting from a fixed minute, every 2 hours starting with the midnight hour in every day; the hash key fixes the minute"},
+	// H24: a hashed second beside a written minute or hour
+	{spec: "H 0 * * * *", opts: []DescribeOption{withSecHash}, want: "at a fixed second past the top of every hour; the hash key fixes the second"},
+	{spec: "H 5 * * * *", opts: []DescribeOption{withSecHash}, want: "at a fixed second within minute 5 in every hour; the hash key fixes the second"},
+	{spec: "H 30 * * * *", opts: []DescribeOption{withSecHash}, want: "at a fixed second within minute 30 in every hour; the hash key fixes the second"},
+	{spec: "H 0,30 * * * *", opts: []DescribeOption{withSecHash}, want: "at a fixed second within minutes 0 and 30 in every hour; the hash key fixes the second"},
+	{spec: "H 30 9-17 * * *", opts: []DescribeOption{withSecHash}, want: "at a fixed second within minute 30 in every hour from 9 am thru 5 pm every day; the hash key fixes the second"},
+	{spec: "H H * * * *", opts: []DescribeOption{withSecHash}, want: "at a fixed second within a fixed minute in every hour; the hash key fixes the second and the minute"},
+	{spec: "H 0 H * * *", opts: []DescribeOption{withSecHash}, want: "at a fixed second at the top of a fixed hour every day; the hash key fixes the second and the hour"},
+	{spec: "H/15 5 * * * *", opts: []DescribeOption{withSecHash}, want: "4 runs within minute 5 in every hour, 15 seconds apart, starting from a fixed second; the hash key fixes the second"},
+	{spec: "H/15 0 * * * *", opts: []DescribeOption{withSecHash}, want: "4 runs past the top of every hour, 15 seconds apart, starting from a fixed second; the hash key fixes the second"},
+	{spec: "H/15 * 9-17 * * *", opts: []DescribeOption{withSecHash}, want: "4 runs in every minute from 9 am thru 5:59 pm, 15 seconds apart, starting from a fixed second; the hash key fixes the second"},
 	// Literal fallback: the whole spec renders field by field
 	// H in the date fields without a form (H20)
 	{spec: "0 0 H/10 * 1", opts: []DescribeOption{withHash}, want: "minute 0, hour 0, day of month H/10, month *, day of week 1", literal: true},
@@ -483,22 +511,14 @@ var describeGoldens = []struct {
 	{spec: "0 0 L,H * *", opts: []DescribeOption{WithParseOptions(Minute | Hour | Dom | Month | Dow | Extended | Hash)}, want: "minute 0, hour 0, day of month L,H, month *, day of week *", literal: true},
 	// H in the time fields without a form (H17)
 	{spec: "H(59-0) * * * *", opts: []DescribeOption{withHash}, want: "minute H(59-0), hour *, day of month *, month *, day of week *", literal: true},
-	{spec: "H 5 * * * *", opts: []DescribeOption{withSecHash}, want: "second H, minute 5, hour *, day of month *, month *, day of week *", literal: true},
-	{spec: "H(0-9),H(20-29) * * * *", opts: []DescribeOption{withHash}, want: "minute H(0-9),H(20-29), hour *, day of month *, month *, day of week *", literal: true},
 	{spec: "H/15,H/20 * * * *", opts: []DescribeOption{withHash}, want: "minute H/15,H/20, hour *, day of month *, month *, day of week *", literal: true},
 	{spec: "0 H(20-5) * * *", opts: []DescribeOption{withHash}, want: "minute 0, hour H(20-5), day of month *, month *, day of week *", literal: true},
 	{spec: "5 H * * * *", opts: []DescribeOption{withSecHash}, want: "second 5, minute H, hour *, day of month *, month *, day of week *", literal: true},
-	{spec: "H H/6 * * *", opts: []DescribeOption{withHash}, want: "minute H, hour H/6, day of month *, month *, day of week *", literal: true},
 	{spec: "H(0-29)/10 9 * * *", opts: []DescribeOption{withHash}, want: "minute H(0-29)/10, hour 9, day of month *, month *, day of week *", literal: true},
-	{spec: "H/15 */2 * * *", opts: []DescribeOption{withHash}, want: "minute H/15, hour */2, day of month *, month *, day of week *", literal: true},
-	{spec: "H 0 H * * *", opts: []DescribeOption{withSecHash}, want: "second H, minute 0, hour H, day of month *, month *, day of week *", literal: true},
-	{spec: "H H * * * *", opts: []DescribeOption{withSecHash}, want: "second H, minute H, hour *, day of month *, month *, day of week *", literal: true},
 	{spec: "0,H 9 * * *", opts: []DescribeOption{withHash}, want: "minute 0,H, hour 9, day of month *, month *, day of week *", literal: true},
 	{spec: "5,H * * * *", opts: []DescribeOption{withHash}, want: "minute 5,H, hour *, day of month *, month *, day of week *", literal: true},
 	{spec: "30 9,H * * *", opts: []DescribeOption{withHash}, want: "minute 30, hour 9,H, day of month *, month *, day of week *", literal: true},
 	{spec: "0 H(9-17)/2 * * *", opts: []DescribeOption{withHash}, want: "minute 0, hour H(9-17)/2, day of month *, month *, day of week *", literal: true},
-	{spec: "0 H,H(0-5) * * *", opts: []DescribeOption{withHash}, want: "minute 0, hour H,H(0-5), day of month *, month *, day of week *", literal: true},
-	{spec: "H/15 * 9-17 * * *", opts: []DescribeOption{withSecHash}, want: "second H/15, minute *, hour 9-17, day of month *, month *, day of week *", literal: true},
 }
 
 // describeNoteGoldens are the binding notes (docs/DESCRIBE.md, N1–N7).
@@ -687,7 +707,7 @@ func describeGrammars() (descRe, noteRe *regexp.Regexp) {
 	// C1: what leads, with the minutes joined to the seconds
 	secs := alt("at "+num+" seconds?", "at seconds "+vlist, "at "+fixed)
 	inner := alt(
-		secs+opt(" within "+alt("a minute", "every minute", "minute "+num, "minutes "+vlist)),
+		secs+opt(" within "+alt("a minute", "every minute", "minute "+num, "minutes "+vlist, fixed)), // H24
 		"at minutes "+vlist,
 		"every minute",
 		"every second"+opt(" for "+alt("minute "+num, "minutes "+vlist)),
@@ -731,12 +751,18 @@ func describeGrammars() (descRe, noteRe *regexp.Regexp) {
 		"every minute during "+fixed,                                                 // R6
 		"at "+fixed+" at "+list(clock)+opt(everyday),                                 // H8
 		"at "+fixed+" and "+fixed+" during "+hours+opt(everyday),                     // H12
+		"at "+fixed+" at the top of "+fixed+opt(everyday),                            // H24
 		// H2, H14, H15: the count forms
 		opt(alt("at the top of the hour", "at "+num+" minutes? past the hour")+", ")+cnt+" runs? in every "+unit+
 			opt(" "+alt("between "+units+" "+nrange, hourrange, "during "+hours))+apart,
-		"every minute during "+cnt+" hours in every day"+apart,
-		cnt+" runs in every "+unit+", at "+alt("the top of the hour and "+fixed+" past it", fixed+" and "+fixed,
-			"the top of the hour and every "+num+" "+units+" starting from "+fixed, clock+" and the top of "+fixed),
+		alt("every minute", "at minutes "+vlist, "at "+fixed)+" during "+cnt+" hours in every day"+apart, // H14, H22
+		cnt+" runs in every "+unit+opt(" "+alt(hourrange, "during "+hours))+", at "+alt( // H6, H15, H21
+			"the top of the hour and "+fixed+" past it", fixed+" and "+fixed,
+			"the top of the hour and every "+num+" "+units+" starting from "+fixed, clock+" and the top of "+fixed,
+			"the top of "+fixed+" and "+fixed),
+		cnt+" runs? in every "+unit+apart+", "+hstep, // H23
+		cnt+" runs? "+alt("within "+alt("minute "+num, "minutes "+vlist)+opt(" "+hourjoin), // H24
+			"past the top of "+tophours)+apart,
 	)
 	// D2, D4–D6: the date clauses; D3: the short-month clause
 	ord := `\d+(?:st|nd|rd|th)`

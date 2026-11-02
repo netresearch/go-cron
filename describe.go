@@ -1070,22 +1070,29 @@ func (d *describer) bySeconds(sec, minute, hour timeField) string {
 		return d.joinHours("every second for "+d.values(minute), "in every hour", sec, minute, hour)
 	}
 	secs := "at " + count(sec.vals[0], unitSecond)
-	if !sec.single() {
+	var at func(h uint) string
+	if sec.single() {
+		at = func(h uint) string { return d.clock(h, 0, sec.vals[0]) }
+	} else {
 		secs = "at seconds " + d.nums(sec)
 	}
+	return d.joinSeconds(secs, at, sec, minute, hour)
+}
+
+// joinSeconds joins the minutes and hours to lead, which names the seconds
+// (C1): "within a minute", "within minute 30 in every hour", "past the top
+// of every hour". at writes the run in hour h for one second at minute 0, as
+// onTheHour takes it; otherwise it is nil.
+func (d *describer) joinSeconds(lead string, at func(h uint) string, sec, minute, hour timeField) string {
 	switch {
 	case minute.every() && hour.every():
-		return secs + " within a minute"
+		return lead + " within a minute"
 	case minute.every():
-		return d.joinHours(secs+" within every minute", "", sec, minute, hour)
+		return d.joinHours(lead+" within every minute", "", sec, minute, hour)
 	case minute.single() && minute.vals[0] == 0:
-		var at func(h uint) string
-		if sec.single() {
-			at = func(h uint) string { return d.clock(h, 0, sec.vals[0]) }
-		}
-		return d.onTheHour(secs+" past the top of", hour, at)
+		return d.onTheHour(lead+" past the top of", hour, at)
 	}
-	return d.joinHours(secs+" within "+d.values(minute), "in every hour", sec, minute, hour)
+	return d.joinHours(lead+" within "+d.values(minute), "in every hour", sec, minute, hour)
 }
 
 // minuteAt opens one minute on the hour forms: "at the top of" (R4), "at 30
@@ -1138,8 +1145,7 @@ func (d *describer) onTheHour(lead string, hour timeField, at func(h uint) strin
 // joinHours joins the hours to inner, the seconds and minutes (R6, R9–R12,
 // T5). every is the join for every hour.
 func (d *describer) joinHours(inner, every string, sec, minute, hour timeField) string {
-	if it, ok := hour.span(); ok && !hour.every() && len(minute.vals) > 1 && !minute.every() &&
-		(it.lo < it.hi || hour.kind() == longRange) {
+	if it, ok := spanForm(minute, hour); ok {
 		// T5: the first and last run of the day lead.
 		first := func(h uint) string { return d.clock(h, minute.vals[0], sec.vals[0]) }
 		last := func(h uint) string {
@@ -1201,6 +1207,14 @@ func (d *describer) wrappedPart(inner string, sec, minute timeField, it timeItem
 // partRange names a part of an hour range: "midnight thru 5 am".
 func (d *describer) partRange(p [2]uint) string {
 	return d.onHour(p[0]) + thruSep + d.onHour(p[1])
+}
+
+// spanForm reports the span form (T5), whose first and last runs need the
+// minutes and seconds as clock times: several minutes on an hour range.
+func spanForm(minute, hour timeField) (timeItem, bool) {
+	it, ok := hour.span()
+	return it, ok && !hour.every() && len(minute.vals) > 1 && !minute.every() &&
+		(it.lo < it.hi || hour.kind() == longRange)
 }
 
 // wholeDay reports an hour step over the whole day that divides 24 (R8, R11).
