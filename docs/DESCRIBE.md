@@ -30,8 +30,8 @@ func WithParseOptions(o ParseOption) DescribeOption // package function only
   description and a nil error. A spec that never runs reads "never runs".
   Specs outside the fields covered so far and combinations of `H` that
   have no form (H17, H20) get the literal form: each written field by
-  name, as written ("minute 0, hour 9, day of month H, month *, day of
-  week 1-5"). A descriptor such as `@daily` is returned as written.
+  name, as written ("minute 0, hour 9, day of month H/10, month *, day
+  of week 1-5"). A descriptor such as `@daily` is returned as written.
 - `H` needs no hash key: the description does not depend on it. With no
   key, `StrictDays` does not check a spec with `H` in the day of the month
   or the month, as the value the key picks decides that check.
@@ -139,9 +139,9 @@ which form a spec gets. Each has an ID, which the grammar cites.
 | H15 | A plain value beside a hashed one in a field states the count, as the two can coincide: "1 or 2 runs in every hour, at the top of the hour and a fixed minute past it" |
 | H16 | Minutes under a fixed hour join with "at": "at minutes 0 and 30 at a fixed hour every day", "at minute 30 at a fixed hour every day"; minute 0 keeps R4: "at the top of a fixed hour every day" |
 | H17 | Other combinations in the time fields render field by field (G10): `H` with a plain second other than 0, several hashed steps, a hashed step beside a fixed value or in a field with a fixed hour, a wrapped fixed hour range, a ranged hour step, or a ranged step with restricted hours |
-| H18 | A hashed day or month: "on a fixed day of the month", "on a fixed day of the week", "in a fixed month"; a range by its values: "between the 1st and 15th", "between Monday and Friday", "between January and June"; one plain value first: "on the 1st and a fixed day of the month" |
+| H18 | A hashed day or month: "on a fixed day of the month", "on a fixed day of the week", "in a fixed month"; a range by its values: "between the 1st and 15th", "between Monday and Friday", "between January and June"; one plain value first: "on the 1st and a fixed day of the month". Beside a restricted other day field a fixed day joins as D5: "at 12 am on a fixed day of the month when it falls on Monday", "on the 1st of the month or on a fixed day of the week" |
 | H19 | A hashed date step counts its days or months, as H14: "on 3 or 4 days in every week, 2 days apart, starting from a fixed day", "in 4 months in every year, 3 months apart, starting from a fixed month". In the day of month the count covers every month length: "on 2 to 4 days in every month, 10 days apart, starting from a fixed day" |
-| H20 | Other combinations in the date fields render field by field (G10): `H` in a day field beside a restricted other day field, beside `L`, `W` or `#`, a wrapped hashed range, several hashed items, a hashed step beside a value, or more than one value beside `H` |
+| H20 | Other combinations in the date fields render field by field (G10): a hashed day step beside a restricted other day field, `H` beside `L`, `W` or `#`, a hashed day ORed with a day field that is every day, a wrapped hashed range, several hashed items, a hashed step beside a value, or more than one value beside `H` |
 
 ## Grammar (EBNF)
 
@@ -250,9 +250,9 @@ inevery: "in" "every" "day"                                               // J1
 clock: CLOCK12 | "midnight" | "noon"                                      // R1, R2, T12
 
 // D1–D7: the date clauses
-day: "on" dom [andor] | before [andor] | "on" dow | "on" hday           // D5, D7, X2, H18
-andor: "when" "it" "falls" "on" dow                                       // D5 AND
-     | "or" "on" list{anyitem}                                            // D5 OR, X4
+day: "on" (dom | hdomfix) [andor] | before [andor] | "on" dow | "on" hday   // D5, D7, X2, H18
+andor: "when" "it" "falls" "on" (dow | hdowfix)                           // D5 AND, H18
+     | "or" "on" (list{anyitem} | hdowfix)                                // D5 OR, X4, H18
 anyitem: "any" (DAYNAME ["thru" DAYNAME] | NTH DAYNAME)
 dom: "the" olist "of" ("the" | "every") "month"                           // D2
    | "the" "weekday" "nearest" "the" ORD                                  // X1
@@ -270,15 +270,14 @@ month: "in" list{mitem} | "in" hmonth                                     // D6,
 mitem: MONTHNAME ["thru" MONTHNAME]
 
 // H18, H19: a day or month the hash key fixes
-hday: "a" "fixed" "day" "of" "the" "month" [hdomrange]                    // H18
-    | "the" ORD "and" "a" "fixed" "day" "of" "the" "month"
+hday: hdomfix | hdowfix                                                   // H18
     | hcnt ("day" | "days") "in" "every" "month" [hdomrange] dapart        // H19
-    | "a" "fixed" "day" "of" "the" "week" [hdowrange]
-    | DAYNAME "and" "a" "fixed" "day" "of" "the" "week"
-    | hcnt ("day" | "days") "in" "every" "week" [hdowrange] dapart
+    | hcnt ("day" | "days") "in" "every" "week" [hdowrange] dapart         // H19
 hmonth: "a" "fixed" "month" [hmonthrange]
       | MONTHNAME "and" "a" "fixed" "month"
       | hcnt ("month" | "months") "in" "every" "year" [hmonthrange] "," INT "months" "apart" "," "starting" "from" "a" "fixed" "month"
+hdomfix: "a" "fixed" "day" "of" "the" "month" [hdomrange] | "the" ORD "and" "a" "fixed" "day" "of" "the" "month"   // H18, D5
+hdowfix: "a" "fixed" "day" "of" "the" "week" [hdowrange] | DAYNAME "and" "a" "fixed" "day" "of" "the" "week"        // H18, D5
 hdomrange: "between" "the" ORD "and" ORD                                  // H18, D2
 hdowrange: "between" DAYNAME "and" DAYNAME
 hmonthrange: "between" MONTHNAME "and" MONTHNAME

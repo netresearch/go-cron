@@ -3001,8 +3001,8 @@ unless `WithParseOptions` is given; several calls OR together); the `Parser`
 method uses the parser's own settings and ignores `WithParseOptions`. Times are on the 12-hour clock. Descriptions carry no time zone. A
 valid spec always gets a description; one that never runs is "never runs".
 Specs outside the fields covered so far, and combinations of `H` without a
-form, get each written field by name ("minute 0, hour 0, day of month H, month
-*, day of week 1"); a descriptor is returned as written. `H` needs no hash key. The
+form, get each written field by name ("minute 0, hour 0, day of month H/10,
+month *, day of week 1"); a descriptor is returned as written. `H` needs no hash key. The
 wording and its grammar are in [DESCRIBE.md](DESCRIBE.md).
 
 **Example:**

@@ -21,6 +21,7 @@ var (
 	withExtOr    = WithParseOptions(Minute | Hour | Dom | Month | Dow | Extended | DowOrDom)
 	withHash     = WithParseOptions(Minute | Hour | Dom | Month | Dow | Hash)
 	withSecHash  = WithParseOptions(Second | Minute | Hour | Dom | Month | Dow | Hash)
+	withHashOr   = WithParseOptions(Minute | Hour | Dom | Month | Dow | Hash | DowOrDom)
 )
 
 // describeGoldens are the binding descriptions (docs/DESCRIBE.md). literal
@@ -394,12 +395,20 @@ var describeGoldens = []struct {
 	{spec: "0 0 H H *", opts: []DescribeOption{withHash}, want: "at midnight on a fixed day of the month in a fixed month; the hash key fixes the day and the month"},
 	{spec: "H 9 H * *", opts: []DescribeOption{withHash}, want: "at a fixed minute during the 9 am hour on a fixed day of the month; the hash key fixes the minute and the day"},
 	{spec: "0 0 H/1 * *", opts: []DescribeOption{withHash}, want: "at midnight every day"},
+	{spec: "0 0 H * 1", opts: []DescribeOption{withHash}, want: "at 12 am on a fixed day of the month when it falls on Monday; the hash key fixes the day"},
+	{spec: "0 0 1 * H", opts: []DescribeOption{withHash}, want: "at midnight on the 1st of the month when it falls on a fixed day of the week; the hash key fixes the day"},
+	{spec: "0 0 H * 1", opts: []DescribeOption{withHashOr}, want: "at 12 am on a fixed day of the month or on any Monday; the hash key fixes the day"},
+	{spec: "0 0 1 * H", opts: []DescribeOption{withHashOr}, want: "at midnight on the 1st of the month or on a fixed day of the week; the hash key fixes the day"},
+	{spec: "0 0 H * H", opts: []DescribeOption{withHash}, want: "at midnight on a fixed day of the month when it falls on a fixed day of the week; the hash key fixes both days"},
+	{spec: "0 9 H(1-15) * 1-5", opts: []DescribeOption{withHash}, want: "at 9 am on a fixed day of the month between the 1st and 15th when it falls on Monday thru Friday; the hash key fixes the day"},
+	{spec: "0 0 H * 0-6", opts: []DescribeOption{withHash}, want: "at midnight on a fixed day of the month; the hash key fixes the day"},
 
 	// Literal fallback: the whole spec renders field by field
 	{spec: "@daily", want: "@daily", literal: true},
 	// H in the date fields without a form (H20)
-	{spec: "0 0 H * 1", opts: []DescribeOption{withHash}, want: "minute 0, hour 0, day of month H, month *, day of week 1", literal: true},
-	{spec: "0 0 1 * H", opts: []DescribeOption{withHash}, want: "minute 0, hour 0, day of month 1, month *, day of week H", literal: true},
+	{spec: "0 0 H/10 * 1", opts: []DescribeOption{withHash}, want: "minute 0, hour 0, day of month H/10, month *, day of week 1", literal: true},
+	{spec: "0 0 1 * H/2", opts: []DescribeOption{withHash}, want: "minute 0, hour 0, day of month 1, month *, day of week H/2", literal: true},
+	{spec: "0 0 H * 0-6", opts: []DescribeOption{withHashOr}, want: "minute 0, hour 0, day of month H, month *, day of week 0-6", literal: true},
 	{spec: "0 0 H(25-5) * *", opts: []DescribeOption{withHash}, want: "minute 0, hour 0, day of month H(25-5), month *, day of week *", literal: true},
 	{spec: "0 9 * * H(5-1)", opts: []DescribeOption{withHash}, want: "minute 0, hour 9, day of month *, month *, day of week H(5-1)", literal: true},
 	{spec: "0 0 1 H(11-2) *", opts: []DescribeOption{withHash}, want: "minute 0, hour 0, day of month 1, month H(11-2), day of week *", literal: true},
@@ -546,7 +555,6 @@ func describeGrammar() *regexp.Regexp {
 	)
 	dayrange := dayname + opt(" thru "+dayname)
 	dow := list(alt(dayrange, "the "+nth+" "+dayname))
-	andor := alt(" when it falls on "+dow, " or on "+list("any "+alt(dayrange, nth+" "+dayname)))
 	// H18, H19: a day or month the hash key fixes
 	hcnt := alt(num, num+" or "+num, num+" to "+num)
 	hapart := func(u string) string { return ", " + num + " " + u + "s apart, starting from a fixed " + u }
@@ -557,7 +565,11 @@ func describeGrammar() *regexp.Regexp {
 	hday := alt(hform("a fixed day of the month", "the "+ord, "day", "month", "the "+ord, ord),
 		hform("a fixed day of the week", dayname, "day", "week", dayname, dayname))
 	hmonth := hform("a fixed month", monthname, "month", "year", monthname, monthname)
-	day := alt(dom+opt(andor), "on "+dow, "on "+hday)
+	// H18, D5: a fixed day joins the other day field
+	hdomfix := alt("a fixed day of the month"+opt(" between the "+ord+" and "+ord), "the "+ord+" and a fixed day of the month")
+	hdowfix := alt("a fixed day of the week"+opt(" between "+dayname+" and "+dayname), dayname+" and a fixed day of the week")
+	andor := alt(" when it falls on "+alt(dow, hdowfix), " or on "+alt(list("any "+alt(dayrange, nth+" "+dayname)), hdowfix))
+	day := alt(alt(dom, "on "+hdomfix)+opt(andor), "on "+dow, "on "+hday)
 	month := "in " + alt(list(monthname+opt(" thru "+monthname)), hmonth)
 	year := alt("in year "+num, "in years "+vlist)
 	short := "; " + alt(
@@ -653,19 +665,19 @@ func TestParserDescribeSpec(t *testing.T) {
 	}
 
 	// SecondOptional: a second that was not written is not listed.
-	got, err = FullParser().DescribeSpec("0 0 H * 1")
+	got, err = FullParser().DescribeSpec("0 0 H/10 * 1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "minute 0, hour 0, day of month H, month *, day of week 1"; got != want {
+	if want := "minute 0, hour 0, day of month H/10, month *, day of week 1"; got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
 
-	got, err = FullParser().DescribeSpec("0 0 0 H * 1 2027")
+	got, err = FullParser().DescribeSpec("0 0 0 H/10 * 1 2027")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "second 0, minute 0, hour 0, day of month H, month *, day of week 1, year 2027"; got != want {
+	if want := "second 0, minute 0, hour 0, day of month H/10, month *, day of week 1, year 2027"; got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
 

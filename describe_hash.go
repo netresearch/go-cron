@@ -412,30 +412,39 @@ func (p Parser) splitDates(fields []string) (h [3]hashField, plain [3]string, ok
 
 // describeDates describes the day of month, day of week and month, the
 // fields in that order with their H items in h (H18, H19), and the
-// short-month clause. ok is false for the combinations without a form (H20):
-// H in a day field beside a restricted other day field, among others.
+// short-month clause. ok is false for the combinations without a form (H20).
 func (p Parser) describeDates(d *describer, h [3]hashField, fields [3]string) (day, month, short string, ok bool) {
-	ok = true
-	switch {
-	case h[0].hashes() && isWildcard(fields[1]):
-		md := newDomField(fields[0])
-		day, ok = hashDate(h[0], md, "a fixed day of the month", "the ", dayRange)
-		day, short = "on "+day, lateClause(md.vals)
-	case h[1].hashes() && isWildcard(fields[0]):
-		runs := func(x hashed) (int, int) { return runRange(x, p.dowBounds(), nil) }
-		day, ok = hashDate(h[1], p.newDowField(fields[1]), "a fixed day of the week", "", runs)
-		day = "on " + day
-	case h[0].hashes() || h[1].hashes():
-		return "", "", "", false
-	default:
-		day, short = p.describeDays(d, fields[0], fields[1])
-	}
+	day, short, ok = p.describeDays(d, fields[0], fields[1], h[0], h[1])
 	if !h[2].hashes() {
 		return day, d.describeMonths(fields[2]), short, ok
 	}
 	runs := func(x hashed) (int, int) { return runRange(x, months, nil) }
 	month, mok := hashDate(h[2], newMonthField(fields[2]), "a fixed month", "", runs)
 	return day, "in " + month, short, ok && mok
+}
+
+// hashDay describes a day field with H items as hashDate does. alone is
+// false beside a restricted other day field, where a fixed day joins as D5
+// does and a step has no form: its count would not count the runs (H20).
+func hashDay(h hashField, f timeField, noun, the string, runs func(hashed) (int, int), alone bool) (string, bool) {
+	if !alone && len(h.steps) > 0 {
+		return "", false
+	}
+	return hashDate(h, f, noun, the, runs)
+}
+
+// hashDom describes a hashed day of month as a day clause, with the
+// short-month clause of its plain days (H18, H19, D3).
+func hashDom(h hashField, md timeField, alone bool) (text, short string, ok bool) {
+	text, ok = hashDay(h, md, "a fixed day of the month", "the ", dayRange, alone)
+	return "on " + text, lateClause(md.vals), ok
+}
+
+// hashDow describes a hashed day of week, counted on the parser's seven-day
+// cycle (H18, H19).
+func (p Parser) hashDow(h hashField, wd timeField, alone bool) (string, bool) {
+	runs := func(x hashed) (int, int) { return runRange(x, p.dowBounds(), nil) }
+	return hashDay(h, wd, "a fixed day of the week", "", runs, alone)
 }
 
 // hashDate describes a date field with H items, f its plain items: "a fixed

@@ -60,8 +60,8 @@ func DescribeSpec(spec string, opts ...DescribeOption) (string, error) {
 // leaves out the time zone; callers show the location beside it. A valid spec
 // always gets a description and a nil error; one that never runs is "never
 // runs". Specs outside the fields covered so far (see docs/DESCRIBE.md) get
-// each written field by name, as written: "minute 0, hour 0, day of month H,
-// month *, day of week 1". A descriptor such as "@daily" is returned as
+// each written field by name, as written: "minute 0, hour 0, day of month
+// H/10, month *, day of week 1". A descriptor such as "@daily" is returned as
 // written. H needs no hash key here: the description does not depend on it.
 // With no key, StrictDays does not check a spec with H in the day of the
 // month or the month, as the value the key picks decides that check.
@@ -157,27 +157,32 @@ func (p Parser) dayMissing(sch Schedule) bool {
 }
 
 // describeDays describes the day of month and day of week, "" when neither
-// is restricted (D2, D4, D5, X1–X4). short names the days above the 28th that
-// the day of month fires on: "; the 31st runs only in months that have one"
-// (D3, X5), then the days before the last day that short months lack (X6).
-func (p Parser) describeDays(d *describer, domField, dowField string) (day, short string) {
+// is restricted (D2, D4, D5, X1–X4), with each field's H items in hd and hw
+// (H18). short names the days above the 28th that the day of month fires on:
+// "; the 31st runs only in months that have one" (D3, X5), then the days
+// before the last day that short months lack (X6). ok is false for H without
+// a form (H20).
+func (p Parser) describeDays(d *describer, domField, dowField string, hd, hw hashField) (day, short string, ok bool) {
 	domPlain, domSpecial := splitItems(domField, domSpecialItem)
 	dowPlain, dowNth := splitItems(dowField, dowNthItem)
 	md := newDomField(strings.Join(domPlain, ","))
 	wd := p.newDowField(strings.Join(dowPlain, ","))
-	domSet := !isWildcard(domField)
-	dowSet := !isWildcard(dowField)
+	domSet, dowSet := restricted(domField, hd), restricted(dowField, hw)
 	or := domSet && dowSet && p.dowOrDom(domField, dowField)
 	domAll, dowAll := len(md.vals) == 31, len(wd.vals) == 7
 	if or && (domAll || dowAll) {
-		return "", "" // T3: one side of the OR is every day
+		return "", "", !hd.hashes() && !hw.hashes() // T3: one side of the OR is every day
 	}
 	// T3 comes first: a field that covers its range drops out on its own.
 	domSet = domSet && !domAll
 	dowSet = dowSet && !dowAll
 
+	ok = true
 	var domText string
-	if domSet {
+	switch {
+	case hd.hashes():
+		domText, short, ok = hashDom(hd, md, !dowSet)
+	case domSet:
 		domText, short = d.describeDom(md, domSpecial, !or)
 	}
 	var days, nth []string
@@ -185,7 +190,12 @@ func (p Parser) describeDays(d *describer, domField, dowField string) (day, shor
 		days, nth = wd.runWords(wd.vals), nthDays(dowNth)
 	}
 	d.dayName = len(days)+len(nth) > 0 // a fixed day is not a named day (D7)
-	return dayClause(domText, dowItems(days, nth, or), or), short
+	dowWords := dowItems(days, nth, or)
+	if hw.hashes() {
+		w, wok := p.hashDow(hw, wd, !domSet)
+		dowWords, ok = []string{w}, ok && wok
+	}
+	return dayClause(domText, dowWords, or), short, ok
 }
 
 // newDomField is the day of month: ordinals, up to 12 listed (D2).
@@ -207,6 +217,12 @@ func newMonthField(text string) timeField {
 	m := newTimeField(text, "month", "year", months)
 	m.word, m.limit = func(v uint) string { return time.Month(v).String() }, 12
 	return m
+}
+
+// restricted reports a day field that names days: H items, or plain items
+// that are not the star.
+func restricted(field string, h hashField) bool {
+	return h.hashes() || !isWildcard(field)
 }
 
 // dayClause joins the day of month, a clause with its own "on" or none
