@@ -55,6 +55,13 @@ func DescribeSpec(spec string, opts ...DescribeOption) (string, error) {
 	return p.DescribeSpec(spec, opts...)
 }
 
+// DescribeSpecNote returns the note that spells out the hashed values in
+// spec's description, or "" when it has none, or the parse error. It parses
+// as DescribeSpec does. See Parser.DescribeSpecNote.
+func DescribeSpecNote(spec string, opts ...DescribeOption) (string, error) {
+	return getParserForOptions(newDescribeConfig(opts).parse).DescribeSpecNote(spec, opts...)
+}
+
 // DescribeSpec returns an English description of spec as p parses it, or the
 // parse error. The description follows the grammar in docs/DESCRIBE.md and
 // leaves out the time zone; callers show the location beside it. A valid spec
@@ -70,6 +77,22 @@ func DescribeSpec(spec string, opts ...DescribeOption) (string, error) {
 // the day of the month or the month, as the value the key picks decides that
 // check.
 func (p Parser) DescribeSpec(spec string, _ ...DescribeOption) (string, error) {
+	desc, _, err := p.describe(spec)
+	return desc, err
+}
+
+// DescribeSpecNote returns the note that spells out the values the hash
+// key picks in spec's description, as p parses it: "at minutes h, h+15,
+// h+30, and h+45 past the hour, where h is a hashed minute from 0 to 14".
+// It is "" unless a field has a hashed step or a hashed day of the month,
+// and when the description is field by field. See docs/DESCRIBE.md.
+func (p Parser) DescribeSpecNote(spec string, _ ...DescribeOption) (string, error) {
+	_, note, err := p.describe(spec)
+	return note, err
+}
+
+// describe returns the description of spec and its note (N1–N7).
+func (p Parser) describe(spec string) (desc, note string, err error) {
 	if p.hashKey == "" {
 		p.hashKey = "describe"
 		// A spec that fails to split fails again in Parse below.
@@ -79,19 +102,19 @@ func (p Parser) DescribeSpec(spec string, _ ...DescribeOption) (string, error) {
 	}
 	sch, err := p.Parse(spec)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	// The spec parsed, so the split cannot fail.
 	_, descriptor, fields, yearField, _ := p.specFields(spec)
 	fields, text := p.expandDescriptor(descriptor, fields)
 	if text != "" {
-		return text, nil
+		return text, "", nil
 	}
 	if !allDescribable(fields) || !describable(yearField) {
-		return p.describeLiteral(spec, fields, yearField), nil
+		return p.describeLiteral(spec, fields, yearField), "", nil
 	}
 	if p.dayMissing(sch) {
-		return "never runs", nil
+		return "never runs", "", nil
 	}
 	var h [3]hashField
 	for i, r := range []bounds{seconds, minutes, hours} {
@@ -102,7 +125,7 @@ func (p Parser) DescribeSpec(spec string, _ ...DescribeOption) (string, error) {
 	var d describer
 	day, month, short, dok := p.describeDates(&d, hd, dates)
 	if !ok || !dok {
-		return p.describeLiteral(spec, fields, yearField), nil
+		return p.describeLiteral(spec, fields, yearField), p.hashNote(&d, h, hd, dates), nil
 	}
 	d.named = day != ""
 	var timeText string
@@ -111,7 +134,7 @@ func (p Parser) DescribeSpec(spec string, _ ...DescribeOption) (string, error) {
 	} else if t, ok := d.describeHashTime(h); ok {
 		timeText = t
 	} else {
-		return p.describeLiteral(spec, fields, yearField), nil
+		return p.describeLiteral(spec, fields, yearField), p.hashNote(&d, h, hd, dates), nil
 	}
 	parts := []string{timeText}
 	for _, clause := range []string{day, month, d.describeYears(yearField)} {
@@ -119,7 +142,8 @@ func (p Parser) DescribeSpec(spec string, _ ...DescribeOption) (string, error) {
 			parts = append(parts, clause)
 		}
 	}
-	return strings.Join(parts, " ") + d.noteText() + short + hashKeyClause(units), nil
+	desc = strings.Join(parts, " ") + d.noteText() + short + hashKeyClause(units)
+	return desc, p.hashNote(&d, h, hd, dates), nil
 }
 
 // descriptorFields holds the fields, second to day of week, that each

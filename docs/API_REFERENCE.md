@@ -3021,6 +3021,27 @@ desc, err = cron.DescribeSpec("@weekly")
 // "at 12 am on Sunday"
 ```
 
+### DescribeSpecNote
+
+```go
+func DescribeSpecNote(spec string, opts ...DescribeOption) (string, error)
+func (p Parser) DescribeSpecNote(spec string, opts ...DescribeOption) (string, error)
+```
+
+DescribeSpecNote spells out the values the hash key picks, which the
+description of a hashed step or day leaves as "a fixed …". It is "" unless a
+field has a hashed step or a hashed day of the month, and parses as
+`DescribeSpec` does. The note rules and grammar are in
+[DESCRIBE.md](DESCRIBE.md).
+
+**Example:**
+```go
+note, err := cron.DescribeSpecNote("H/15 * * * *", cron.WithParseOptions(cron.Minute|cron.Hour|cron.Dom|cron.Month|cron.Dow|cron.Hash))
+// "at minutes h, h+15, h+30, and h+45 past the hour, where h is a hashed minute from 0 to 14"
+note, err = cron.DescribeSpecNote("0 9 * * H/2", cron.WithParseOptions(cron.Minute|cron.Hour|cron.Dom|cron.Month|cron.Dow|cron.Hash))
+// "on Sunday, Tuesday, Thursday, and Saturday; or Monday, Wednesday, and Friday, depending on the hash"
+```
+
 ### WorkflowExecutionID
 
 ```go

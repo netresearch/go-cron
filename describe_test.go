@@ -4,7 +4,10 @@
 package cron
 
 import (
+	"fmt"
+	"maps"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -497,6 +500,123 @@ var describeGoldens = []struct {
 	{spec: "H/15 * 9-17 * * *", opts: []DescribeOption{withSecHash}, want: "second H/15, minute *, hour 9-17, day of month *, month *, day of week *", literal: true},
 }
 
+// describeNoteGoldens are the binding notes (docs/DESCRIBE.md, N1–N7).
+var describeNoteGoldens = []struct {
+	spec string
+	opts []DescribeOption
+	want string
+}{
+	{spec: "H/15 * * * *", opts: []DescribeOption{withHash}, want: "at minutes h, h+15, h+30, and h+45 past the hour, where h is a hashed minute from 0 to 14"},
+	{spec: "H/5 * * * *", opts: []DescribeOption{withHash}, want: "at minutes h, h+5, h+10, … h+55 past the hour, where h is a hashed minute from 0 to 4"},
+	{spec: "H/7 * * * *", opts: []DescribeOption{withHash}, want: "at minutes h, h+7, h+14, … h+56 past the hour, where h is a hashed minute from 0 to 6; h+56 runs only when h is below 4"},
+	{spec: "H/40 * * * *", opts: []DescribeOption{withHash}, want: "at minutes h and h+40 past the hour, where h is a hashed minute from 0 to 39; h+40 runs only when h is below 20"},
+	{spec: "H/15 9 * * *", opts: []DescribeOption{withHash}, want: "at minutes h, h+15, h+30, and h+45 during the 9 am hour, where h is a hashed minute from 0 to 14"},
+	{spec: "H/15 9,17 * * *", opts: []DescribeOption{withHash}, want: "at minutes h, h+15, h+30, and h+45 during the 9 am and 5 pm hours, where h is a hashed minute from 0 to 14"},
+	{spec: "H/15 9-17 * * *", opts: []DescribeOption{withHash}, want: "at minutes h, h+15, h+30, and h+45 past every hour from 9 am thru 5 pm, where h is a hashed minute from 0 to 14"},
+	{spec: "H/20 * * * * *", opts: []DescribeOption{withSecHash}, want: "at seconds h, h+20, and h+40 within a minute, where h is a hashed second from 0 to 19"},
+	{spec: "0 H/6 * * *", opts: []DescribeOption{withHash}, want: "at the top of a fixed hour between midnight and 5 am and every 6 hours after it"},
+	{spec: "0 H(9-17)/4 * * *", opts: []DescribeOption{withHash}, want: "at the top of a fixed hour between 9 am and noon and every 4 hours after it thru 5 pm"},
+	{spec: "0 9 * * H/2", opts: []DescribeOption{withHash}, want: "on Sunday, Tuesday, Thursday, and Saturday; or Monday, Wednesday, and Friday, depending on the hash"},
+	{spec: "0 9 * * H/3", opts: []DescribeOption{withHash}, want: "on Sunday, Wednesday, and Saturday; Monday and Thursday; or Tuesday and Friday, depending on the hash"},
+	{spec: "0 9 * * H/4", opts: []DescribeOption{withHash}, want: "on Sunday and Thursday; Monday and Friday; Tuesday and Saturday; or Wednesday, depending on the hash"},
+	{spec: "0 9 * * H(1-5)/2", opts: []DescribeOption{withHash}, want: "on Monday, Wednesday, and Friday; or Tuesday and Thursday, depending on the hash"},
+	{spec: "0 9 * * H(5-1)/2", opts: []DescribeOption{withHash}, want: "on Friday and Sunday; or Saturday and Monday, depending on the hash"},
+	{spec: "0 0 1 H/2 *", opts: []DescribeOption{withHash}, want: "in January, March, May, July, September, and November; or February, April, June, August, October, and December, depending on the hash"},
+	{spec: "0 0 1 H/3 *", opts: []DescribeOption{withHash}, want: "in January, April, July, and October; February, May, August, and November; or March, June, September, and December, depending on the hash"},
+	{spec: "0 0 1 H/4 *", opts: []DescribeOption{withHash}, want: "in months h, h+4, and h+8, where h is a hashed month from 1 (January) to 4 (April)"},
+	{spec: "0 0 1 H/5 *", opts: []DescribeOption{withHash}, want: "in months h, h+5, and h+10, where h is a hashed month from 1 (January) to 5 (May); h+10 runs only when h is below 3"},
+	{spec: "0 0 1 H(11-2)/2 *", opts: []DescribeOption{withHash}, want: "in November and January; or December and February, depending on the hash"},
+	{spec: "0 0 H/2 * *", opts: []DescribeOption{withHash}, want: "on the 1st, 3rd, 5th, … 31st; or the 2nd, 4th, 6th, … 30th of every month, depending on the hash"},
+	{spec: "0 0 H/10 * *", opts: []DescribeOption{withHash}, want: "on days h, h+10, h+20, and h+30 of every month, where h is a hashed day from 1 to 10; h+30 runs only when h is below 2"},
+	{spec: "0 0 H(1-28)/7 * *", opts: []DescribeOption{withHash}, want: "on days h, h+7, h+14, and h+21 of every month, where h is a hashed day from 1 to 7"},
+	{spec: "0 0 H(25-5)/7 * *", opts: []DescribeOption{withHash}, want: "on the 1st and 25th; the 2nd and 26th; the 3rd and 27th; the 4th and 28th; the 5th and 29th; the 30th; or the 31st of every month, depending on the hash"},
+	{spec: "0 0 H * *", opts: []DescribeOption{withHash}, want: "on day h of every month, where h is a hashed day from 1 to 31; a month without day h is skipped"},
+	{spec: "0 0 1,H * *", opts: []DescribeOption{withHash}, want: "on the 1st and day h of every month, where h is a hashed day from 1 to 31; a month without day h runs on the 1st only"},
+	{spec: "0 0 H(1-15) * *", opts: []DescribeOption{withHash}, want: "on day h of every month, where h is a hashed day from 1 to 15"},
+	{spec: "0 0 H(25-5) * *", opts: []DescribeOption{withHash}, want: "on day h of every month, where h is a hashed day from 1 to 5 or 25 to 31; a month without day h is skipped"},
+	{spec: "0 0 H(10-1) * *", opts: []DescribeOption{withHash}, want: "on day h of every month, where h is a hashed day from 1 or 10 to 31; a month without day h is skipped"},
+	{spec: "H/30 0 * * H/2", opts: []DescribeOption{withHash}, want: "at minutes h and h+30 during the midnight hour, where h is a hashed minute from 0 to 29, on Sunday, Tuesday, Thursday, and Saturday; or Monday, Wednesday, and Friday, depending on the hash"},
+	{spec: "0 0 H/10 H/4 *", opts: []DescribeOption{withHash}, want: "on days h, h+10, h+20, and h+30 of every month, where h is a hashed day from 1 to 10; h+30 runs only when h is below 2, in months k, k+4, and k+8, where k is a hashed month from 1 (January) to 4 (April)"},
+	{spec: "0 0 H(31-5) * *", opts: []DescribeOption{withHash}, want: "on day h of every month, where h is a hashed day from 1 to 5 or 31; a month without day h is skipped"},
+}
+
+func TestDescribeSpecNote(t *testing.T) {
+	g := describeNoteGrammar()
+	for _, tt := range describeNoteGoldens {
+		if !g.MatchString(tt.want) {
+			t.Errorf("%q: note %q is outside the note grammar", tt.spec, tt.want)
+		}
+		got, err := DescribeSpecNote(tt.spec, tt.opts...)
+		if err != nil {
+			t.Errorf("DescribeSpecNote(%q): unexpected error %v", tt.spec, err)
+			continue
+		}
+		if got != tt.want {
+			t.Errorf("DescribeSpecNote(%q):\n got %q\nwant %q", tt.spec, got, tt.want)
+		}
+	}
+}
+
+// TestStepOutcomes binds the outcome sets the notes list to the parser:
+// for each hashed step, the values stepOutcomes gives for each start are
+// the sets the parser selects over many hash keys (N4).
+func TestStepOutcomes(t *testing.T) {
+	p := NewParser(Second | Minute | Hour | Dom | Month | Dow | Hash)
+	for _, tt := range []struct {
+		spec  string
+		field int // seconds to day of week, as SpecSchedule
+	}{
+		{"0 H/15 * * * *", 1},
+		{"0 H/7 * * * *", 1},
+		{"0 H/40 * * * *", 1},
+		{"0 H(0-29)/10 * * * *", 1},
+		{"0 0 H/6 * * *", 2},
+		{"0 0 H(9-17)/4 * * *", 2},
+		{"0 0 0 H/2 * *", 3},
+		{"0 0 0 H/10 * *", 3},
+		{"0 0 0 H(1-28)/7 * *", 3},
+		{"0 0 0 H(25-5)/7 * *", 3},
+		{"0 0 0 1 H/2 *", 4},
+		{"0 0 0 1 H/5 *", 4},
+		{"0 0 0 1 H(11-2)/2 *", 4},
+		{"0 0 9 * * H/2", 5},
+		{"0 0 9 * * H/3", 5},
+		{"0 0 9 * * H/4", 5},
+		{"0 0 9 * * H(1-5)/2", 5},
+		{"0 0 9 * * H(5-1)/2", 5},
+	} {
+		_, _, fields, _, _ := p.specFields(tt.spec)
+		r := []bounds{seconds, minutes, hours, dom, months, p.dowBounds()}[tt.field]
+		x := whole(splitHash(fields[tt.field], r).steps[0], r)
+		want := map[string]bool{}
+		for _, o := range stepOutcomes(x, r) {
+			want[fmt.Sprint(slices.Sorted(slices.Values(o)))] = true
+		}
+		got := map[string]bool{}
+		for k := range 1000 {
+			sch, err := p.WithHashKey(fmt.Sprint("key", k)).Parse(tt.spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ss := sch.(*SpecSchedule)
+			bits := []uint64{ss.Second, ss.Minute, ss.Hour, ss.Dom, ss.Month, ss.Dow}[tt.field]
+			if tt.field == 5 && bits&(1<<7) != 0 {
+				bits = bits&^(1<<7) | 1 // Sunday is 0 and 7
+			}
+			var vals []uint
+			for v := r.min; v <= r.max; v++ {
+				if bits&(1<<v) != 0 {
+					vals = append(vals, v)
+				}
+			}
+			got[fmt.Sprint(vals)] = true
+		}
+		if !maps.Equal(got, want) {
+			t.Errorf("%s: parser outcomes %v, stepOutcomes %v", tt.spec, slices.Sorted(maps.Keys(got)), slices.Sorted(maps.Keys(want)))
+		}
+	}
+}
+
 func TestDescribeSpec(t *testing.T) {
 	for _, tt := range describeGoldens {
 		describe := DescribeSpec
@@ -518,6 +638,20 @@ func TestDescribeSpec(t *testing.T) {
 // production by production. Every description outside the literal fallback
 // must match it.
 func describeGrammar() *regexp.Regexp {
+	desc, _ := describeGrammars()
+	return desc
+}
+
+// describeNoteGrammar is the note EBNF in docs/DESCRIBE.md as a regular
+// expression. Every DescribeSpecNote text other than "" must match it.
+func describeNoteGrammar() *regexp.Regexp {
+	_, note := describeGrammars()
+	return note
+}
+
+// describeGrammars returns the description and note grammars, which share
+// their clock, hour and name productions.
+func describeGrammars() (descRe, noteRe *regexp.Regexp) {
 	alt := func(s ...string) string { return "(?:" + strings.Join(s, "|") + ")" }
 	opt := func(s string) string { return "(?:" + s + ")?" }
 	// list{x} and list2{x}: the serial comma from three items.
@@ -654,7 +788,27 @@ func describeGrammar() *regexp.Regexp {
 	dur := `[-+]?(?:\d*\.?\d+(?:ns|us|µs|μs|ms|s|m|h))+`
 	interval := "every " + dur + " from " + alt("when scheduling started", "Unix epoch") +
 		opt(` \(written as `+dur+", "+alt("rounded up to the "+dur+" minimum", "rounded up to whole seconds", "cut to whole seconds")+`\)`)
-	return regexp.MustCompile("^" + alt(schedule, "never runs", "only when triggered", interval) + "$")
+	descRe = regexp.MustCompile("^" + alt(schedule, "never runs", "only when triggered", interval) + "$")
+
+	// N1–N7: the note, one clause per hashed field
+	v := `[hkjmnp]`
+	vterm := v + `(?:\+\d+)?`
+	vals := alt(vterm+" and "+vterm, vterm+"(?:, "+vterm+")+, and "+vterm, vterm+", "+vterm+", "+vterm+", … "+vterm)
+	bound := num + opt(` \(`+monthname+`\)`)
+	where := ", where " + v + " is a hashed " + alt("second", "minute", "day", "month") + " from " + bound + opt(" to "+bound) + opt(" or "+bound+opt(" to "+bound))
+	tail := "; " + vterm + " runs only when " + v + " is below " + num
+	tplace := alt(" past the hour", " during "+hours, " past every hour "+hourrange, " within a minute")
+	ntime := alt("at "+alt("seconds", "minutes")+" "+vals+tplace+where+opt(tail),
+		"at the top of a fixed hour between "+clock+" and "+clock+" and every "+num+" hours after it"+opt(" thru "+clock))
+	outcome := alt(list(dayname), list(monthname), "the "+ord+opt(" and "+ord), "the "+ord+"(?:, "+ord+")+, and "+ord, "the "+ord+", "+ord+", "+ord+", … "+ord)
+	outcomes := outcome + "(?:; " + outcome + ")*; or " + outcome
+	nday := alt("on days "+vals+" of every month"+where+opt(tail),
+		"on "+opt("the "+ord+" and ")+"day "+v+" of every month"+where+opt("; a month without day "+v+alt(" is skipped", " runs on the "+ord+" only")),
+		"on "+outcomes+opt(" of every month")+", depending on the hash")
+	nmonth := alt("in months "+vals+where+opt(tail), "in "+outcomes+", depending on the hash")
+	nclause := alt(ntime, nday, nmonth)
+	noteRe = regexp.MustCompile("^" + nclause + "(?:, " + nclause + ")*$")
+	return descRe, noteRe
 }
 
 func TestDescribeSpecGrammar(t *testing.T) {
@@ -849,7 +1003,7 @@ func FuzzDescribeSpec(f *testing.F) {
 	f.Add("+0 0 1 1 0")
 	f.Add("0 0 1 1 0 22-99")
 
-	g := describeGrammar()
+	g, ng := describeGrammars()
 	parsers := []Parser{
 		NewParser(Minute | Hour | Dom | Month | Dow | Descriptor),
 		NewParser(Second | Minute | Hour | Dom | Month | Dow | Descriptor),
@@ -873,6 +1027,9 @@ func FuzzDescribeSpec(f *testing.F) {
 			_, _, fields, _, _ := p.specFields(spec)
 			if literalForm.MatchString(got) && !containsHashExpr(fields) {
 				t.Fatalf("DescribeSpec(%q) = %q: literal form without H", spec, got)
+			}
+			if note, _ := p.DescribeSpecNote(spec); note != "" && !ng.MatchString(note) {
+				t.Fatalf("DescribeSpecNote(%q) = %q, outside the note grammar", spec, note)
 			}
 		}
 	})

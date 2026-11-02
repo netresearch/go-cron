@@ -138,15 +138,19 @@ func (h hashField) fixedShape(f timeField) hashShape {
 // 29", "between minutes 0 and 10 or 50 and 59", "between minutes 0 and 5 or
 // 59" (H3, T9). ok is false for a wrapped range of one value per part.
 func between(unit string, x hashed, r bounds) (string, bool) {
-	parts, ok := rangeParts(x, r, func(v uint) string { return strconv.FormatUint(uint64(v), 10) }, "")
+	parts, ok := rangeParts(x, r, number, "", " and ")
 	return "between " + unit + "s " + parts, ok
 }
 
-// rangeParts writes a hashed range as its parts, low to high (T9), "the"
-// before each: "0 and 10 or 50 and 59", "the 1st and 5th or the 31st"; a
-// part of one value reads as that value. ok is false for a wrapped range
-// whose parts are each one value (H17, H20).
-func rangeParts(x hashed, r bounds, word func(uint) string, the string) (string, bool) {
+// number writes v as a number.
+func number(v uint) string { return strconv.FormatUint(uint64(v), 10) }
+
+// rangeParts writes a hashed range as its parts, low to high (T9), with the
+// prefix before each part and the joiner between its ends: "0 and 10 or 50
+// and 59", "the 1st and 5th or the 31st", "1 to 5 or 31"; a part of one value
+// reads as that value. ok is false for a wrapped range whose parts are each
+// one value (H17, H20).
+func rangeParts(x hashed, r bounds, word func(uint) string, the, and string) (string, bool) {
 	parts := timeItem{lo: x.lo, hi: x.hi}.parts(r)
 	words := make([]string, len(parts))
 	ones := 0
@@ -156,7 +160,7 @@ func rangeParts(x hashed, r bounds, word func(uint) string, the string) (string,
 			ones++
 			continue
 		}
-		words[i] += " and " + word(p[1])
+		words[i] += and + word(p[1])
 	}
 	return strings.Join(words, " or "), ones < 2
 }
@@ -517,7 +521,7 @@ func dateBetween(x hashed, f timeField, the string) (string, bool) {
 	case x.whole:
 		return "", true
 	case x.lo > x.hi && f.container == unitMonth:
-		parts, ok := rangeParts(x, f.r, f.w, the)
+		parts, ok := rangeParts(x, f.r, f.w, the, " and ")
 		return " between " + parts, ok
 	}
 	return " between " + the + f.w(x.lo) + " and " + f.w(x.hi), true

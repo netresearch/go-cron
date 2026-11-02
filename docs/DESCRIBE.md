@@ -19,6 +19,8 @@ description follows, and how the wording was tested and is extended.
 ```go
 func DescribeSpec(spec string, opts ...DescribeOption) (string, error)
 func (p Parser) DescribeSpec(spec string, opts ...DescribeOption) (string, error)
+func DescribeSpecNote(spec string, opts ...DescribeOption) (string, error)
+func (p Parser) DescribeSpecNote(spec string, opts ...DescribeOption) (string, error)
 
 func WithParseOptions(o ParseOption) DescribeOption // package function only
 ```
@@ -42,6 +44,10 @@ func WithParseOptions(o ParseOption) DescribeOption // package function only
   from the parsed schedule, because the parsed bits have lost what was
   written (`*/15` and `0,15,30,45` parse the same, but only one has a step).
 - Descriptions carry no time zone; callers show the location beside them.
+- `DescribeSpecNote` spells out the values the hash key picks, which the
+  description leaves as "a fixed …": "at minutes h, h+15, h+30, and h+45
+  past the hour, where h is a hashed minute from 0 to 14". It is "" unless
+  a field has a hashed step or a hashed day of the month (N1–N7).
 - **Coverage:** the second, minute and hour fields, and the day of month, day
   of week, month and year written as values, ranges, steps and lists; the
   `L` and `W` days of month (`DomL`, `DomW`) and the `#` days of week
@@ -154,6 +160,18 @@ which form a spec gets. Each has an ID, which the grammar cites.
 |---|---|
 | P2 | A descriptor reads as its cron equivalent: `@weekly` as `0 0 * * 0`, "at 12 am on Sunday"; `@hourly` as `0 * * * *`, "at the top of every hour". `@triggered`, `@manual` and `@none` read "only when triggered" |
 | P3 | An interval reads as it runs, after the parser's minimum and the cut to whole seconds, from its anchor: "every 1h30m from when scheduling started" (`@every`, `@every_start`), "every 15m from Unix epoch" (`@every_aligned`, and `@every` under `AlignEvery`). A written duration that changed is named in a note: "(written as 500ms, rounded up to the 1s minimum)" (`EveryRoundUp`), "(written as 1.5s, cut to whole seconds)", "(written as 1.7s, rounded up to whole seconds)" (a fractional minimum). `90m` reads "1h30m" |
+
+### Notes (`DescribeSpecNote`)
+
+| ID | Rule |
+|---|---|
+| N1 | The note is "" unless a field has a hashed step or a hashed day of the month (`H`, `H(1-15)`, `1,H`); a plain hashed second, minute, hour, day of the week or month needs none. A description rendered field by field still gets its note. A field whose hashed items have no note form leaves the whole note "" |
+| N2 | A hashed step in the second or minute field reads as its values with a variable, unit first (R5), in the hours of the description (R6, R9, C1): "at minutes h, h+15, h+30, and h+45 past the hour, where h is a hashed minute from 0 to 14" |
+| N3 | The values run to the last one any h has; past the T1 limit, the first 3, "…", the last ("h, h+5, h+10, … h+55"). When only some h have the last value, a tail says which: "at minutes h and h+40 past the hour, where h is a hashed minute from 0 to 39; h+40 runs only when h is below 20" |
+| N4 | The day of the week always lists its outcomes; the day of the month and the month list up to 3, and a wrapped range, otherwise the variable form. Outcomes are ordered by h: "on Sunday, Tuesday, Thursday, and Saturday; or Monday, Wednesday, and Friday, depending on the hash". Days of the month read low to high; a wrapped week or year in its order ("on Friday and Sunday; or Saturday and Monday") |
+| N5 | A hashed day of the month: "on day h of every month, where h is a hashed day from 1 to 31; a month without day h is skipped"; beside a plain value "on the 1st and day h of every month, …; a month without day h runs on the 1st only". The tail only when h can pass the 28th |
+| N6 | Each clause carries its own explanation; clauses in field order, joined with ", "; the variables h, k, j, m, n, p in turn. Midnight reads as in the description (R2, D7) |
+| N7 | A hashed hour step names the fixed hour's range and the step: "at the top of a fixed hour between midnight and 5 am and every 6 hours after it"; "thru" the range's last hour when the range is not the whole day |
 
 ## Grammar (EBNF)
 
@@ -324,6 +342,40 @@ NTH: "first" | "second" | "third" | "fourth" | "fifth" | "last"
 DAYNAME: "Sunday" | "Monday" | "Tuesday" | "Wednesday" | "Thursday" | "Friday" | "Saturday"
 MONTHNAME: "January" | "February" | "March" | "April" | "May" | "June" | "July"
          | "August" | "September" | "October" | "November" | "December"
+
+// ---------------- notes (DescribeSpecNote) ----------------
+// A note is its own text, not a description: it starts at notetext.
+notetext: nclause ("," nclause)*                                            // N6
+
+nclause: ntime | nday | nmonth
+
+// N2, N3: a hashed step in a time field, with a variable; N7: hour steps
+ntime: "at" ("seconds" | "minutes") vals tplace where [tail]
+     | "at" "the" "top" "of" "a" "fixed" "hour" "between" clock "and" clock "and" "every" INT "hours" "after" "it" ["thru" clock]   // N7
+tplace: "past" "the" "hour" | "during" hours | "past" "every" "hour" hourrange | "within" "a" "minute"   // R6, R9, C1
+
+// N4, N5: date fields
+nday: "on" "days" vals "of" "every" "month" where [tail]
+    | "on" ["the" ORD "and"] "day" VAR "of" "every" "month" where [daytail]
+    | "on" outcomes ["of" "every" "month"] "," "depending" "on" "the" "hash"
+nmonth: "in" "months" vals where [tail]
+      | "in" outcomes "," "depending" "on" "the" "hash"
+
+// values with a variable (G8, T1, N3)
+vals: vterm "and" vterm | vterm ("," vterm)+ "," "and" vterm
+    | vterm "," vterm "," vterm "," "…" vterm
+vterm: VAR ["+" INT]
+where: "," "where" VAR "is" "a" "hashed" ("second" | "minute" | "day" | "month") "from" bound ["to" bound] ["or" bound ["to" bound]]
+bound: INT ["(" MONTHNAME ")"]
+tail: ";" vterm "runs" "only" "when" VAR "is" "below" INT                   // N3
+daytail: ";" "a" "month" "without" "day" VAR ("is" "skipped" | "runs" "on" "the" ORD "only")   // N5
+
+// N4: outcomes, ordered by h; days of the month low to high, a wrapped week or year in its order
+outcomes: outcome (";" outcome)* ";" "or" outcome
+outcome: list{DAYNAME} | list{MONTHNAME}
+       | "the" ORD ["and" ORD] | "the" ORD ("," ORD)+ "," "and" ORD
+       | "the" ORD "," ORD "," ORD "," "…" ORD                             // T1
+VAR: /[hkjmnp]/                                                          // N6
 ```
 
 ## How the wording was chosen
