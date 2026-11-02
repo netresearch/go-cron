@@ -975,7 +975,8 @@ func TestDescribeSpecStrictDaysNoKey(t *testing.T) {
 var literalForm = regexp.MustCompile(`^(?:second|minute|hour|day of month|month|day of week|year) `)
 
 // numberRange matches a range of numbers in a spec, such as a year range.
-var numberRange = regexp.MustCompile(`(\d+)-(\d+)`)
+// The parser takes a bound with a plus sign ("1-+2000").
+var numberRange = regexp.MustCompile(`(\d+)-\+?(\d+)`)
 
 // wideRange reports a range of more than 100 values. The parser lists every
 // year of a year range, so a wide one spends the fuzz run in Parse; no other
