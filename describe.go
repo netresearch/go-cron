@@ -436,7 +436,11 @@ func (n *notes) bySeconds(sec, minute, hour timeField) string {
 	case minute.every():
 		return joinHours(secs+" within every minute", "", sec, minute, hour)
 	case minute.single() && minute.vals[0] == 0:
-		return onTheHour(secs+" past the top of", hour, nil)
+		var at func(h uint) string
+		if sec.single() {
+			at = func(h uint) string { return clockTime(h, 0, sec.vals[0]) }
+		}
+		return onTheHour(secs+" past the top of", hour, at)
 	}
 	return joinHours(secs+" within "+n.values(minute), "in every hour", sec, minute, hour)
 }
@@ -454,9 +458,9 @@ func minuteAt(m uint) string {
 // (R4, R5, R9, R10): "at the top of every hour", "at 30 minutes past every
 // hour from 9 am thru 5 pm every day".
 //
-// at writes the run in hour h when the lead is one minute at second 0; a
-// part of one hour of a wrapped range then reads "at" that run (R9, T9):
-// "from midnight thru 5 am and at 11:30 pm". Otherwise at is nil.
+// at writes the run in hour h when the lead fixes one minute and one
+// second; a part of one hour of a wrapped range then reads "at" that run
+// (R9, T9): "from midnight thru 5 am and at 11:30 pm". Otherwise at is nil.
 func onTheHour(lead string, hour timeField, at func(h uint) string) string {
 	switch hour.kind() {
 	case everyHour:
