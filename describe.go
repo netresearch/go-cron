@@ -61,7 +61,7 @@ func DescribeSpec(spec string, opts ...DescribeOption) (string, error) {
 // always gets a description and a nil error; one that never runs is "never
 // runs". Specs outside the fields covered so far (see docs/DESCRIBE.md) get
 // each written field by name, as written: "minute 0, hour 0, day of month H,
-// month *, day of week *". A descriptor such as "@daily" is returned as
+// month *, day of week 1". A descriptor such as "@daily" is returned as
 // written. H needs no hash key here: the description does not depend on it.
 // With no key, StrictDays does not check a spec with H in the day of the
 // month or the month, as the value the key picks decides that check.
@@ -82,7 +82,7 @@ func (p Parser) DescribeSpec(spec string, _ ...DescribeOption) (string, error) {
 	if descriptor != "" {
 		return descriptor, nil
 	}
-	if containsHashExpr(fields[3:]) || !allDescribable(fields) || !describable(yearField, nil) {
+	if !allDescribable(fields) || !describable(yearField) {
 		return p.describeLiteral(spec, fields, yearField), nil
 	}
 	if p.dayMissing(sch) {
@@ -92,12 +92,16 @@ func (p Parser) DescribeSpec(spec string, _ ...DescribeOption) (string, error) {
 	for i, r := range []bounds{seconds, minutes, hours} {
 		h[i] = splitHash(fields[i], r)
 	}
-	units := hashUnits(h[:], literalNames[:3])
+	hd, dates, ok := p.splitDates(fields)
+	units := hashUnits(append(h[:], hd[:]...), []string{unitSecond, unitMinute, unitHour, "day", "day", "month"})
 	var d describer
-	day, short, dayName := p.describeDays(&d, fields[3], fields[5])
-	d.named, d.dayName = day != "", dayName
+	day, month, short, dok := p.describeDates(&d, hd, dates)
+	if !ok || !dok {
+		return p.describeLiteral(spec, fields, yearField), nil
+	}
+	d.named = day != ""
 	var timeText string
-	if len(units) == 0 {
+	if !slices.ContainsFunc(h[:], hashField.hashes) {
 		timeText = d.describeTime([]string{h[0].plain, h[1].plain, h[2].plain})
 	} else if t, ok := d.describeHashTime(h); ok {
 		timeText = t
@@ -105,7 +109,7 @@ func (p Parser) DescribeSpec(spec string, _ ...DescribeOption) (string, error) {
 		return p.describeLiteral(spec, fields, yearField), nil
 	}
 	parts := []string{timeText}
-	for _, clause := range []string{day, d.describeMonths(fields[4]), d.describeYears(yearField)} {
+	for _, clause := range []string{day, month, d.describeYears(yearField)} {
 		if clause != "" {
 			parts = append(parts, clause)
 		}
@@ -156,20 +160,17 @@ func (p Parser) dayMissing(sch Schedule) bool {
 // is restricted (D2, D4, D5, X1–X4). short names the days above the 28th that
 // the day of month fires on: "; the 31st runs only in months that have one"
 // (D3, X5), then the days before the last day that short months lack (X6).
-// dayName reports a day of the week in the clause (D7).
-func (p Parser) describeDays(d *describer, domField, dowField string) (day, short string, named bool) {
+func (p Parser) describeDays(d *describer, domField, dowField string) (day, short string) {
 	domPlain, domSpecial := splitItems(domField, domSpecialItem)
 	dowPlain, dowNth := splitItems(dowField, dowNthItem)
-	md := newTimeField(strings.Join(domPlain, ","), "day", "month", dom)
-	md.word, md.limit = ordinal, 12
-	wd := newTimeField(strings.Join(dowPlain, ","), "day", "week", p.dowBounds())
-	wd.word = func(v uint) string { return time.Weekday(v).String() }
+	md := newDomField(strings.Join(domPlain, ","))
+	wd := p.newDowField(strings.Join(dowPlain, ","))
 	domSet := !isWildcard(domField)
 	dowSet := !isWildcard(dowField)
 	or := domSet && dowSet && p.dowOrDom(domField, dowField)
 	domAll, dowAll := len(md.vals) == 31, len(wd.vals) == 7
 	if or && (domAll || dowAll) {
-		return "", "", false // T3: one side of the OR is every day
+		return "", "" // T3: one side of the OR is every day
 	}
 	// T3 comes first: a field that covers its range drops out on its own.
 	domSet = domSet && !domAll
@@ -183,8 +184,29 @@ func (p Parser) describeDays(d *describer, domField, dowField string) (day, shor
 	if dowSet {
 		days, nth = wd.runWords(wd.vals), nthDays(dowNth)
 	}
-	dowWords := dowItems(days, nth, or)
-	return dayClause(domText, dowWords, or), short, dowWords != nil
+	d.dayName = len(days)+len(nth) > 0 // a fixed day is not a named day (D7)
+	return dayClause(domText, dowItems(days, nth, or), or), short
+}
+
+// newDomField is the day of month: ordinals, up to 12 listed (D2).
+func newDomField(text string) timeField {
+	md := newTimeField(text, "day", "month", dom)
+	md.word, md.limit = ordinal, 12
+	return md
+}
+
+// newDowField is the day of week: names, 7 read as Sunday (D4).
+func (p Parser) newDowField(text string) timeField {
+	wd := newTimeField(text, "day", "week", p.dowBounds())
+	wd.word = func(v uint) string { return time.Weekday(v % 7).String() }
+	return wd
+}
+
+// newMonthField is the month: names, up to 12 listed (D6).
+func newMonthField(text string) timeField {
+	m := newTimeField(text, "month", "year", months)
+	m.word, m.limit = func(v uint) string { return time.Month(v).String() }, 12
+	return m
 }
 
 // dayClause joins the day of month, a clause with its own "on" or none
@@ -404,11 +426,10 @@ func (p Parser) dowOrDom(domField, dowField string) bool {
 
 // describeMonths describes the month field: "in January thru March" (D6).
 func (d *describer) describeMonths(field string) string {
-	m := newTimeField(field, "month", "year", months)
+	m := newMonthField(field)
 	if isWildcard(field) || m.every() {
 		return ""
 	}
-	m.word, m.limit = func(v uint) string { return time.Month(v).String() }, 12
 	return "in " + d.dateNums(m)
 }
 
@@ -472,12 +493,14 @@ func isWildcard(field string) bool {
 var describableItem = regexp.MustCompile(`^(?:[*?]|(?:\+?[0-9]+|[A-Za-z]{3})(?:-(?:\+?[0-9]+|[A-Za-z]{3}))?)(?:/\+?[0-9]+)?$`)
 
 // describable reports a field whose items all have the covered syntax, or
-// the field's own (special): H in the time fields, L and W in the day of
-// month, # in the day of week. special is nil for the other fields.
-func describable(field string, special *regexp.Regexp) bool {
+// one of the field's own (special): H, L and W in the day of month, # in the
+// day of week.
+func describable(field string, special ...*regexp.Regexp) bool {
 	items := strings.FieldsFunc(field, func(r rune) bool { return r == ',' })
 	return !slices.ContainsFunc(items, func(it string) bool {
-		return !describableItem.MatchString(it) && (special == nil || !special.MatchString(it))
+		return !describableItem.MatchString(it) && !slices.ContainsFunc(special, func(re *regexp.Regexp) bool {
+			return re.MatchString(it)
+		})
 	})
 }
 
@@ -485,16 +508,14 @@ func describable(field string, special *regexp.Regexp) bool {
 // describable.
 func allDescribable(fields []string) bool {
 	for i, f := range fields {
-		var special *regexp.Regexp
+		special := []*regexp.Regexp{hashItemSyntax}
 		switch i {
-		case 0, 1, 2:
-			special = hashItemSyntax
 		case 3:
-			special = domSpecialItem
+			special = append(special, domSpecialItem)
 		case 5:
-			special = dowNthItem
+			special = append(special, dowNthItem)
 		}
-		if !describable(f, special) {
+		if !describable(f, special...) {
 			return false
 		}
 	}

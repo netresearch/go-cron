@@ -73,12 +73,12 @@ func readHash(it string, r bounds) (x hashed, isHash bool) {
 		lo, hi, _ := strings.Cut(strings.TrimSuffix(inner, ")"), "-")
 		x.lo, _ = mustParseInt(lo)
 		x.hi, _ = mustParseInt(hi)
-		x.whole = x.lo == r.min && x.hi == r.max
+		x.whole = x.lo == r.min && (x.hi == r.max || isDowBounds(r) && x.hi == 6)
 	}
 	if hasStep {
 		x.step, _ = mustParseInt(step)
 	}
-	size := cyclicRangeSize(x.lo, x.hi, r)
+	size := cyclicRangeSize(dowCycle(x.lo, x.hi, r))
 	switch {
 	case x.step == 1 && hasStep || size == 1:
 		x.step = 0
@@ -161,6 +161,7 @@ func (d *describer) fixed(unit string, x hashed, r bounds) (string, bool) {
 // container, with the plain values beside it (H2, H15): each start the hash
 // can pick is counted.
 func runRange(x hashed, r bounds, plain []uint) (lo, hi int) {
+	x.lo, x.hi, r = dowCycle(x.lo, x.hi, r)
 	size, span := cyclicRangeSize(x.lo, x.hi, r), r.max-r.min+1
 	lo = int(span) + len(plain)
 	add := func(vals []uint) {
@@ -182,13 +183,17 @@ func runRange(x hashed, r bounds, plain []uint) (lo, hi int) {
 	return lo, hi
 }
 
-// counted writes a count with its unit, or the two counts the hashed start
-// decides between: "4 runs", "1 or 2 runs", "4 or 5 hours" (H2).
+// counted writes a count with its unit, or the counts the hashed start
+// decides between: "4 runs", "1 or 2 runs", "4 or 5 hours" (H2); "2 to 4
+// days" when the month's length decides too (H19).
 func counted(lo, hi int, unit string) string {
-	if lo == hi {
+	switch {
+	case lo == hi:
 		return count(uint(lo), unit) // #nosec G115 -- counts are small and positive
+	case hi == lo+1:
+		return fmt.Sprintf("%d or %d %ss", lo, hi, unit)
 	}
-	return fmt.Sprintf("%d or %d %ss", lo, hi, unit)
+	return fmt.Sprintf("%d to %d %ss", lo, hi, unit)
 }
 
 // runCount names the runs of a hashed step: "4 runs", "1 or 2 runs".
@@ -379,4 +384,107 @@ func (d *describer) hashHour(hh hashField, hour timeField, hs hashShape, minute 
 		}
 	}
 	return "", false
+}
+
+// hashes reports a field with H items that select by the hash.
+func (h hashField) hashes() bool {
+	return len(h.fixed)+len(h.steps) > 0
+}
+
+// splitDates splits the date fields' H items, in the order of the hash
+// clause: day of month, day of week, month (H1, G7). plain is each field
+// without its H items, or as written when it has none. ok is false for H
+// beside L, W or #, which has no form (H20).
+func (p Parser) splitDates(fields []string) (h [3]hashField, plain [3]string, ok bool) {
+	plain = [3]string{fields[3], fields[5], fields[4]}
+	for i, r := range []bounds{dom, p.dowBounds(), months} {
+		if !containsHashExpr(plain[i : i+1]) {
+			continue
+		}
+		if !describable(plain[i], hashItemSyntax) {
+			return h, plain, false
+		}
+		h[i] = splitHash(plain[i], r)
+		plain[i] = h[i].plain
+	}
+	return h, plain, true
+}
+
+// describeDates describes the day of month, day of week and month, the
+// fields in that order with their H items in h (H18, H19), and the
+// short-month clause. ok is false for the combinations without a form (H20):
+// H in a day field beside a restricted other day field, among others.
+func (p Parser) describeDates(d *describer, h [3]hashField, fields [3]string) (day, month, short string, ok bool) {
+	ok = true
+	switch {
+	case h[0].hashes() && isWildcard(fields[1]):
+		md := newDomField(fields[0])
+		day, ok = hashDate(h[0], md, "a fixed day of the month", "the ", dayRange)
+		day, short = "on "+day, lateClause(md.vals)
+	case h[1].hashes() && isWildcard(fields[0]):
+		runs := func(x hashed) (int, int) { return runRange(x, p.dowBounds(), nil) }
+		day, ok = hashDate(h[1], p.newDowField(fields[1]), "a fixed day of the week", "", runs)
+		day = "on " + day
+	case h[0].hashes() || h[1].hashes():
+		return "", "", "", false
+	default:
+		day, short = p.describeDays(d, fields[0], fields[1])
+	}
+	if !h[2].hashes() {
+		return day, d.describeMonths(fields[2]), short, ok
+	}
+	runs := func(x hashed) (int, int) { return runRange(x, months, nil) }
+	month, mok := hashDate(h[2], newMonthField(fields[2]), "a fixed month", "", runs)
+	return day, "in " + month, short, ok && mok
+}
+
+// hashDate describes a date field with H items, f its plain items: "a fixed
+// day of the month between the 1st and 15th", "the 1st and a fixed day of
+// the month" (H18), "2 to 4 days in every month, 10 days apart, starting
+// from a fixed day" (H19). noun names the fixed value, the is the article
+// before ordinals (D2), and runs counts a step's values in its container.
+func hashDate(h hashField, f timeField, noun, the string, runs func(hashed) (int, int)) (string, bool) {
+	switch h.shape(f) {
+	case hashFixed:
+		b, ok := dateBetween(h.fixed[0], f, the)
+		return noun + b, ok
+	case hashFixedPlus:
+		return the + f.w(f.vals[0]) + " and " + noun, true
+	case hashStep:
+		x := h.steps[0]
+		b, ok := dateBetween(x, f, the)
+		lo, hi := runs(x)
+		return counted(lo, hi, f.unit) + " in every " + f.container + b + stepTail(x, f.unit), ok
+	}
+	return "", false
+}
+
+// dateBetween names the range of a hashed date value or step by its values:
+// " between Monday and Friday", " between the 1st and 15th" (H3, H18). ok is
+// false for a wrapped range, which has no form (H20).
+func dateBetween(x hashed, f timeField, the string) (string, bool) {
+	switch {
+	case x.whole:
+		return "", true
+	case x.lo > x.hi:
+		return "", false
+	}
+	return " between " + the + f.w(x.lo) + " and " + f.w(x.hi), true
+}
+
+// dayRange returns the fewest and most days a hashed day-of-month step runs
+// on in a month, over each start the hash can pick and each month length
+// (H19): H/10 runs on 9, 19 and 29, or on 2 days in February.
+func dayRange(x hashed) (lo, hi int) {
+	lo = int(dom.max)
+	for o := range x.step {
+		for days := dom.max - 3; days <= dom.max; days++ {
+			n := 0
+			for v := x.lo + o; v <= min(x.hi, days); v += x.step {
+				n++
+			}
+			lo, hi = min(lo, n), max(hi, n)
+		}
+	}
+	return lo, hi
 }

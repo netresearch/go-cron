@@ -5,7 +5,6 @@ package cron
 
 import (
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -371,8 +370,43 @@ var describeGoldens = []struct {
 	{spec: "0 H/6 * * 1", opts: []DescribeOption{withHash}, want: "at the top of the hour, 4 runs in every day, 6 hours apart, starting from a fixed hour on Monday; the hash key fixes the hour"},
 	{spec: "0 9,H * * 1", opts: []DescribeOption{withHash}, want: "1 or 2 runs in every day, at 9 am and the top of a fixed hour on Monday; the hash key fixes the hour"},
 
+	// H in the date fields
+	{spec: "0 0 H * *", opts: []DescribeOption{withHash}, want: "at midnight on a fixed day of the month; the hash key fixes the day"},
+	{spec: "0 0 1,H * *", opts: []DescribeOption{withHash}, want: "at midnight on the 1st and a fixed day of the month; the hash key fixes the day"},
+	{spec: "0 9 * * H", opts: []DescribeOption{withHash}, want: "at 9 am on a fixed day of the week; the hash key fixes the day"},
+	{spec: "0 9 * * H(1-5)", opts: []DescribeOption{withHash}, want: "at 9 am on a fixed day of the week between Monday and Friday; the hash key fixes the day"},
+	{spec: "0 0 1 H *", opts: []DescribeOption{withHash}, want: "at midnight on the 1st of the month in a fixed month; the hash key fixes the month"},
+	{spec: "0 0 H(1-15) * *", opts: []DescribeOption{withHash}, want: "at midnight on a fixed day of the month between the 1st and 15th; the hash key fixes the day"},
+	{spec: "0 0 H/10 * *", opts: []DescribeOption{withHash}, want: "at midnight on 2 to 4 days in every month, 10 days apart, starting from a fixed day; the hash key fixes the day"},
+	{spec: "0 0 H/7 * *", opts: []DescribeOption{withHash}, want: "at midnight on 4 or 5 days in every month, 7 days apart, starting from a fixed day; the hash key fixes the day"},
+	{spec: "0 0 H(1-15)/5 * *", opts: []DescribeOption{withHash}, want: "at midnight on 3 days in every month between the 1st and 15th, 5 days apart, starting from a fixed day; the hash key fixes the day"},
+	{spec: "0 9 * * H/2", opts: []DescribeOption{withHash}, want: "at 9 am on 3 or 4 days in every week, 2 days apart, starting from a fixed day; the hash key fixes the day"},
+	{spec: "0 9 * * H(1-5)/2", opts: []DescribeOption{withHash}, want: "at 9 am on 2 or 3 days in every week between Monday and Friday, 2 days apart, starting from a fixed day; the hash key fixes the day"},
+	{spec: "0 9 * * H(5-7)", opts: []DescribeOption{withHash}, want: "at 9 am on a fixed day of the week between Friday and Sunday; the hash key fixes the day"},
+	{spec: "0 9 * * H(0-6)", opts: []DescribeOption{withHash}, want: "at 9 am on a fixed day of the week; the hash key fixes the day"},
+	{spec: "0 9 * * H/7", opts: []DescribeOption{withHash}, want: "at 9 am on a fixed day of the week; the hash key fixes the day"},
+	{spec: "0 9 * * 1,H", opts: []DescribeOption{withHash}, want: "at 9 am on Monday and a fixed day of the week; the hash key fixes the day"},
+	{spec: "0 0 1 H/3 *", opts: []DescribeOption{withHash}, want: "at midnight on the 1st of the month in 4 months in every year, 3 months apart, starting from a fixed month; the hash key fixes the month"},
+	{spec: "0 0 1 H/5 *", opts: []DescribeOption{withHash}, want: "at midnight on the 1st of the month in 2 or 3 months in every year, 5 months apart, starting from a fixed month; the hash key fixes the month"},
+	{spec: "0 0 1 H(1-6) *", opts: []DescribeOption{withHash}, want: "at midnight on the 1st of the month in a fixed month between January and June; the hash key fixes the month"},
+	{spec: "0 0 1 H(1-6)/2 *", opts: []DescribeOption{withHash}, want: "at midnight on the 1st of the month in 3 months in every year between January and June, 2 months apart, starting from a fixed month; the hash key fixes the month"},
+	{spec: "0 0 1 1,H *", opts: []DescribeOption{withHash}, want: "at midnight on the 1st of the month in January and a fixed month; the hash key fixes the month"},
+	{spec: "0 0 H H *", opts: []DescribeOption{withHash}, want: "at midnight on a fixed day of the month in a fixed month; the hash key fixes the day and the month"},
+	{spec: "H 9 H * *", opts: []DescribeOption{withHash}, want: "at a fixed minute during the 9 am hour on a fixed day of the month; the hash key fixes the minute and the day"},
+	{spec: "0 0 H/1 * *", opts: []DescribeOption{withHash}, want: "at midnight every day"},
+
 	// Literal fallback: the whole spec renders field by field
 	{spec: "@daily", want: "@daily", literal: true},
+	// H in the date fields without a form (H20)
+	{spec: "0 0 H * 1", opts: []DescribeOption{withHash}, want: "minute 0, hour 0, day of month H, month *, day of week 1", literal: true},
+	{spec: "0 0 1 * H", opts: []DescribeOption{withHash}, want: "minute 0, hour 0, day of month 1, month *, day of week H", literal: true},
+	{spec: "0 0 H(25-5) * *", opts: []DescribeOption{withHash}, want: "minute 0, hour 0, day of month H(25-5), month *, day of week *", literal: true},
+	{spec: "0 9 * * H(5-1)", opts: []DescribeOption{withHash}, want: "minute 0, hour 9, day of month *, month *, day of week H(5-1)", literal: true},
+	{spec: "0 0 1 H(11-2) *", opts: []DescribeOption{withHash}, want: "minute 0, hour 0, day of month 1, month H(11-2), day of week *", literal: true},
+	{spec: "0 0 1,H/10 * *", opts: []DescribeOption{withHash}, want: "minute 0, hour 0, day of month 1,H/10, month *, day of week *", literal: true},
+	{spec: "0 0 1,15,H * *", opts: []DescribeOption{withHash}, want: "minute 0, hour 0, day of month 1,15,H, month *, day of week *", literal: true},
+	{spec: "0 0 H,H(1-15) * *", opts: []DescribeOption{withHash}, want: "minute 0, hour 0, day of month H,H(1-15), month *, day of week *", literal: true},
+	{spec: "0 0 L,H * *", opts: []DescribeOption{WithParseOptions(Minute | Hour | Dom | Month | Dow | Extended | Hash)}, want: "minute 0, hour 0, day of month L,H, month *, day of week *", literal: true},
 	{spec: "H 5 * * * *", opts: []DescribeOption{withSecHash}, want: "second H, minute 5, hour *, day of month *, month *, day of week *", literal: true},
 	// H combinations without a form (G10)
 	{spec: "H(0-9),H(20-29) * * * *", opts: []DescribeOption{withHash}, want: "minute H(0-9),H(20-29), hour *, day of month *, month *, day of week *", literal: true},
@@ -513,8 +547,18 @@ func describeGrammar() *regexp.Regexp {
 	dayrange := dayname + opt(" thru "+dayname)
 	dow := list(alt(dayrange, "the "+nth+" "+dayname))
 	andor := alt(" when it falls on "+dow, " or on "+list("any "+alt(dayrange, nth+" "+dayname)))
-	day := alt(dom+opt(andor), "on "+dow)
-	month := "in " + list(monthname+opt(" thru "+monthname))
+	// H18, H19: a day or month the hash key fixes
+	hcnt := alt(num, num+" or "+num, num+" to "+num)
+	hapart := func(u string) string { return ", " + num + " " + u + "s apart, starting from a fixed " + u }
+	hform := func(noun, plain, unit, in, lo, hi string) string {
+		b := opt(" between " + lo + " and " + hi)
+		return alt(noun+b, plain+" and "+noun, hcnt+" "+unit+"s? in every "+in+b+hapart(unit))
+	}
+	hday := alt(hform("a fixed day of the month", "the "+ord, "day", "month", "the "+ord, ord),
+		hform("a fixed day of the week", dayname, "day", "week", dayname, dayname))
+	hmonth := hform("a fixed month", monthname, "month", "year", monthname, monthname)
+	day := alt(dom+opt(andor), "on "+dow, "on "+hday)
+	month := "in " + alt(list(monthname+opt(" thru "+monthname)), hmonth)
 	year := alt("in year "+num, "in years "+vlist)
 	short := "; " + alt(
 		"the "+list(ord)+" "+alt("runs", "run")+" only in months that have "+alt("one", "them"),
@@ -609,19 +653,19 @@ func TestParserDescribeSpec(t *testing.T) {
 	}
 
 	// SecondOptional: a second that was not written is not listed.
-	got, err = FullParser().DescribeSpec("0 0 H * *")
+	got, err = FullParser().DescribeSpec("0 0 H * 1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "minute 0, hour 0, day of month H, month *, day of week *"; got != want {
+	if want := "minute 0, hour 0, day of month H, month *, day of week 1"; got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
 
-	got, err = FullParser().DescribeSpec("0 0 0 H * * 2027")
+	got, err = FullParser().DescribeSpec("0 0 0 H * 1 2027")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "second 0, minute 0, hour 0, day of month H, month *, day of week *, year 2027"; got != want {
+	if want := "second 0, minute 0, hour 0, day of month H, month *, day of week 1, year 2027"; got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
 
@@ -705,32 +749,11 @@ func wideRange(spec string) bool {
 	return false
 }
 
-// literalSyntax reports the syntax DescribeSpec renders literally: H in a
-// date field. An item that starts with "*" or "?" is the star, whatever
-// follows it, as the parser reads it. It is written apart from the describer's own check, so a spec
-// that falls back for another reason fails FuzzDescribeSpec.
-func literalSyntax(fields []string, yearField string) bool {
-	if yearField != "" {
-		fields = append(slices.Clone(fields), yearField)
-	}
-	for _, f := range fields[3:] {
-		for item := range strings.SplitSeq(f, ",") {
-			if strings.HasPrefix(item, "*") || strings.HasPrefix(item, "?") {
-				continue
-			}
-			if strings.HasPrefix(item, "H") {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 // FuzzDescribeSpec checks that every spec that parses gets a description in
 // the grammar or the literal fallback, and the literal fallback for
-// descriptors and literalSyntax and otherwise only with H in the time fields,
-// which has forms for some combinations (G10). Specs with a range of more
-// than 100 values (years) are skipped.
+// descriptors and otherwise only with H, which has forms for some
+// combinations (G10). Specs with a range of more than 100 values (years) are
+// skipped.
 func FuzzDescribeSpec(f *testing.F) {
 	for _, tt := range describeGoldens {
 		f.Add(tt.spec)
@@ -761,10 +784,10 @@ func FuzzDescribeSpec(f *testing.F) {
 			if !g.MatchString(got) && !literalForm.MatchString(got) {
 				t.Fatalf("DescribeSpec(%q) = %q, outside the grammar", spec, got)
 			}
-			_, descriptor, fields, yearField, _ := p.specFields(spec)
+			_, descriptor, fields, _, _ := p.specFields(spec)
 			literal := literalForm.MatchString(got)
-			want := descriptor != "" || literalSyntax(fields, yearField)
-			if literal != want && (!literal || !containsHashExpr(fields[:3])) {
+			want := descriptor != ""
+			if literal != want && (!literal || !containsHashExpr(fields)) {
 				t.Fatalf("DescribeSpec(%q) = %q: literal form %v, want %v", spec, got, literal, want)
 			}
 		}
