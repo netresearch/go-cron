@@ -68,7 +68,7 @@ which form a spec gets. Each has an ID, which the grammar cites.
 | T5 | Span form: several minutes over one hour range open with the first and last run of the day: "from 9 am thru 5:56 pm every day, at minutes 0, 7, 14, … 56 past each hour" |
 | T6 | Hours read in clock order: a wrapped range is shorthand for two ranges ("at midnight, 2 am, and 10 pm") |
 | J1 | "for" joins a value. "in every …" follows a step. Plain "every day" follows clock times, the span and an hour range |
-| T9 | A range reads "thru". Two adjacent values name both ("5 and 6"). A wrapped range reads in two parts and a wrapped step lists in full, sorted low to high: "at minutes 0 thru 10 and 50 thru 59 past the hour". An hour range's two parts share one "from": "from midnight thru 5:56 am and 8 pm thru 11:56 pm every day". So do a wrapped hour step's, each from its first run to its last: "every 2 hours from midnight thru 10 am and 8 pm thru 10 pm in every day" |
+| T9 | A range reads "thru". Two adjacent values name both ("5 and 6"). A wrapped range reads in two parts and a wrapped step lists in full, sorted low to high: "at minutes 0 thru 10 and 50 thru 59 past the hour". An hour range's two parts share one "from": "from midnight thru 5:56 am and 8 pm thru 11:56 pm every day". So do a wrapped hour step's, each from its first run to its last: "every 2 hours from midnight thru 10 am and 8 pm thru 10 pm in every day". A part of one run reads "at" its time: "every 2 hours from midnight thru 10 am and at 10 pm in every day" |
 | T11 | A range starting with `*` or `?`, and a list with a star item, read as the star |
 | T12 | A time on the hour drops the minutes ("2 am"); "12:30 am", "12:30 pm"; never "12 pm" |
 
@@ -120,7 +120,8 @@ clocktime: "at" list{clock} [everyday]
 span: "from" list{crange} [everyday] "," inner "past" "each" "hour"
 
 // R8: one minute on an hour step past 6 values, the minute folded in
-hourstep: "every" INT "hours" ("starting" "at" clock | hourrange) [inevery]
+hourstep: "every" INT "hours" ("starting" "at" clock | hourrange | oneparts) [inevery]
+oneparts: "from" crange "and" "at" clock | "at" clock "and" "from" crange   // R8, T9: a part of one run
 
 // C1: seconds, minutes, then hours, finest first
 parts: inner [hourjoin]

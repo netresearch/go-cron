@@ -144,6 +144,8 @@ var describeGoldens = []struct {
 	{spec: "30 20-5 * * *", want: "at 30 minutes past every hour from midnight thru 5 am and 8 pm thru 11 pm every day"},
 	{spec: "0 20-10/2 * * *", want: "every 2 hours from midnight thru 10 am and 8 pm thru 10 pm in every day"},
 	{spec: "* 20-10/2 * * *", want: "every minute every 2 hours from the midnight hour thru the 10 am hour and the 8 pm hour thru the 10 pm hour in every day"},
+	{spec: "0 22-10/2 * * *", want: "every 2 hours from midnight thru 10 am and at 10 pm in every day"},
+	{spec: "0 4-0/2 * * *", want: "every 2 hours at midnight and from 4 am thru 10 pm in every day"},
 
 	// Literal fallback: the whole spec renders field by field
 	{spec: "0 9 * * 1-5", want: "minute 0, hour 9, day of month *, month *, day of week 1-5", literal: true},
@@ -212,7 +214,8 @@ func describeGrammar() *regexp.Regexp {
 		// span
 		hourrange+opt(everyday)+", "+inner+" past each hour",
 		// hourstep
-		"every "+num+" hours "+alt("starting at "+clock, hourrange)+opt(inevery),
+		"every "+num+" hours "+alt("starting at "+clock, hourrange,
+			"from "+clock+" thru "+clock+" and at "+clock, "at "+clock+" and from "+clock+" thru "+clock)+opt(inevery),
 		// parts
 		inner+opt(" "+hourjoin),
 		top+" "+tophours,
