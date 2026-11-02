@@ -31,8 +31,10 @@ func WithParseOptions(o ParseOption) DescribeOption // package function only
   Specs outside the fields covered so far and combinations of `H` that
   have no form (H17, H20) get the literal form: each written field by
   name, as written ("minute 0, hour 9, day of month H/10, month *, day
-  of week 1-5"). A descriptor reads as its cron equivalent (P2); an
-  interval such as `@every 1h` is returned as written.
+  of week 1-5"). A descriptor reads as its cron equivalent (P2), and an
+  interval as it runs (P3). The `Parser` method uses the parser's minimum
+  `@every` interval (`WithMinEveryInterval`); the package function uses
+  the default, 1s.
 - `H` needs no hash key: the description does not depend on it. With no
   key, `StrictDays` does not check a spec with `H` in the day of the month
   or the month, as the value the key picks decides that check.
@@ -45,7 +47,8 @@ func WithParseOptions(o ParseOption) DescribeOption // package function only
   `L` and `W` days of month (`DomL`, `DomW`) and the `#` days of week
   (`DowNth`, `DowLast`); `H` in the second, minute, hour, day of month, day
   of week and month fields (`Hash`); the descriptors `@yearly` thru
-  `@hourly`, `@triggered`, `@manual` and `@none` (`Descriptor`).
+  `@hourly`, `@triggered`, `@manual` and `@none`, and the intervals
+  `@every`, `@every_aligned` and `@every_start` (`Descriptor`).
 
 ## Rules
 
@@ -150,6 +153,7 @@ which form a spec gets. Each has an ID, which the grammar cites.
 | ID | Rule |
 |---|---|
 | P2 | A descriptor reads as its cron equivalent: `@weekly` as `0 0 * * 0`, "at 12 am on Sunday"; `@hourly` as `0 * * * *`, "at the top of every hour". `@triggered`, `@manual` and `@none` read "only when triggered" |
+| P3 | An interval reads as it runs, after the parser's minimum and the cut to whole seconds, from its anchor: "every 1h30m from when scheduling started" (`@every`, `@every_start`), "every 15m from Unix epoch" (`@every_aligned`, and `@every` under `AlignEvery`). A written duration that changed is named in a note: "(written as 500ms, rounded up to the 1s minimum)" (`EveryRoundUp`), "(written as 1.5s, cut to whole seconds)", "(written as 1.7s, rounded up to whole seconds)" (a fractional minimum). `90m` reads "1h30m" |
 
 ## Grammar (EBNF)
 
@@ -158,7 +162,7 @@ The productions below are what `DescribeSpec` produces, in
 `describe_test.go` is the same grammar as a regular expression:
 `TestDescribeSpecGrammar` checks every golden description against it, and
 `FuzzDescribeSpec` checks the descriptions of generated specs. The literal
-form (G10) and interval descriptors are outside the grammar.
+form (G10) is outside the grammar.
 
 What a context-free grammar can't check is kept by the goldens: the value
 limits (T1, T4, R8–R12), the hour order (T6) and the values themselves (G1).
@@ -170,6 +174,7 @@ limits (T1, T4, R8–R12), the hour order (T6) and the values themselves (G1).
 start: schedule
      | "never" "runs"                                                     // G11
      | "only" "when" "triggered"                                          // P2
+     | interval                                                           // P3
 
 schedule: time [day] [month] [year] [note] short* [hashkey]               // G7, H1
 
@@ -296,6 +301,12 @@ year: "in" "year" INT | "in" "years" vlist                                // D6
 short: ";" "the" list{ORD} ("runs" | "run") "only" "in" "months" "that" "have" ("one" | "them")   // D3, X5
      | ";" ("it" | beforeitem) "runs" "only" "in" "months" "of" INT "days" ["or" "more"]           // X6
 
+interval: "every" DURATION ("from" "when" "scheduling" "started"         // P3
+                           | "from" "Unix" "epoch") [ivnote]
+ivnote: "(" "written" "as" DURATION "," ivhow ")"                        // P3
+ivhow: "rounded" "up" "to" ("the" DURATION "minimum" | "whole" "seconds")
+     | "cut" "to" "whole" "seconds"
+
 note: "(" ival (";" ival)* ")"                                            // T1
 ival: "every" (unit | INT units) ["," "starting" "over" "each" unit]
 unit: "second" | "minute" | "hour" | "day" | "month" | "year"
@@ -307,6 +318,7 @@ vitem: INT ["thru" INT]
 
 CLOCK12: /(1[0-2]|[1-9])(:[0-5][0-9]){1,2} [ap]m|(1[01]|[1-9]) [ap]m|12 am/   // T12, R2
 INT: /[0-9]+/
+DURATION: /[-+]?([0-9]*\.?[0-9]+(ns|us|µs|μs|ms|s|m|h))+/              // P3: Go's duration
 ORD: /[0-9]+(st|nd|rd|th)/
 NTH: "first" | "second" | "third" | "fourth" | "fifth" | "last"
 DAYNAME: "Sunday" | "Monday" | "Tuesday" | "Wednesday" | "Thursday" | "Friday" | "Saturday"

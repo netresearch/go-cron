@@ -3003,8 +3003,10 @@ valid spec always gets a description; one that never runs is "never runs".
 Specs outside the fields covered so far, and combinations of `H` without a
 form, get each written field by name ("minute 0, hour 0, day of month H/10,
 month *, day of week 1"). A descriptor reads as its cron equivalent, and
-`@triggered`, `@manual` and `@none` read "only when triggered"; an interval
-such as `@every 1h` is returned as written. `H` needs no hash key. The
+`@triggered`, `@manual` and `@none` read "only when triggered". An interval
+reads as it runs, from its anchor ("every 1h30m from when scheduling started",
+"every 15m from Unix epoch"); the `Parser` method applies the parser's
+minimum `@every` interval. `H` needs no hash key. The
 wording and its grammar are in [DESCRIBE.md](DESCRIBE.md).
 
 **Example:**

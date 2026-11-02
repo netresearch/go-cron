@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // withSeconds parses six-field specs, seconds first.
@@ -22,13 +23,28 @@ var (
 	withHash     = WithParseOptions(Minute | Hour | Dom | Month | Dow | Hash)
 	withSecHash  = WithParseOptions(Second | Minute | Hour | Dom | Month | Dow | Hash)
 	withHashOr   = WithParseOptions(Minute | Hour | Dom | Month | Dow | Hash | DowOrDom)
+	withAlign    = WithParseOptions(Minute | Hour | Dom | Month | Dow | Descriptor | AlignEvery)
+	withRoundUp  = WithParseOptions(Minute | Hour | Dom | Month | Dow | Descriptor | EveryRoundUp)
 )
 
+// minEvery is the standard parser with a minimum @every interval of d, and
+// EveryRoundUp if roundUp.
+func minEvery(d time.Duration, roundUp bool) *Parser {
+	o := Minute | Hour | Dom | Month | Dow | Descriptor
+	if roundUp {
+		o |= EveryRoundUp
+	}
+	p := NewParser(o).WithMinEveryInterval(d)
+	return &p
+}
+
 // describeGoldens are the binding descriptions (docs/DESCRIBE.md). literal
-// marks the field-by-field fallback, which is outside the grammar.
+// marks the field-by-field fallback, which is outside the grammar. parser,
+// when set, describes with Parser.DescribeSpec instead of the package function.
 var describeGoldens = []struct {
 	spec    string
 	opts    []DescribeOption
+	parser  *Parser
 	want    string
 	literal bool
 }{
@@ -417,8 +433,22 @@ var describeGoldens = []struct {
 	{spec: "CRON_TZ=Europe/Berlin @daily", want: "at midnight every day"},
 	{spec: "@daily", opts: []DescribeOption{withSeconds}, want: "at midnight every day"},
 
+	// Intervals: as they run, from their anchor (P3)
+	{spec: "@every 1h30m", want: "every 1h30m from when scheduling started"},
+	{spec: "@every 15m", opts: []DescribeOption{withAlign}, want: "every 15m from Unix epoch"},
+	{spec: "@every_aligned 15m", want: "every 15m from Unix epoch"},
+	{spec: "@every 500ms", opts: []DescribeOption{withRoundUp}, want: "every 1s from when scheduling started (written as 500ms, rounded up to the 1s minimum)"},
+	{spec: "@every 30s", parser: minEvery(time.Minute, true), want: "every 1m from when scheduling started (written as 30s, rounded up to the 1m minimum)"},
+	{spec: "@every 1.5s", want: "every 1s from when scheduling started (written as 1.5s, cut to whole seconds)"},
+	{spec: "@every 500ms", parser: minEvery(0, false), want: "every 500ms from when scheduling started"},
+	{spec: "@every_start 15m", opts: []DescribeOption{withAlign}, want: "every 15m from when scheduling started"},
+	{spec: "@every_aligned 1h", want: "every 1h from Unix epoch"},
+	{spec: "@every 90m", want: "every 1h30m from when scheduling started"},
+	{spec: "@every 1.7s", parser: minEvery(1500*time.Millisecond, false), want: "every 2s from when scheduling started (written as 1.7s, rounded up to whole seconds)"},
+	{spec: "@every 500ms", parser: minEvery(1500*time.Millisecond, true), want: "every 2s from when scheduling started (written as 500ms, rounded up to the 1.5s minimum)"},
+	{spec: "@every 0s", parser: minEvery(0, false), want: "every 1s from when scheduling started (written as 0s, rounded up to whole seconds)"},
+
 	// Literal fallback: the whole spec renders field by field
-	{spec: "@every 1h30m", want: "@every 1h30m", literal: true},
 	// H in the date fields without a form (H20)
 	{spec: "0 0 H/10 * 1", opts: []DescribeOption{withHash}, want: "minute 0, hour 0, day of month H/10, month *, day of week 1", literal: true},
 	{spec: "0 0 1 * H/2", opts: []DescribeOption{withHash}, want: "minute 0, hour 0, day of month 1, month *, day of week H/2", literal: true},
@@ -451,7 +481,11 @@ var describeGoldens = []struct {
 
 func TestDescribeSpec(t *testing.T) {
 	for _, tt := range describeGoldens {
-		got, err := DescribeSpec(tt.spec, tt.opts...)
+		describe := DescribeSpec
+		if tt.parser != nil {
+			describe = tt.parser.DescribeSpec
+		}
+		got, err := describe(tt.spec, tt.opts...)
 		if err != nil {
 			t.Errorf("DescribeSpec(%q): unexpected error %v", tt.spec, err)
 			continue
@@ -593,7 +627,11 @@ func describeGrammar() *regexp.Regexp {
 
 	hashkey := "; the hash key fixes " + alt(list("the "+unit), "both "+units) // H1
 	schedule := time + opt(" "+day) + opt(" "+month) + opt(" "+year) + opt(note) + "(?:" + short + ")*" + opt(hashkey)
-	return regexp.MustCompile("^" + alt(schedule, "never runs", "only when triggered") + "$")
+	// P3: an interval as it runs, from its anchor
+	dur := `[-+]?(?:\d*\.?\d+(?:ns|us|µs|μs|ms|s|m|h))+`
+	interval := "every " + dur + " from " + alt("when scheduling started", "Unix epoch") +
+		opt(` \(written as `+dur+", "+alt("rounded up to the "+dur+" minimum", "rounded up to whole seconds", "cut to whole seconds")+`\)`)
+	return regexp.MustCompile("^" + alt(schedule, "never runs", "only when triggered", interval) + "$")
 }
 
 func TestDescribeSpecGrammar(t *testing.T) {
@@ -755,8 +793,8 @@ func TestDescribeSpecStrictDaysNoKey(t *testing.T) {
 	}
 }
 
-// literalForm matches the field-by-field fallback and bare descriptors.
-var literalForm = regexp.MustCompile(`^(?:@|(?:second|minute|hour|day of month|month|day of week|year) )`)
+// literalForm matches the field-by-field fallback.
+var literalForm = regexp.MustCompile(`^(?:second|minute|hour|day of month|month|day of week|year) `)
 
 // numberRange matches a range of numbers in a spec, such as a year range.
 var numberRange = regexp.MustCompile(`(\d+)-(\d+)`)
@@ -776,9 +814,8 @@ func wideRange(spec string) bool {
 }
 
 // FuzzDescribeSpec checks that every spec that parses gets a description in
-// the grammar or the literal fallback, and the literal fallback for
-// descriptors and otherwise only with H, which has forms for some
-// combinations (G10). Specs with a range of more than 100 values (years) are
+// the grammar or the literal fallback, and the literal fallback only with H,
+// which has forms for some combinations (G10). Specs with a range of more than 100 values (years) are
 // skipped.
 func FuzzDescribeSpec(f *testing.F) {
 	for _, tt := range describeGoldens {
@@ -810,11 +847,9 @@ func FuzzDescribeSpec(f *testing.F) {
 			if !g.MatchString(got) && !literalForm.MatchString(got) {
 				t.Fatalf("DescribeSpec(%q) = %q, outside the grammar", spec, got)
 			}
-			_, descriptor, fields, _, _ := p.specFields(spec)
-			literal := literalForm.MatchString(got)
-			want := strings.HasPrefix(descriptor, "@every")
-			if literal != want && (!literal || !containsHashExpr(fields)) {
-				t.Fatalf("DescribeSpec(%q) = %q: literal form %v, want %v", spec, got, literal, want)
+			_, _, fields, _, _ := p.specFields(spec)
+			if literalForm.MatchString(got) && !containsHashExpr(fields) {
+				t.Fatalf("DescribeSpec(%q) = %q: literal form without H", spec, got)
 			}
 		}
 	})

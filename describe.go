@@ -63,10 +63,12 @@ func DescribeSpec(spec string, opts ...DescribeOption) (string, error) {
 // each written field by name, as written: "minute 0, hour 0, day of month
 // H/10, month *, day of week 1". A descriptor reads as its cron equivalent
 // ("@weekly" is "at 12 am on Sunday"), and "@triggered", "@manual" and "@none"
-// read "only when triggered"; an interval such as "@every 1h" is returned as
-// written. H needs no hash key here: the description does not depend on it.
-// With no key, StrictDays does not check a spec with H in the day of the
-// month or the month, as the value the key picks decides that check.
+// read "only when triggered". An interval reads as it runs, from its anchor,
+// with the parser's minimum: "every 1h30m from when scheduling started",
+// "every 15m from Unix epoch". H needs no hash key here: the description does
+// not depend on it. With no key, StrictDays does not check a spec with H in
+// the day of the month or the month, as the value the key picks decides that
+// check.
 func (p Parser) DescribeSpec(spec string, _ ...DescribeOption) (string, error) {
 	if p.hashKey == "" {
 		p.hashKey = "describe"
@@ -81,7 +83,7 @@ func (p Parser) DescribeSpec(spec string, _ ...DescribeOption) (string, error) {
 	}
 	// The spec parsed, so the split cannot fail.
 	_, descriptor, fields, yearField, _ := p.specFields(spec)
-	fields, text := expandDescriptor(descriptor, fields)
+	fields, text := p.expandDescriptor(descriptor, fields)
 	if text != "" {
 		return text, nil
 	}
@@ -134,8 +136,8 @@ var descriptorFields = map[string][]string{
 
 // expandDescriptor returns the fields a calendar descriptor runs as, or the
 // whole description of any other descriptor: "only when triggered" for a
-// trigger, an interval as written. Without a descriptor it returns fields.
-func expandDescriptor(descriptor string, fields []string) (expanded []string, text string) {
+// trigger, the interval for "@every". Without a descriptor it returns fields.
+func (p Parser) expandDescriptor(descriptor string, fields []string) (expanded []string, text string) {
 	switch descriptor {
 	case "":
 		return fields, ""
@@ -145,7 +147,53 @@ func expandDescriptor(descriptor string, fields []string) (expanded []string, te
 	if f, ok := descriptorFields[descriptor]; ok {
 		return f, ""
 	}
-	return nil, descriptor
+	return nil, p.describeInterval(descriptor)
+}
+
+// describeInterval describes a parsed "@every" descriptor as it runs (P3):
+// the interval after the parser's minimum and truncation, from the start or
+// the Unix epoch, and how the written duration changed.
+func (p Parser) describeInterval(descriptor string) string {
+	sch, _ := p.intervalSchedule(descriptor) // the spec parsed
+	from := "when scheduling started"
+	var every time.Duration
+	switch s := sch.(type) {
+	case ConstantDelaySchedule:
+		every = s.Delay
+	case AlignedSchedule:
+		every, from = s.Interval, "Unix epoch"
+	}
+	if every <= 0 {
+		every, from = time.Second, "when scheduling started" // Next adds 1s
+	}
+	_, writtenText, _ := strings.Cut(descriptor, " ")
+	written, _ := time.ParseDuration(writtenText)
+	text := "every " + durationText(every) + " from " + from
+	var how string
+	switch {
+	case every == written:
+		return text
+	case written < p.minEveryInterval:
+		how = "rounded up to the " + durationText(p.minEveryInterval) + " minimum"
+	case every > written:
+		how = "rounded up to whole seconds"
+	default:
+		how = "cut to whole seconds"
+	}
+	return text + " (written as " + writtenText + ", " + how + ")"
+}
+
+// durationText is d as Go writes it, without zero minutes and seconds after
+// a larger unit: "1h30m", "1h", "1m", "500ms".
+func durationText(d time.Duration) string {
+	s := d.String()
+	if strings.HasSuffix(s, "m0s") {
+		s = strings.TrimSuffix(s, "0s")
+	}
+	if strings.HasSuffix(s, "h0m") {
+		s = strings.TrimSuffix(s, "0m")
+	}
+	return s
 }
 
 // describer builds one description: whether it names a day, and the notes
