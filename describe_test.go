@@ -20,6 +20,8 @@ var (
 	withYear     = WithParseOptions(Minute | Hour | Dom | Month | Dow | Year)
 	withExt      = WithParseOptions(Minute | Hour | Dom | Month | Dow | Extended)
 	withExtOr    = WithParseOptions(Minute | Hour | Dom | Month | Dow | Extended | DowOrDom)
+	withHash     = WithParseOptions(Minute | Hour | Dom | Month | Dow | Hash)
+	withSecHash  = WithParseOptions(Second | Minute | Hour | Dom | Month | Dow | Hash)
 )
 
 // describeGoldens are the binding descriptions (docs/DESCRIBE.md). literal
@@ -305,9 +307,89 @@ var describeGoldens = []struct {
 	{spec: "0 0 L-3 * FRI#3", opts: []DescribeOption{withExtOr}, want: "at 12 am 3 days before the last day of the month or on any third Friday"},
 	{spec: "0 0 L-29,L-28,L-29 * *", opts: []DescribeOption{withExt}, want: "at midnight 28 days before the last day and 29 days before the last day of the month; 28 days before the last day runs only in months of 29 days or more; 29 days before the last day runs only in months of 30 days or more"},
 
+	// H in the time fields (H1–H16)
+	{spec: "H * * * *", opts: []DescribeOption{withHash}, want: "at a fixed minute past the hour; the hash key fixes the minute"},
+	{spec: "H(0-29) * * * *", opts: []DescribeOption{withHash}, want: "at a fixed minute between minutes 0 and 29 past the hour; the hash key fixes the minute"},
+	{spec: "H(50-10) * * * *", opts: []DescribeOption{withHash}, want: "at a fixed minute between minutes 0 and 10 or 50 and 59 past the hour; the hash key fixes the minute"},
+	{spec: "H(0-59) * * * *", opts: []DescribeOption{withHash}, want: "at a fixed minute past the hour; the hash key fixes the minute"},
+	{spec: "0,H * * * *", opts: []DescribeOption{withHash}, want: "1 or 2 runs in every hour, at the top of the hour and a fixed minute past it; the hash key fixes the minute"},
+	{spec: "H,H * * * *", opts: []DescribeOption{withHash}, want: "at a fixed minute past the hour; the hash key fixes the minute"},
+	{spec: "H 9 * * *", opts: []DescribeOption{withHash}, want: "at a fixed minute during the 9 am hour every day; the hash key fixes the minute"},
+	{spec: "0 H * * *", opts: []DescribeOption{withHash}, want: "at the top of a fixed hour every day; the hash key fixes the hour"},
+	{spec: "H H * * *", opts: []DescribeOption{withHash}, want: "at a fixed minute at a fixed hour every day; the hash key fixes the minute and the hour"},
+	{spec: "0 H(9-17) * * *", opts: []DescribeOption{withHash}, want: "at the top of a fixed hour between the 9 am and 5 pm hours every day; the hash key fixes the hour"},
+	{spec: "H 9,17 * * *", opts: []DescribeOption{withHash}, want: "at a fixed minute during the 9 am and 5 pm hours every day; the hash key fixes the minute"},
+	{spec: "H 9-17/2 * * *", opts: []DescribeOption{withHash}, want: "at a fixed minute during the 9 am, 11 am, 1 pm, 3 pm, and 5 pm hours every day; the hash key fixes the minute"},
+	{spec: "0,30 H * * *", opts: []DescribeOption{withHash}, want: "at minutes 0 and 30 at a fixed hour every day; the hash key fixes the hour"},
+	{spec: "0 9,H * * *", opts: []DescribeOption{withHash}, want: "1 or 2 runs in every day, at 9 am and the top of a fixed hour; the hash key fixes the hour"},
+	{spec: "H 9 * * 1-5", opts: []DescribeOption{withHash}, want: "at a fixed minute during the 9 am hour on Monday thru Friday; the hash key fixes the minute"},
+	{spec: "H 9 1 * *", opts: []DescribeOption{withHash}, want: "at a fixed minute during the 9 am hour on the 1st of the month; the hash key fixes the minute"},
+	{spec: "H */2 * * *", opts: []DescribeOption{withHash}, want: "at a fixed minute every 2 hours starting with the midnight hour in every day; the hash key fixes the minute"},
+	{spec: "* H * * *", opts: []DescribeOption{withHash}, want: "every minute during a fixed hour; the hash key fixes the hour"},
+	{spec: "* H/6 * * *", opts: []DescribeOption{withHash}, want: "every minute during 4 hours in every day, 6 hours apart, starting from a fixed hour; the hash key fixes the hour"},
+	{spec: "H/15 * * * *", opts: []DescribeOption{withHash}, want: "4 runs in every hour, 15 minutes apart, starting from a fixed minute; the hash key fixes the minute"},
+	{spec: "H/40 * * * *", opts: []DescribeOption{withHash}, want: "1 or 2 runs in every hour, 40 minutes apart, starting from a fixed minute; the hash key fixes the minute"},
+	{spec: "H(0-29)/10 * * * *", opts: []DescribeOption{withHash}, want: "3 runs in every hour between minutes 0 and 29, 10 minutes apart, starting from a fixed minute; the hash key fixes the minute"},
+	{spec: "H/15 9-17 * * *", opts: []DescribeOption{withHash}, want: "4 runs in every hour from 9 am thru 5 pm, 15 minutes apart, starting from a fixed minute; the hash key fixes the minute"},
+	{spec: "0 H/6 * * *", opts: []DescribeOption{withHash}, want: "at the top of the hour, 4 runs in every day, 6 hours apart, starting from a fixed hour; the hash key fixes the hour"},
+	{spec: "0 H/5 * * *", opts: []DescribeOption{withHash}, want: "at the top of the hour, 4 or 5 runs in every day, 5 hours apart, starting from a fixed hour; the hash key fixes the hour"},
+	{spec: "0,H/15 * * * *", opts: []DescribeOption{withHash}, want: "4 or 5 runs in every hour, at the top of the hour and every 15 minutes starting from a fixed minute; the hash key fixes the minute"},
+	{spec: "H,H(0-29) * * * *", opts: []DescribeOption{withHash}, want: "1 or 2 runs in every hour, at a fixed minute and a fixed minute between minutes 0 and 29; the hash key fixes both minutes"},
+	{spec: "H * * * * *", opts: []DescribeOption{withSecHash}, want: "at a fixed second within a minute; the hash key fixes the second"},
+	{spec: "H 0 9 * * *", opts: []DescribeOption{withSecHash}, want: "at a fixed second at 9 am every day; the hash key fixes the second"},
+	{spec: "0 H 9 * * *", opts: []DescribeOption{withSecHash}, want: "at a fixed minute during the 9 am hour every day; the hash key fixes the minute"},
+	{spec: "H H 9 * * *", opts: []DescribeOption{withSecHash}, want: "at a fixed second and a fixed minute during the 9 am hour every day; the hash key fixes the second and the minute"},
+	{spec: "H/15 * * * * *", opts: []DescribeOption{withSecHash}, want: "4 runs in every minute, 15 seconds apart, starting from a fixed second; the hash key fixes the second"},
+	{spec: "H/15 * 9 * * *", opts: []DescribeOption{withSecHash}, want: "4 runs in every minute during the 9 am hour, 15 seconds apart, starting from a fixed second; the hash key fixes the second"},
+	{spec: "H/1 * * * *", opts: []DescribeOption{withHash}, want: "every minute"},
+	{spec: "H(0-29)/1 * * * *", opts: []DescribeOption{withHash}, want: "at minutes 0 thru 29 past the hour"},
+	{spec: "H/60 * * * *", opts: []DescribeOption{withHash}, want: "at a fixed minute past the hour; the hash key fixes the minute"},
+	{spec: "H/100 * * * *", opts: []DescribeOption{withHash}, want: "at a fixed minute past the hour; the hash key fixes the minute"},
+	{spec: "H(5-5) * * * *", opts: []DescribeOption{withHash}, want: "at 5 minutes past the hour"},
+	{spec: "*,H * * * *", opts: []DescribeOption{withHash}, want: "every minute"},
+	{spec: "H(0-29),H * * * *", opts: []DescribeOption{withHash}, want: "1 or 2 runs in every hour, at a fixed minute and a fixed minute between minutes 0 and 29; the hash key fixes both minutes"},
+	{spec: "H 9-17 * * *", opts: []DescribeOption{withHash}, want: "at a fixed minute past every hour from 9 am thru 5 pm every day; the hash key fixes the minute"},
+	{spec: "H 20-5 * * *", opts: []DescribeOption{withHash}, want: "at a fixed minute past every hour from midnight thru 5 am and 8 pm thru 11 pm every day; the hash key fixes the minute"},
+	{spec: "H */6 * * *", opts: []DescribeOption{withHash}, want: "at a fixed minute during midnight, 6 am, noon, and 6 pm hours in every day; the hash key fixes the minute"},
+	{spec: "H 1/3 * * *", opts: []DescribeOption{withHash}, want: "at a fixed minute every 3 hours from the 1 am hour thru the 10 pm hour in every day; the hash key fixes the minute"},
+	{spec: "H(0-29) 9 * * *", opts: []DescribeOption{withHash}, want: "at a fixed minute between minutes 0 and 29 during the 9 am hour every day; the hash key fixes the minute"},
+	{spec: "30 H * * *", opts: []DescribeOption{withHash}, want: "at minute 30 at a fixed hour every day; the hash key fixes the hour"},
+	{spec: "* H(9-17) * * *", opts: []DescribeOption{withHash}, want: "every minute during a fixed hour between the 9 am and 5 pm hours; the hash key fixes the hour"},
+	{spec: "*/7 H * * *", opts: []DescribeOption{withHash}, want: "at minutes 0, 7, 14, … 56 at a fixed hour every day (every 7 minutes, starting over each hour); the hash key fixes the hour"},
+	{spec: "H(0-29) H(9-17) * * *", opts: []DescribeOption{withHash}, want: "at a fixed minute between minutes 0 and 29 at a fixed hour between the 9 am and 5 pm hours every day; the hash key fixes the minute and the hour"},
+	{spec: "H/15 9,17 * * *", opts: []DescribeOption{withHash}, want: "4 runs in every hour during the 9 am and 5 pm hours, 15 minutes apart, starting from a fixed minute; the hash key fixes the minute"},
+	{spec: "H/15 */6 * * *", opts: []DescribeOption{withHash}, want: "4 runs in every hour during midnight, 6 am, noon, and 6 pm hours, 15 minutes apart, starting from a fixed minute; the hash key fixes the minute"},
+	{spec: "H/15 20-5 * * *", opts: []DescribeOption{withHash}, want: "4 runs in every hour from midnight thru 5 am and 8 pm thru 11 pm, 15 minutes apart, starting from a fixed minute; the hash key fixes the minute"},
+	{spec: "H(50-10)/5 * * * *", opts: []DescribeOption{withHash}, want: "4 or 5 runs in every hour between minutes 0 and 10 or 50 and 59, 5 minutes apart, starting from a fixed minute; the hash key fixes the minute"},
+	{spec: "30 H/6 * * *", opts: []DescribeOption{withHash}, want: "at 30 minutes past the hour, 4 runs in every day, 6 hours apart, starting from a fixed hour; the hash key fixes the hour"},
+	{spec: "* H/5 * * *", opts: []DescribeOption{withHash}, want: "every minute during 4 or 5 hours in every day, 5 hours apart, starting from a fixed hour; the hash key fixes the hour"},
+	{spec: "H * 9 * * *", opts: []DescribeOption{withSecHash}, want: "at a fixed second within every minute during the 9 am hour; the hash key fixes the second"},
+	{spec: "H * 9-17 * * *", opts: []DescribeOption{withSecHash}, want: "at a fixed second within every minute from 9 am thru 5:59 pm every day; the hash key fixes the second"},
+	{spec: "H 30 9,17 * * *", opts: []DescribeOption{withSecHash}, want: "at a fixed second at 9:30 am and 5:30 pm every day; the hash key fixes the second"},
+	{spec: "H(0-29) * * * * *", opts: []DescribeOption{withSecHash}, want: "at a fixed second between seconds 0 and 29 within a minute; the hash key fixes the second"},
+	{spec: "H(0-29)/10 * * * * *", opts: []DescribeOption{withSecHash}, want: "3 runs in every minute between seconds 0 and 29, 10 seconds apart, starting from a fixed second; the hash key fixes the second"},
+	{spec: "0 H/6 * * 1", opts: []DescribeOption{withHash}, want: "at the top of the hour, 4 runs in every day, 6 hours apart, starting from a fixed hour on Monday; the hash key fixes the hour"},
+	{spec: "0 9,H * * 1", opts: []DescribeOption{withHash}, want: "1 or 2 runs in every day, at 9 am and the top of a fixed hour on Monday; the hash key fixes the hour"},
+
 	// Literal fallback: the whole spec renders field by field
 	{spec: "@daily", want: "@daily", literal: true},
-	{spec: "H/15 * * * *", opts: []DescribeOption{WithParseOptions(Minute | Hour | Dom | Month | Dow | Hash)}, want: "minute H/15, hour *, day of month *, month *, day of week *", literal: true},
+	{spec: "H 5 * * * *", opts: []DescribeOption{withSecHash}, want: "second H, minute 5, hour *, day of month *, month *, day of week *", literal: true},
+	// H combinations without a form (G10)
+	{spec: "H(0-9),H(20-29) * * * *", opts: []DescribeOption{withHash}, want: "minute H(0-9),H(20-29), hour *, day of month *, month *, day of week *", literal: true},
+	{spec: "H/15,H/20 * * * *", opts: []DescribeOption{withHash}, want: "minute H/15,H/20, hour *, day of month *, month *, day of week *", literal: true},
+	{spec: "0 H(20-5) * * *", opts: []DescribeOption{withHash}, want: "minute 0, hour H(20-5), day of month *, month *, day of week *", literal: true},
+	{spec: "5 H * * * *", opts: []DescribeOption{withSecHash}, want: "second 5, minute H, hour *, day of month *, month *, day of week *", literal: true},
+	{spec: "H H/6 * * *", opts: []DescribeOption{withHash}, want: "minute H, hour H/6, day of month *, month *, day of week *", literal: true},
+	{spec: "H(0-29)/10 9 * * *", opts: []DescribeOption{withHash}, want: "minute H(0-29)/10, hour 9, day of month *, month *, day of week *", literal: true},
+	{spec: "H/15 */2 * * *", opts: []DescribeOption{withHash}, want: "minute H/15, hour */2, day of month *, month *, day of week *", literal: true},
+	{spec: "H 0 H * * *", opts: []DescribeOption{withSecHash}, want: "second H, minute 0, hour H, day of month *, month *, day of week *", literal: true},
+	{spec: "H H * * * *", opts: []DescribeOption{withSecHash}, want: "second H, minute H, hour *, day of month *, month *, day of week *", literal: true},
+	{spec: "0,H 9 * * *", opts: []DescribeOption{withHash}, want: "minute 0,H, hour 9, day of month *, month *, day of week *", literal: true},
+	{spec: "5,H * * * *", opts: []DescribeOption{withHash}, want: "minute 5,H, hour *, day of month *, month *, day of week *", literal: true},
+	{spec: "30 9,H * * *", opts: []DescribeOption{withHash}, want: "minute 30, hour 9,H, day of month *, month *, day of week *", literal: true},
+	{spec: "0 H(9-17)/2 * * *", opts: []DescribeOption{withHash}, want: "minute 0, hour H(9-17)/2, day of month *, month *, day of week *", literal: true},
+	{spec: "0 H,H(0-5) * * *", opts: []DescribeOption{withHash}, want: "minute 0, hour H,H(0-5), day of month *, month *, day of week *", literal: true},
+	{spec: "H/15 * 9-17 * * *", opts: []DescribeOption{withSecHash}, want: "second H/15, minute *, hour 9-17, day of month *, month *, day of week *", literal: true},
 }
 
 func TestDescribeSpec(t *testing.T) {
@@ -338,7 +420,7 @@ func describeGrammar() *regexp.Regexp {
 	clock := alt(clock12, "midnight", "noon")
 	vlist := alt(list(num+opt(" thru "+num)), num+", "+num+", "+num+", … "+num)
 	unit := alt("second", "minute", "hour", "day", "month", "year")
-	units := alt("seconds", "minutes", "days", "months", "years")
+	units := alt("seconds", "minutes", "hours", "days", "months", "years")
 	// R3: no article before a list that starts with midnight
 	hourtail := alt(" and "+clock, "(?:, "+clock+")+, and "+clock) + " hours"
 	hours := alt("the "+clock+" hour", "the "+alt(clock12, "noon")+hourtail, "midnight"+hourtail)
@@ -353,8 +435,11 @@ func describeGrammar() *regexp.Regexp {
 	hstep := "every " + num + " hours " + alt("starting with "+hours, "from "+list(hcrange),
 		"from "+hcrange+" and "+hone, hone+" and from "+hcrange) + opt(inevery)
 
+	// H1, H3: a value the hash key fixes
+	fixed := "a fixed " + unit + opt(" between "+alt(units+" "+num+" and "+num+opt(" or "+num+" and "+num), hours))
+
 	// C1: what leads, with the minutes joined to the seconds
-	secs := alt("at "+num+" seconds?", "at seconds "+vlist)
+	secs := alt("at "+num+" seconds?", "at seconds "+vlist, "at "+fixed)
 	inner := alt(
 		secs+opt(" within "+alt("a minute", "every minute", "minute "+num, "minutes "+vlist)),
 		"at minutes "+vlist,
@@ -368,6 +453,9 @@ func describeGrammar() *regexp.Regexp {
 		"every hour from "+crange+" and at "+clock+opt(everyday),
 		"every hour from "+crange+" and the "+clock+" hour"+opt(everyday),
 		"the "+clock+" hour and every hour from "+crange+opt(everyday))
+	cnt := alt(num, num+" or "+num)
+	apart := ", " + num + " " + units + " apart, starting from " + fixed
+
 	// R6, R9, R10, R11: the hours joined to what comes before
 	hourjoin := alt("past the hour", "in every hour"+opt(" "+hourrange+opt(everyday)), "during "+hours+opt(inevery), hstep,
 		"in every hour from "+crange+" and "+alt("at "+clock, hone)+opt(everyday),
@@ -388,6 +476,21 @@ func describeGrammar() *regexp.Regexp {
 		"at "+clock+" and "+inner+" in every hour from "+crange+opt(everyday),
 		"every "+alt("minute", "second")+" "+hourrange+opt(everyday),
 		secs+" within every minute "+hourrange+opt(everyday),
+		// H in the time fields
+		"at "+fixed+" past every hour "+hourrange+opt(everyday),                      // R9
+		"at "+fixed+" during "+hours+opt(alt(everyday, inevery)),                     // H7, R10
+		"at "+fixed+" "+hstep,                                                        // R11
+		"at "+alt(fixed, "minute "+num, "minutes "+vlist)+" at "+fixed+opt(everyday), // H16
+		"at the top of "+fixed+opt(everyday),                                         // R4
+		"every minute during "+fixed,                                                 // R6
+		"at "+fixed+" at "+list(clock)+opt(everyday),                                 // H8
+		"at "+fixed+" and "+fixed+" during "+hours+opt(everyday),                     // H12
+		// H2, H14, H15: the count forms
+		opt(alt("at the top of the hour", "at "+num+" minutes? past the hour")+", ")+cnt+" runs? in every "+unit+
+			opt(" "+alt("between "+units+" "+num+" and "+num+opt(" or "+num+" and "+num), hourrange, "during "+hours))+apart,
+		"every minute during "+cnt+" hours in every day"+apart,
+		cnt+" runs in every "+unit+", at "+alt("the top of the hour and "+fixed+" past it", fixed+" and "+fixed,
+			"the top of the hour and every "+num+" "+units+" starting from "+fixed, clock+" and the top of "+fixed),
 	)
 	// D2, D4–D6: the date clauses; D3: the short-month clause
 	ord := `\d+(?:st|nd|rd|th)`
@@ -418,7 +521,8 @@ func describeGrammar() *regexp.Regexp {
 		alt("it", before)+" runs only in months of "+num+" days"+opt(" or more"),
 	)
 
-	schedule := time + opt(" "+day) + opt(" "+month) + opt(" "+year) + opt(note) + "(?:" + short + ")*"
+	hashkey := "; the hash key fixes " + alt(list("the "+unit), "both "+units) // H1
+	schedule := time + opt(" "+day) + opt(" "+month) + opt(" "+year) + opt(note) + "(?:" + short + ")*" + opt(hashkey)
 	return regexp.MustCompile("^" + alt(schedule, "never runs") + "$")
 }
 
@@ -525,7 +629,7 @@ func TestParserDescribeSpec(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "minute H/15, hour *, day of month *, month *, day of week *"; got != want {
+	if want := "4 runs in every hour, 15 minutes apart, starting from a fixed minute; the hash key fixes the minute"; got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
 
@@ -534,7 +638,7 @@ func TestParserDescribeSpec(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "minute H, hour H, day of month *, month *, day of week *"; got != want {
+	if want := "at a fixed minute at a fixed hour every day; the hash key fixes the minute and the hour"; got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
 }
@@ -601,15 +705,15 @@ func wideRange(spec string) bool {
 	return false
 }
 
-// literalSyntax reports the syntax DescribeSpec renders literally: H in any
-// field. An item that starts with "*" or "?" is the star, whatever follows
-// it, as the parser reads it. It is written apart from the describer's own check, so a spec
+// literalSyntax reports the syntax DescribeSpec renders literally: H in a
+// date field. An item that starts with "*" or "?" is the star, whatever
+// follows it, as the parser reads it. It is written apart from the describer's own check, so a spec
 // that falls back for another reason fails FuzzDescribeSpec.
 func literalSyntax(fields []string, yearField string) bool {
 	if yearField != "" {
 		fields = append(slices.Clone(fields), yearField)
 	}
-	for _, f := range fields {
+	for _, f := range fields[3:] {
 		for item := range strings.SplitSeq(f, ",") {
 			if strings.HasPrefix(item, "*") || strings.HasPrefix(item, "?") {
 				continue
@@ -623,9 +727,10 @@ func literalSyntax(fields []string, yearField string) bool {
 }
 
 // FuzzDescribeSpec checks that every spec that parses gets a description in
-// the grammar or the literal fallback, and the literal fallback exactly for
-// descriptors and literalSyntax. Specs with a range of more than 100 values
-// (years) are skipped.
+// the grammar or the literal fallback, and the literal fallback for
+// descriptors and literalSyntax and otherwise only with H in the time fields,
+// which has forms for some combinations (G10). Specs with a range of more
+// than 100 values (years) are skipped.
 func FuzzDescribeSpec(f *testing.F) {
 	for _, tt := range describeGoldens {
 		f.Add(tt.spec)
@@ -657,8 +762,10 @@ func FuzzDescribeSpec(f *testing.F) {
 				t.Fatalf("DescribeSpec(%q) = %q, outside the grammar", spec, got)
 			}
 			_, descriptor, fields, yearField, _ := p.specFields(spec)
-			if want := descriptor != "" || literalSyntax(fields, yearField); literalForm.MatchString(got) != want {
-				t.Fatalf("DescribeSpec(%q) = %q: literal form %v, want %v", spec, got, !want, want)
+			literal := literalForm.MatchString(got)
+			want := descriptor != "" || literalSyntax(fields, yearField)
+			if literal != want && (!literal || !containsHashExpr(fields[:3])) {
+				t.Fatalf("DescribeSpec(%q) = %q: literal form %v, want %v", spec, got, literal, want)
 			}
 		}
 	})

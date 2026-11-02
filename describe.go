@@ -82,22 +82,35 @@ func (p Parser) DescribeSpec(spec string, _ ...DescribeOption) (string, error) {
 	if descriptor != "" {
 		return descriptor, nil
 	}
-	if containsHashExpr(fields) || !allDescribable(fields) || !describable(yearField, nil) {
+	if containsHashExpr(fields[3:]) || !allDescribable(fields) || !describable(yearField, nil) {
 		return p.describeLiteral(spec, fields, yearField), nil
 	}
 	if p.dayMissing(sch) {
 		return "never runs", nil
 	}
+	var h [3]hashField
+	for i, r := range []bounds{seconds, minutes, hours} {
+		h[i] = splitHash(fields[i], r)
+	}
+	units := hashUnits(h[:], literalNames[:3])
 	var d describer
 	day, short, dayName := p.describeDays(&d, fields[3], fields[5])
 	d.named, d.dayName = day != "", dayName
-	parts := []string{d.describeTime(fields)}
+	var timeText string
+	if len(units) == 0 {
+		timeText = d.describeTime([]string{h[0].plain, h[1].plain, h[2].plain})
+	} else if t, ok := d.describeHashTime(h); ok {
+		timeText = t
+	} else {
+		return p.describeLiteral(spec, fields, yearField), nil
+	}
+	parts := []string{timeText}
 	for _, clause := range []string{day, d.describeMonths(fields[4]), d.describeYears(yearField)} {
 		if clause != "" {
 			parts = append(parts, clause)
 		}
 	}
-	return strings.Join(parts, " ") + d.noteText() + short, nil
+	return strings.Join(parts, " ") + d.noteText() + short + hashKeyClause(units), nil
 }
 
 // describer builds one description: whether it names a day, and the notes
@@ -459,8 +472,8 @@ func isWildcard(field string) bool {
 var describableItem = regexp.MustCompile(`^(?:[*?]|(?:\+?[0-9]+|[A-Za-z]{3})(?:-(?:\+?[0-9]+|[A-Za-z]{3}))?)(?:/\+?[0-9]+)?$`)
 
 // describable reports a field whose items all have the covered syntax, or
-// the field's own (special): L and W in the day of month, # in the day of
-// week. special is nil for the other fields.
+// the field's own (special): H in the time fields, L and W in the day of
+// month, # in the day of week. special is nil for the other fields.
 func describable(field string, special *regexp.Regexp) bool {
 	items := strings.FieldsFunc(field, func(r rune) bool { return r == ',' })
 	return !slices.ContainsFunc(items, func(it string) bool {
@@ -474,6 +487,8 @@ func allDescribable(fields []string) bool {
 	for i, f := range fields {
 		var special *regexp.Regexp
 		switch i {
+		case 0, 1, 2:
+			special = hashItemSyntax
 		case 3:
 			special = domSpecialItem
 		case 5:
@@ -516,6 +531,8 @@ func (p Parser) describeLiteral(spec string, fields []string, yearField string) 
 // Phrases the descriptions repeat.
 const (
 	unitSecond       = "second"
+	unitMinute       = "minute"
+	unitHour         = "hour"
 	thruSep          = " thru "
 	everyDaySuffix   = " every day"
 	inEveryDaySuffix = " in every day"
@@ -879,9 +896,9 @@ func (d *describer) clock(h, m, s uint) string {
 // describeTime describes the second, minute and hour fields: what leads, the
 // minutes joined to it, then the hours (C1).
 func (d *describer) describeTime(fields []string) string {
-	sec := newTimeField(fields[0], unitSecond, "minute", seconds)
-	minute := newTimeField(fields[1], "minute", "hour", minutes)
-	hour := newTimeField(fields[2], "hour", "day", hours)
+	sec := newTimeField(fields[0], unitSecond, unitMinute, seconds)
+	minute := newTimeField(fields[1], unitMinute, unitHour, minutes)
+	hour := newTimeField(fields[2], unitHour, "day", hours)
 	if sec.single() {
 		if out, ok := d.clockTimes(sec.vals[0], minute, hour); ok {
 			return out
@@ -936,7 +953,7 @@ func minuteAt(m uint) string {
 	if m == 0 {
 		return "at the top of"
 	}
-	return "at " + count(m, "minute") + " past"
+	return "at " + count(m, unitMinute) + " past"
 }
 
 // onTheHour joins the hours to one minute, any minute, as lead opens it

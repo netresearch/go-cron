@@ -28,10 +28,11 @@ func WithParseOptions(o ParseOption) DescribeOption // package function only
   parser's own settings and ignores `WithParseOptions`.
 - An invalid spec returns the parse error. A valid spec always gets a
   description and a nil error. A spec that never runs reads "never runs".
-  Specs outside the fields covered so far, and specs with `H`, get the
+  Specs outside the fields covered so far, `H` in the date fields, and
+  combinations of `H` in the time fields that have no form (H17) get the
   literal form: each written field by name, as written ("minute 0, hour 9,
-  day of month *, month *, day of week 1-5"). A descriptor such as `@daily`
-  is returned as written.
+  day of month H, month *, day of week 1-5"). A descriptor such as
+  `@daily` is returned as written.
 - `H` needs no hash key: the description does not depend on it. With no
   key, `StrictDays` does not check a spec with `H` in the day of the month
   or the month, as the value the key picks decides that check.
@@ -42,7 +43,7 @@ func WithParseOptions(o ParseOption) DescribeOption // package function only
 - **Coverage:** the second, minute and hour fields, and the day of month, day
   of week, month and year written as values, ranges, steps and lists; the
   `L` and `W` days of month (`DomL`, `DomW`) and the `#` days of week
-  (`DowNth`, `DowLast`).
+  (`DowNth`, `DowLast`); `H` in the second, minute and hour fields (`Hash`).
 
 ## Rules
 
@@ -118,6 +119,27 @@ which form a spec gets. Each has an ID, which the grammar cites.
 | X5 | A nearest weekday above the 28th gets the short-month clause (D3): "; the 31st runs only in months that have one" |
 | X6 | `L-n` with n ≥ 28 runs only in months of more than n days. As the whole day clause, not ORed: "; it runs only in months of 31 days". In a list or ORed, the item is named: "; 30 days before the last day runs only in months of 31 days" |
 
+### H (hash)
+
+| ID | Rule |
+|---|---|
+| H1 | A value the hash key picks is "fixed", and the hash clause closes the description after a semicolon: "at a fixed minute past the hour; the hash key fixes the minute" |
+| H2 | A hashed step states its count: "4 runs in every hour, 15 minutes apart, starting from a fixed minute"; "1 or 2 runs" when the hashed start decides the count |
+| H3 | A range: "a fixed minute between minutes 0 and 29"; a wrapped range in two parts, sorted (T9): "between minutes 0 and 10 or 50 and 59"; hours by name: "a fixed hour between the 9 am and 5 pm hours" |
+| H4 | `0,H` follows R4: "at the top of the hour and a fixed minute past it" |
+| H5 | `0,H/15`: the plain value first: "at the top of the hour and every 15 minutes starting from a fixed minute" |
+| H6 | `H,H(0-29)`: "at a fixed minute and a fixed minute between minutes 0 and 29; the hash key fixes both minutes" |
+| H7 | A fixed minute in named hours takes "during" (R6): "at a fixed minute during the 9 am hour every day" |
+| H8 | A fixed second under one minute and named hours is set clock times: "at a fixed second at 9 am every day"; with every minute, C1: "at a fixed second within every minute during the 9 am hour" |
+| H9 | "every day" follows set times |
+| H10 | `H/1` is every value of its range; a step at or past the range size is one fixed value; `H(5-5)` is 5; `*,H` is every value; `H(0-59)` drops "between" |
+| H12 | A fixed second and a fixed minute in named hours: "at a fixed second and a fixed minute during the 9 am hour every day" |
+| H13 | `0 9,H`: "at 9 am and the top of a fixed hour" (with the count, H15) |
+| H14 | Every minute in a hashed hour step: "every minute during 4 hours in every day, 6 hours apart, starting from a fixed hour" |
+| H15 | A plain value beside a hashed one in a field states the count, as the two can coincide: "1 or 2 runs in every hour, at the top of the hour and a fixed minute past it" |
+| H16 | Minutes under a fixed hour join with "at": "at minutes 0 and 30 at a fixed hour every day", "at minute 30 at a fixed hour every day"; minute 0 keeps R4: "at the top of a fixed hour every day" |
+| H17 | Other combinations render field by field (G10): `H` with a plain second other than 0, several hashed steps, a hashed step beside a fixed value or in a field with a fixed hour, a wrapped fixed hour range, a ranged hour step, or a ranged step with restricted hours |
+
 ## Grammar (EBNF)
 
 The productions below are what `DescribeSpec` produces, in
@@ -137,9 +159,9 @@ limits (T1, T4, R8–R12), the hour order (T6) and the values themselves (G1).
 start: schedule
      | "never" "runs"                                                     // G11
 
-schedule: time [day] [month] [year] [note] short*                         // G7
+schedule: time [day] [month] [year] [note] short* [hashkey]               // G7, H1
 
-time: clocktime | span | hourstep | parts
+time: clocktime | span | hourstep | parts | hashed | counted
 
 // T4, R1, R2, R7, J1: set clock times
 clocktime: "at" list{clock} [everyday]
@@ -164,7 +186,7 @@ inner: secs [minjoin]
      | "at" "minutes" vlist                                               // R5
      | "every" "minute"                                                   // T3
      | "every" "second" [forjoin]                                         // T3, J1
-secs: "at" INT ("second" | "seconds") | "at" "seconds" vlist              // C1, R5
+secs: "at" INT ("second" | "seconds") | "at" "seconds" vlist | "at" fixed  // C1, R5, H1
 minjoin: "within" ("a" "minute" | "every" "minute" | "minute" INT | "minutes" vlist)   // C1, R6
 forjoin: "for" ("minute" INT | "minutes" vlist)                           // C1, J1
 
@@ -190,6 +212,31 @@ hourjoin: "past" "the" "hour"                                             // R6
 hstep: "every" INT "hours" ("starting" "with" hours | "from" list{hcrange} | hone) [inevery]   // R11
 hone: "from" hcrange "and" "during" "the" clock "hour" | "during" "the" clock "hour" "and" "from" hcrange   // R11, T9: a part of one run
 hcrange: "the" clock "hour" "thru" "the" clock "hour"                    // R11, T9: a wrapped step is two, in clock order
+
+// H1–H16: values the hash key fixes
+hashed: "at" fixed "past" "every" "hour" hourrange [everyday]             // R9
+      | "at" fixed "during" hours [everyday | inevery]                    // H7, R10
+      | "at" fixed hstep                                                  // R11
+      | "at" (fixed | "minute" INT | "minutes" vlist) "at" fixed [everyday]   // H16
+      | "at" "the" "top" "of" fixed [everyday]                            // R4, H16
+      | "every" "minute" "during" fixed                                   // R6
+      | "at" fixed "at" list{clock} [everyday]                            // H8
+      | "at" fixed "and" fixed "during" hours [everyday]                  // H12
+counted: [toplead ","] count "in" "every" unit [cplace] apart             // H2
+       | "every" "minute" "during" cnt "hours" "in" "every" "day" apart   // H14
+       | count "in" "every" unit "," "at" overlap                         // H15
+toplead: "at" "the" "top" "of" "the" "hour" | "at" INT ("minute" | "minutes") "past" "the" "hour"
+cnt: INT | INT "or" INT
+count: cnt ("run" | "runs")
+cplace: between | hourrange | "during" hours
+apart: "," INT units "apart" "," "starting" "from" fixed
+overlap: "the" "top" "of" "the" "hour" "and" fixed "past" "it"             // H4
+       | fixed "and" fixed                                                // H6
+       | "the" "top" "of" "the" "hour" "and" "every" INT units "starting" "from" fixed   // H5
+       | clock "and" "the" "top" "of" fixed                               // H13
+fixed: "a" "fixed" unit [between | "between" hours]                       // H1, H3
+between: "between" units INT "and" INT ["or" INT "and" INT]               // H3, T9
+hashkey: ";" "the" "hash" "key" "fixes" (list{"the" unit} | "both" units)   // H1
 
 hours: "the" clock "hour" | "the" (CLOCK12 | "noon") hourtail | "midnight" hourtail   // R3
 hourtail: ("and" clock | ("," clock)+ "," "and" clock) "hours"            // R3: no article before a list that starts with midnight
@@ -225,7 +272,7 @@ short: ";" "the" list{ORD} ("runs" | "run") "only" "in" "months" "that" "have" (
 note: "(" ival (";" ival)* ")"                                            // T1
 ival: "every" (unit | INT units) ["," "starting" "over" "each" unit]
 unit: "second" | "minute" | "hour" | "day" | "month" | "year"
-units: "seconds" | "minutes" | "days" | "months" | "years"
+units: "seconds" | "minutes" | "hours" | "days" | "months" | "years"
 
 list{x}: x | x "and" x | x ("," x)+ "," "and" x                          // G8
 vlist: list{vitem} | INT "," INT "," INT "," "…" INT                      // T1, T9
