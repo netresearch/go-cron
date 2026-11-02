@@ -102,7 +102,7 @@ which form a spec gets. Each has an ID, which the grammar cites.
 | D4 | Days of the week are names, from the values the parser selects. Sunday appears once. A step walks the seven days as the parser does (`DowStepToSaturday` included) |
 | D5 | Both day fields: "when it falls on" (AND, the default), "or on any" (`DowOrDom`). With `StepWildcard`, a field starting with `*` or `?` is unrestricted |
 | D6 | Months are names. Years name the unit ("in year 2027", "in years 2026 thru 2028") and list up to 6 values |
-| D7 | A day is named when the description has a day clause |
+| D7 | A named day is Sunday thru Saturday: a day of the week in the day clause, alone, in a list or range, or with "any". A day of the month or a month is not a named day: "at midnight on the 1st of the month", "at 12 am on the 13th of the month when it falls on Friday" |
 
 ## Grammar (EBNF)
 
