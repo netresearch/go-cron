@@ -63,10 +63,8 @@ func (p Parser) DescribeSpec(spec string, _ ...DescribeOption) (string, error) {
 	if _, err := p.Parse(spec); err != nil {
 		return "", err
 	}
-	_, descriptor, fields, yearField, err := p.specFields(spec)
-	if err != nil {
-		return "", err
-	}
+	// The spec parsed, so the split cannot fail.
+	_, descriptor, fields, yearField, _ := p.specFields(spec)
 	if descriptor != "" {
 		return descriptor, nil
 	}
@@ -316,6 +314,13 @@ func (p Parser) describeLiteral(spec string, fields []string, yearField string) 
 	return strings.Join(parts, ", ")
 }
 
+// Phrases the descriptions repeat.
+const (
+	thruSep          = " thru "
+	everyDaySuffix   = " every day"
+	inEveryDaySuffix = " in every day"
+)
+
 // valueLimit is how many values are listed before a step is cut short,
 // unless a field sets its own limit (T1).
 const valueLimit = 6
@@ -412,7 +417,7 @@ func fromThru(it timeItem, start, end func(h uint) string) string {
 	parts := it.parts(hours)
 	words := make([]string, 0, len(parts))
 	for _, p := range parts {
-		words = append(words, start(p[0])+" thru "+end(p[1]))
+		words = append(words, start(p[0])+thruSep+end(p[1]))
 	}
 	return "from " + andList(words)
 }
@@ -530,7 +535,7 @@ func (f timeField) rangeWords(lo, hi uint) []string {
 	case lo + 1:
 		return []string{l, h}
 	}
-	return []string{l + " thru " + h}
+	return []string{l + thruSep + h}
 }
 
 // named reports hours that read by name ("the 9 am and 5 pm hours"): one
@@ -631,7 +636,7 @@ func (d *describer) everyDay() string {
 	if d.named {
 		return ""
 	}
-	return " every day"
+	return everyDaySuffix
 }
 
 // inEveryDay is " in every day", or "" when a day clause takes its place (J1).
@@ -639,7 +644,7 @@ func (d *describer) inEveryDay() string {
 	if d.named {
 		return ""
 	}
-	return " in every day"
+	return inEveryDaySuffix
 }
 
 // clock writes a clock time; midnight is "12 am" on a named day (R2).
@@ -734,9 +739,9 @@ func (d *describer) onTheHour(lead string, hour timeField, at func(h uint) strin
 	if p := it.parts(hours); at != nil && len(p) == 2 {
 		switch {
 		case p[1][0] == p[1][1]:
-			return lead + " every hour from " + d.onHour(p[0][0]) + " thru " + d.onHour(p[0][1]) + " and at " + at(p[1][0]) + d.everyDay()
+			return lead + " every hour from " + d.onHour(p[0][0]) + thruSep + d.onHour(p[0][1]) + " and at " + at(p[1][0]) + d.everyDay()
 		case p[0][0] == p[0][1]:
-			return "at " + at(p[0][0]) + " and " + lead + " every hour from " + d.onHour(p[1][0]) + " thru " + d.onHour(p[1][1]) + d.everyDay()
+			return "at " + at(p[0][0]) + " and " + lead + " every hour from " + d.onHour(p[1][0]) + thruSep + d.onHour(p[1][1]) + d.everyDay()
 		}
 	}
 	return lead + " every hour " + fromThru(it, d.onHour, d.onHour) + d.everyDay()
@@ -795,7 +800,7 @@ func (d *describer) stepClause(hour timeField) string {
 	}
 	// T9: the parts, the first range after "from"; a part of one run is
 	// "during" its hour.
-	parts := stepParts(it, hour.r, true)
+	parts := stepParts(it, hour.r)
 	words := make([]string, 0, len(parts))
 	for i, p := range parts {
 		if p[0] == p[1] {
@@ -813,13 +818,11 @@ func (d *describer) stepClause(hour timeField) string {
 
 // stepParts returns the first and last run of an hour step. A wrapped step
 // splits at midnight into its parts in clock order, each from its first run
-// to its last (T9). With oneRun false, a step with a part of one run is
-// left whole, in firing order.
-func stepParts(it timeItem, r bounds, oneRun bool) [][2]uint {
+// to its last (T9).
+func stepParts(it timeItem, r bounds) [][2]uint {
 	runs := it.runs(r)
-	whole := [][2]uint{{runs[0], runs[len(runs)-1]}}
 	if it.lo <= it.hi {
-		return whole
+		return [][2]uint{{runs[0], runs[len(runs)-1]}}
 	}
 	var am, pm []uint
 	for _, v := range runs {
@@ -831,11 +834,7 @@ func stepParts(it timeItem, r bounds, oneRun bool) [][2]uint {
 	}
 	parts := make([][2]uint, 0, 2)
 	for _, half := range [][]uint{am, pm} {
-		switch {
-		case len(half) == 0:
-		case len(half) == 1 && !oneRun:
-			return whole
-		default:
+		if len(half) > 0 {
 			parts = append(parts, [2]uint{half[0], half[len(half)-1]})
 		}
 	}
@@ -848,7 +847,7 @@ func stepParts(it timeItem, r bounds, oneRun bool) [][2]uint {
 // am thru 10 pm". at writes an hour.
 func partWords(parts [][2]uint, at func(h uint) string) string {
 	if len(parts) == 2 && parts[0][0] == parts[0][1] {
-		return "at " + at(parts[0][0]) + " and from " + at(parts[1][0]) + " thru " + at(parts[1][1])
+		return "at " + at(parts[0][0]) + " and from " + at(parts[1][0]) + thruSep + at(parts[1][1])
 	}
 	words := make([]string, 0, len(parts))
 	for _, p := range parts {
@@ -856,7 +855,7 @@ func partWords(parts [][2]uint, at func(h uint) string) string {
 			words = append(words, "at "+at(p[0]))
 			continue
 		}
-		words = append(words, at(p[0])+" thru "+at(p[1]))
+		words = append(words, at(p[0])+thruSep+at(p[1]))
 	}
 	return "from " + andList(words)
 }
@@ -891,7 +890,7 @@ func (d *describer) hourStep(s uint, minute, hour timeField) (string, bool) {
 		out += "starting at " + d.clock(it.lo, m, s)
 	} else {
 		at := func(h uint) string { return d.clock(h, m, s) }
-		out += partWords(stepParts(it, hour.r, true), at)
+		out += partWords(stepParts(it, hour.r), at)
 	}
 	return out + d.inEveryDay(), true
 }

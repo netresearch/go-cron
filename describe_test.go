@@ -197,6 +197,8 @@ var describeGoldens = []struct {
 	{spec: "0 0 1 * */01", opts: []DescribeOption{withDowOrDom}, want: "at 12 am on the 1st of the month"},
 	{spec: "0 0 , * 1", opts: []DescribeOption{withDowOrDom}, want: "at 12 am on Monday"},
 	{spec: "0 0 1 * ,", opts: []DescribeOption{withDowOrDom}, want: "at 12 am on the 1st of the month"},
+	{spec: "0 0 , * ,", opts: []DescribeOption{withDowOrDom}, want: "never runs"},
+	{spec: "0 0 1-31 * 1", opts: []DescribeOption{withDowOrDom}, want: "at midnight every day"},
 	{spec: "0 0 , * 1", want: "never runs"},
 	{spec: "0 0 * * ,", want: "never runs"},
 	{spec: "0 0 1 , *", want: "never runs"},
@@ -219,6 +221,7 @@ var describeGoldens = []struct {
 	{spec: "* 4-0/2 * * *", want: "every minute every 2 hours during the midnight hour and from the 4 am hour thru the 10 pm hour in every day"},
 	{spec: "30 23-5 * * *", want: "at 30 minutes past every hour from midnight thru 5 am and at 11:30 pm every day"},
 	{spec: "30 18-0 * * *", want: "at 12:30 am and at 30 minutes past every hour from 6 pm thru 11 pm every day"},
+	{spec: "0 5-0/3 * * *", want: "every 3 hours from 5 am thru 11 pm in every day"},
 
 	// Literal fallback: the whole spec renders field by field
 	{spec: "0 0 L * *", opts: []DescribeOption{WithParseOptions(Minute | Hour | Dom | Month | Dow | DomL)}, want: "minute 0, hour 0, day of month L, month *, day of week *", literal: true},
