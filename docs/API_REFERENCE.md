@@ -2988,7 +2988,7 @@ wording and its grammar are in [DESCRIBE.md](DESCRIBE.md).
 **Example:**
 ```go
 desc, err := cron.DescribeSpec("0 22-2/2 * * *")
-// "at 10 pm, midnight, and 2 am every day"
+// "at midnight, 2 am, and 10 pm every day"
 desc, err = cron.DescribeSpec("*/15 * * * *")
 // "at minutes 0, 15, 30, and 45 past the hour"
 desc, err = cron.DescribeSpec("0 9 13 * 5")
