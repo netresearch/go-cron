@@ -2671,20 +2671,24 @@ c := cron.New(cron.WithObservability(hooks))
 
 ```go
 type SpecAnalysis struct {
-    Valid        bool
-    Error        error
-    NextRun      time.Time
-    Location     *time.Location
-    Fields       map[string]string
-    IsDescriptor bool
-    Interval     time.Duration
-    Schedule     Schedule
-    Warnings     []string
+    Valid           bool
+    Error           error
+    NextRun         time.Time
+    Location        *time.Location
+    Fields          map[string]string
+    IsDescriptor    bool
+    Interval        time.Duration
+    Schedule        Schedule
+    Description     string
+    DescriptionNote string
+    Warnings        []string
 }
 ```
 
 SpecAnalysis contains detailed information about a parsed cron specification.
-Returned by `AnalyzeSpec`.
+Returned by `AnalyzeSpec`. `Description` and `DescriptionNote` are what
+`DescribeSpec` and `DescribeSpecNote` give for the spec; both are empty when
+it is invalid.
 
 ---
 

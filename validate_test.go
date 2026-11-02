@@ -356,6 +356,33 @@ func TestAnalyzeSpec(t *testing.T) {
 }
 
 // TestAnalyzeSpecTimezone tests timezone handling in analysis.
+// TestAnalyzeSpecDescription checks that AnalyzeSpec carries the
+// description and its note, as DescribeSpec and DescribeSpecNote give them.
+func TestAnalyzeSpecDescription(t *testing.T) {
+	hash := Minute | Hour | Dom | Month | Dow | Hash
+	for _, tt := range []struct {
+		name       string
+		result     SpecAnalysis
+		desc, note string
+	}{
+		{"plain", AnalyzeSpec("0 9 * * 1-5"), "at 9 am on Monday thru Friday", ""},
+		{"descriptor", AnalyzeSpec("@weekly"), "at 12 am on Sunday", ""},
+		{
+			"hashed", AnalyzeSpecWithHash("H/15 * * * *", hash, "job"), "4 runs in every hour, 15 minutes apart, starting from a fixed minute; the hash key fixes the minute",
+			"at minutes h, h+15, h+30, and h+45 past the hour, where h is a hashed minute from 0 to 14",
+		},
+		{
+			"with hash", AnalyzeSpecWithHash("0 9 * * H/2", hash, "job"), "at 9 am on 3 or 4 days in every week, 2 days apart, starting from a fixed day; the hash key fixes the day",
+			"on Sunday, Tuesday, Thursday, and Saturday; or Monday, Wednesday, and Friday, depending on the hash",
+		},
+		{"invalid", AnalyzeSpec("61 * * * *"), "", ""},
+	} {
+		if tt.result.Description != tt.desc || tt.result.DescriptionNote != tt.note {
+			t.Errorf("%s: got %q, %q; want %q, %q", tt.name, tt.result.Description, tt.result.DescriptionNote, tt.desc, tt.note)
+		}
+	}
+}
+
 func TestAnalyzeSpecTimezone(t *testing.T) {
 	result := AnalyzeSpec("TZ=America/New_York 0 9 * * *")
 	if !result.Valid {
