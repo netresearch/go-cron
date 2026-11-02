@@ -30,13 +30,12 @@ func WithParseOptions(o ParseOption) DescribeOption // package function only
   parser's own settings and ignores `WithParseOptions`.
 - An invalid spec returns the parse error. A valid spec always gets a
   description and a nil error. A spec that never runs reads "never runs".
-  Specs outside the fields covered so far and combinations of `H` that
-  have no form (H17, H20) get the literal form: each written field by
-  name, as written ("minute 0, hour 9, day of month H/10, month *, day
-  of week 1-5"). A descriptor reads as its cron equivalent (P2), and an
-  interval as it runs (P3). The `Parser` method uses the parser's minimum
-  `@every` interval (`WithMinEveryInterval`); the package function uses
-  the default, 1s.
+  Combinations of `H` that have no form (H17, H20) get the literal
+  form: each written field by name, as written ("minute 0, hour 9, day
+  of month H/10, month *, day of week 1-5"). A descriptor reads as its
+  cron equivalent (P2), and an interval as it runs (P3). The `Parser`
+  method uses the parser's minimum `@every` interval
+  (`WithMinEveryInterval`); the package function uses the default, 1s.
 - `H` needs no hash key: the description does not depend on it. With no
   key, `StrictDays` does not check a spec with `H` in the day of the month
   or the month, as the value the key picks decides that check.

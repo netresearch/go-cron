@@ -3004,9 +3004,8 @@ error. The package function parses as `AnalyzeSpec` does (the standard parser
 unless `WithParseOptions` is given; several calls OR together); the `Parser`
 method uses the parser's own settings and ignores `WithParseOptions`. Times are on the 12-hour clock. Descriptions carry no time zone. A
 valid spec always gets a description; one that never runs is "never runs".
-Specs outside the fields covered so far, and combinations of `H` without a
-form, get each written field by name ("minute 0, hour 0, day of month H/10,
-month *, day of week 1"). A descriptor reads as its cron equivalent, and
+Combinations of `H` without a form get each written field by name ("minute
+0, hour 0, day of month H/10, month *, day of week 1"). A descriptor reads as its cron equivalent, and
 `@triggered`, `@manual` and `@none` read "only when triggered". An interval
 reads as it runs, from its anchor ("every 1h30m from when scheduling started",
 "every 15m from Unix epoch"); the `Parser` method applies the parser's

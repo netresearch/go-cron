@@ -477,13 +477,13 @@ var describeGoldens = []struct {
 	{spec: "0 0 1 * H/2", opts: []DescribeOption{withHash}, want: "minute 0, hour 0, day of month 1, month *, day of week H/2", literal: true},
 	{spec: "0 0 H * 0-6", opts: []DescribeOption{withHashOr}, want: "minute 0, hour 0, day of month H, month *, day of week 0-6", literal: true},
 	{spec: "0 0 H(31-1) * *", opts: []DescribeOption{withHash}, want: "minute 0, hour 0, day of month H(31-1), month *, day of week *", literal: true},
-	{spec: "H(59-0) * * * *", opts: []DescribeOption{withHash}, want: "minute H(59-0), hour *, day of month *, month *, day of week *", literal: true},
 	{spec: "0 0 1,H/10 * *", opts: []DescribeOption{withHash}, want: "minute 0, hour 0, day of month 1,H/10, month *, day of week *", literal: true},
 	{spec: "0 0 1,15,H * *", opts: []DescribeOption{withHash}, want: "minute 0, hour 0, day of month 1,15,H, month *, day of week *", literal: true},
 	{spec: "0 0 H,H(1-15) * *", opts: []DescribeOption{withHash}, want: "minute 0, hour 0, day of month H,H(1-15), month *, day of week *", literal: true},
 	{spec: "0 0 L,H * *", opts: []DescribeOption{WithParseOptions(Minute | Hour | Dom | Month | Dow | Extended | Hash)}, want: "minute 0, hour 0, day of month L,H, month *, day of week *", literal: true},
+	// H in the time fields without a form (H17)
+	{spec: "H(59-0) * * * *", opts: []DescribeOption{withHash}, want: "minute H(59-0), hour *, day of month *, month *, day of week *", literal: true},
 	{spec: "H 5 * * * *", opts: []DescribeOption{withSecHash}, want: "second H, minute 5, hour *, day of month *, month *, day of week *", literal: true},
-	// H combinations without a form (G10)
 	{spec: "H(0-9),H(20-29) * * * *", opts: []DescribeOption{withHash}, want: "minute H(0-9),H(20-29), hour *, day of month *, month *, day of week *", literal: true},
 	{spec: "H/15,H/20 * * * *", opts: []DescribeOption{withHash}, want: "minute H/15,H/20, hour *, day of month *, month *, day of week *", literal: true},
 	{spec: "0 H(20-5) * * *", opts: []DescribeOption{withHash}, want: "minute 0, hour H(20-5), day of month *, month *, day of week *", literal: true},

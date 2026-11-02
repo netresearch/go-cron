@@ -66,9 +66,9 @@ func DescribeSpecNote(spec string, opts ...DescribeOption) (string, error) {
 // parse error. The description follows the grammar in docs/DESCRIBE.md and
 // leaves out the time zone; callers show the location beside it. A valid spec
 // always gets a description and a nil error; one that never runs is "never
-// runs". Specs outside the fields covered so far (see docs/DESCRIBE.md) get
-// each written field by name, as written: "minute 0, hour 0, day of month
-// H/10, month *, day of week 1". A descriptor reads as its cron equivalent
+// runs". Combinations of H without a form (H17 and H20 in docs/DESCRIBE.md)
+// get each written field by name, as written: "minute 0, hour 0, day of
+// month H/10, month *, day of week 1". A descriptor reads as its cron equivalent
 // ("@weekly" is "at 12 am on Sunday"), and "@triggered", "@manual" and "@none"
 // read "only when triggered". An interval reads as it runs, from its anchor,
 // with the parser's minimum: "every 1h30m from when scheduling started",
