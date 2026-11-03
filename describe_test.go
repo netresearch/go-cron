@@ -505,6 +505,9 @@ var describeGoldens = []struct {
 	{spec: "0 9 * * SUN-SAT,H", opts: []DescribeOption{withHash}, want: "at 9 am every day"},
 	{spec: "H 30 0-11,12-23 * * *", opts: []DescribeOption{withSecHash}, want: "at a fixed second within minute 30 in every hour; the hash key fixes the second"},
 
+	// G11: the day the key picks decides, so H in a date field is not checked
+	{spec: "0 0 H(30-31) 2 *", opts: []DescribeOption{withHash}, want: "at midnight on a fixed day of the month between the 30th and 31st in February; the hash key fixes the day"},
+
 	// Literal fallback: the whole spec renders field by field
 	// H in the date fields without a form (H20)
 	{spec: "0 0 H/10 * 1", opts: []DescribeOption{withHash}, want: "minute 0, hour 0, day of month H/10, month *, day of week 1", literal: true},

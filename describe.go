@@ -113,7 +113,8 @@ func (p Parser) describe(spec string) (desc, note string, err error) {
 	if !allDescribable(fields) || !describable(yearField) {
 		return p.describeLiteral(spec, fields, yearField), "", nil
 	}
-	if p.dayMissing(sch) {
+	// H in a date field: the day the key picks decides, so it is not checked.
+	if !containsHashExpr(fields[3:5]) && p.dayMissing(sch) {
 		return "never runs", "", nil
 	}
 	var h [3]hashField
