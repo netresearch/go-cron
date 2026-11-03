@@ -428,7 +428,7 @@ func (d *describer) secondPlain(lead string, minute, hour timeField) (string, bo
 	case minute.every():
 		zero := newTimeField("0", unitSecond, unitMinute, seconds)
 		return d.joinHours(lead+" within every minute", "", zero, minute, hour), true // C1
-	case minute.single() && hour.named():
+	case minute.single() && hour.kind() == namedHours:
 		clocks := make([]string, len(hour.vals))
 		for i, hv := range hour.vals {
 			clocks[i] = d.clock(hv, minute.vals[0], 0)

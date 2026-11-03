@@ -272,7 +272,7 @@ func (p Parser) describeDays(d *describer, domField, dowField string, hd, hw has
 	wd := p.newDowField(strings.Join(dowPlain, ","))
 	domSet, dowSet := restricted(domField, hd), restricted(dowField, hw)
 	or := domSet && dowSet && p.dowOrDom(domField, dowField)
-	domAll, dowAll := len(md.vals) == 31, len(wd.vals) == 7
+	domAll, dowAll := md.every(), wd.every()
 	if or && (domAll || dowAll) {
 		return "", "", !hd.hashes() && !hw.hashes() // T3: one side of the OR is every day
 	}
@@ -813,6 +813,13 @@ func uniq(vals []uint) []uint {
 
 // every reports a field that fires on every value ("*", "*/1", "0-59").
 func (f timeField) every() bool {
+	if isDowBounds(f.r) { // 7 is Sunday: seven days, not eight values
+		var days uint
+		for _, v := range f.vals {
+			days |= 1 << (v % 7)
+		}
+		return days == 1<<7-1
+	}
 	return len(f.vals) == int(f.r.max-f.r.min+1)
 }
 

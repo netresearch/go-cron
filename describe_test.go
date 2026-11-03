@@ -499,6 +499,12 @@ var describeGoldens = []struct {
 	{spec: "H/15 5 * * * *", opts: []DescribeOption{withSecHash}, want: "4 runs within minute 5 in every hour, 15 seconds apart, starting from a fixed second; the hash key fixes the second"},
 	{spec: "H/15 0 * * * *", opts: []DescribeOption{withSecHash}, want: "4 runs past the top of every hour, 15 seconds apart, starting from a fixed second; the hash key fixes the second"},
 	{spec: "H/15 * 9-17 * * *", opts: []DescribeOption{withSecHash}, want: "4 runs in every minute from 9 am thru 5:59 pm, 15 seconds apart, starting from a fixed second; the hash key fixes the second"},
+	// T3 and T11: a field that covers its range, beside H
+	{spec: "0 9 * * 0-6,H", opts: []DescribeOption{withHash}, want: "at 9 am every day"},
+	{spec: "0 9 * * 1-7,H", opts: []DescribeOption{withHash}, want: "at 9 am every day"},
+	{spec: "0 9 * * SUN-SAT,H", opts: []DescribeOption{withHash}, want: "at 9 am every day"},
+	{spec: "H 30 0-11,12-23 * * *", opts: []DescribeOption{withSecHash}, want: "at a fixed second within minute 30 in every hour; the hash key fixes the second"},
+
 	// Literal fallback: the whole spec renders field by field
 	// H in the date fields without a form (H20)
 	{spec: "0 0 H/10 * 1", opts: []DescribeOption{withHash}, want: "minute 0, hour 0, day of month H/10, month *, day of week 1", literal: true},
