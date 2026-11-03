@@ -365,20 +365,27 @@ func TestDescribeSpecBadOptions(t *testing.T) {
 	}
 }
 
-// TestDescribeSpecStrictDaysNoKey checks that, with no hash key, a spec
-// with H gets the description it gets without StrictDays, as the result would
-// otherwise depend on the placeholder key, while a spec without H and a parser
-// with a key keep the day check.
+// TestDescribeSpecStrictDaysNoKey checks that, with no hash key, a spec with
+// H in the day of the month or the month gets the description it gets without
+// StrictDays, as the result would otherwise depend on the placeholder key,
+// while any other spec and a parser with a key keep the day check.
 func TestDescribeSpecStrictDaysNoKey(t *testing.T) {
 	strict := Minute | Hour | Dom | Month | Dow | Hash | StrictDays
 	// "job-a" accepts the first spec; "job-a" and "job-b" both reject the second.
-	for _, spec := range []string{"0 0 H(29-31) 2 *", "0 0 H(28-31) 2 *"} {
+	for _, spec := range []string{"0 0 H(29-31) 2 *", "0 0 H(28-31) 2 *", "0 0 30 H *"} {
 		want, err := DescribeSpec(spec, WithParseOptions(strict&^StrictDays))
 		if err != nil {
 			t.Fatal(err)
 		}
 		if got, err := DescribeSpec(spec, WithParseOptions(strict)); err != nil || got != want {
 			t.Errorf("DescribeSpec(%q) with StrictDays = %q, %v; want %q, nil", spec, got, err, want)
+		}
+	}
+	// H outside the day of the month and the month cannot change the day
+	// check: every key rejects these, so no key rejects them too.
+	for _, spec := range []string{"H 0 30 2 *", "0 H 30 2 *", "0 0 30 2 H"} {
+		if _, err := DescribeSpec(spec, WithParseOptions(strict)); err == nil {
+			t.Errorf("DescribeSpec(%q) with StrictDays: want an error", spec)
 		}
 	}
 	if _, err := DescribeSpec("0 0 30 2 *", WithParseOptions(strict)); err == nil {

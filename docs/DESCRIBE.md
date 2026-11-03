@@ -33,8 +33,8 @@ func WithParseOptions(o ParseOption) DescribeOption // package function only
   day of month *, month *, day of week 1-5"). A descriptor such as `@daily`
   is returned as written.
 - `H` needs no hash key: the description does not depend on it. With no
-  key, `StrictDays` does not check a spec with `H`, as the day the key picks
-  decides that check.
+  key, `StrictDays` does not check a spec with `H` in the day of the month
+  or the month, as the value the key picks decides that check.
 - The description is made from the spec text as the parser splits it, not
   from the parsed schedule, because the parsed bits have lost what was
   written (`*/15` and `0,15,30,45` parse the same, but only one has a step).
