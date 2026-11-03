@@ -340,8 +340,18 @@ func looksLikeYear(field string) bool {
 // getParserForOptions returns a parser configured with the given options.
 // If no options provided, returns the standard parser with descriptors enabled.
 func getParserForOptions(options []ParseOption) Parser {
+	p, err := tryParserForOptions(options)
+	if err != nil {
+		panic(err)
+	}
+	return p
+}
+
+// tryParserForOptions is getParserForOptions with invalid options returned
+// as an error.
+func tryParserForOptions(options []ParseOption) (Parser, error) {
 	if len(options) == 0 {
-		return standardParser
+		return standardParser, nil
 	}
 
 	// Use the provided options, ensuring Descriptor is included for common use
@@ -355,7 +365,7 @@ func getParserForOptions(options []ParseOption) Parser {
 		}
 	}
 
-	return NewParser(opts)
+	return TryNewParser(opts)
 }
 
 // emptySpecMessage is the package-shared error text used when a spec string

@@ -354,6 +354,17 @@ func TestParserDescribeSpec(t *testing.T) {
 	}
 }
 
+// TestDescribeSpecBadOptions checks that invalid parse options and a nil
+// option return an error or are skipped, not a panic.
+func TestDescribeSpecBadOptions(t *testing.T) {
+	if _, err := DescribeSpec("0 0 * * *", WithParseOptions(SecondOptional|DowOptional|Minute|Hour|Dom|Month)); err == nil {
+		t.Error("two optional fields: want an error")
+	}
+	if got, err := DescribeSpec("0 0 * * *", nil); err != nil || got != "at midnight every day" {
+		t.Errorf("nil option: got %q, %v", got, err)
+	}
+}
+
 // TestDescribeSpecStrictDaysNoKey checks that, with no hash key, a spec
 // with H gets the description it gets without StrictDays, as the result would
 // otherwise depend on the placeholder key, while a spec without H and a parser

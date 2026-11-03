@@ -33,7 +33,9 @@ func WithParseOptions(o ParseOption) DescribeOption {
 func newDescribeConfig(opts []DescribeOption) describeConfig {
 	var c describeConfig
 	for _, o := range opts {
-		o(&c)
+		if o != nil {
+			o(&c)
+		}
 	}
 	return c
 }
@@ -43,7 +45,11 @@ func newDescribeConfig(opts []DescribeOption) describeConfig {
 // AnalyzeSpec does: with the standard parser unless WithParseOptions is
 // given. See Parser.DescribeSpec.
 func DescribeSpec(spec string, opts ...DescribeOption) (string, error) {
-	return getParserForOptions(newDescribeConfig(opts).parse).DescribeSpec(spec, opts...)
+	p, err := tryParserForOptions(newDescribeConfig(opts).parse)
+	if err != nil {
+		return "", err
+	}
+	return p.DescribeSpec(spec, opts...)
 }
 
 // DescribeSpec returns an English description of spec as p parses it, or the
