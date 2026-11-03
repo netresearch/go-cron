@@ -1034,6 +1034,9 @@ func TestDescribeSpecBadOptions(t *testing.T) {
 	if got, err := DescribeSpec("0 0 * * *", nil); err != nil || got != "at midnight every day" {
 		t.Errorf("nil option: got %q, %v", got, err)
 	}
+	if _, err := DescribeSpecNote("0 0 * * *", WithParseOptions(SecondOptional|DowOptional|Minute|Hour|Dom|Month)); err == nil {
+		t.Error("DescribeSpecNote, two optional fields: want an error")
+	}
 }
 
 // TestDescribeSpecStrictDaysNoKey checks that, with no hash key, a spec with
