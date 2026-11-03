@@ -2977,12 +2977,13 @@ for other field counts it is empty. `NextRun` reflects the chosen values. See
 ```go
 func DescribeSpec(spec string, opts ...DescribeOption) (string, error)
 func (p Parser) DescribeSpec(spec string, opts ...DescribeOption) (string, error)
+func WithParseOptions(o ParseOption) DescribeOption
 ```
 
 DescribeSpec returns an English description of a cron expression, or the parse
 error. The package function parses as `AnalyzeSpec` does (the standard parser
-unless `WithParseOptions` is given); the `Parser` method uses the parser's own
-settings. Times are on the 12-hour clock. Descriptions carry no time zone. A
+unless `WithParseOptions` is given; several calls OR together); the `Parser`
+method uses the parser's own settings and ignores `WithParseOptions`. Times are on the 12-hour clock. Descriptions carry no time zone. A
 valid spec always gets a description; one that never runs is "never runs".
 Specs outside the fields covered so far, and specs with `H`, get
 each written field by name ("minute 0, hour 9, day of month *, month *, day of

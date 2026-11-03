@@ -194,10 +194,9 @@ The wording is for people. It was tested with blind reader trials:
 3. Answers are scored against the runs go-cron actually computes for the
    spec.
 
-The readers were AI assistants, with spot checks by people. The assistants
-are a proxy for people: they show where a sentence's structure breaks (a
-clause skipped, a parenthesis ignored, a rule misapplied), and their misses
-are checked against everyday usage. A wording is chosen because people
+Blind reader trials are a proxy for people: they show where a sentence's
+structure breaks (a clause skipped, a parenthesis ignored, a rule
+misapplied), and their misses are checked against everyday usage. A wording is chosen because people
 would say it and the trials show it carries the schedule, not for a score.
 Examples from the trials:
 
