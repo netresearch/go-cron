@@ -100,7 +100,9 @@ increment until the end of that specific range.  It does not wrap around.
 Comma ( , )
 
 Commas are used to separate items of a list. For example, using "MON,WED,FRI" in
-the 5th field (day of week) would mean Mondays, Wednesdays and Fridays.
+the 5th field (day of week) would mean Mondays, Wednesdays and Fridays. Empty
+items are dropped ("1,,5" is 1 and 5), but a field needs at least one item:
+a field of commas only, such as ",", is an error.
 
 Hyphen ( - )
 

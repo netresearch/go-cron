@@ -66,8 +66,9 @@ const Extended = DowNth | DowLast | DomL | DomW
 //   - The parser accepts specs robfig/cron rejects, for example 7 for
 //     Sunday, wraparound ranges like 22-2, quoted TZ= values and go-cron-only
 //     descriptors such as @triggered and @every_aligned. It rejects specs
-//     longer than 1024 characters, an empty TZ= value and a range that starts
-//     with * or ? (such as *-5), which robfig/cron accepts.
+//     longer than 1024 characters, an empty TZ= value, a range that starts
+//     with * or ? (such as *-5) and a field of commas only, which robfig/cron
+//     accepts.
 //   - EveryRoundUp rounds up to the parser's minimum @every interval, so
 //     Parser.WithMinEveryInterval(time.Minute) turns "@every 30s" into 1m,
 //     where robfig/cron keeps 30s, and Parser.WithMinEveryInterval(0) keeps
@@ -957,9 +958,12 @@ func getYearField(field string) (map[int]struct{}, error) {
 		return nil, nil // nil = wildcard (any year)
 	}
 
+	ranges, err := splitList(field, years.name)
+	if err != nil {
+		return nil, err
+	}
 	yearSet := make(map[int]struct{})
 	selected := 0
-	ranges := strings.FieldsFunc(field, func(r rune) bool { return r == ',' })
 	for _, expr := range ranges {
 		years, err := getYearRange(expr)
 		if err != nil {
@@ -974,6 +978,17 @@ func getYearField(field string) (map[int]struct{}, error) {
 		}
 	}
 	return yearSet, nil
+}
+
+// splitList splits a field into the items of its comma-separated list.
+// Empty items are dropped, so "1,,5" is 1 and 5, but a field without any item,
+// such as ",", is an error: it would select no values and never run.
+func splitList(field, name string) ([]string, error) {
+	items := strings.FieldsFunc(field, func(r rune) bool { return r == ',' })
+	if len(items) == 0 {
+		return nil, fmt.Errorf("%s field has no values: %q", name, field)
+	}
+	return items, nil
 }
 
 // errTooManyYears returns the error for a year field above maxYearsPerField.
@@ -994,8 +1009,11 @@ func computeHash(key string) uint64 {
 // the field represents or error parsing field value. It handles H (hash) expressions
 // when hashKey is provided.
 func getFieldWithHash(field string, r bounds, hashKey string, hashEnabled bool) (uint64, error) {
+	ranges, err := splitList(field, r.name)
+	if err != nil {
+		return 0, err
+	}
 	var bits uint64
-	ranges := strings.FieldsFunc(field, func(r rune) bool { return r == ',' })
 	for _, expr := range ranges {
 		bit, err := getRangeWithHash(expr, r, hashKey, hashEnabled)
 		if err != nil {
@@ -1086,7 +1104,10 @@ func getDowFieldWithConstraints(field string, r bounds, allowNth, allowLast bool
 	var bits uint64
 	var constraints []DowConstraint
 
-	ranges := strings.FieldsFunc(field, func(r rune) bool { return r == ',' })
+	ranges, err := splitList(field, r.name)
+	if err != nil {
+		return 0, nil, err
+	}
 	for _, expr := range ranges {
 		if idx := strings.Index(expr, "#"); idx != -1 {
 			// Parse as #n or #L constraint
@@ -1179,7 +1200,10 @@ func getDomFieldWithConstraints(field string, r bounds, allowL, allowW bool, has
 	var bits uint64
 	var constraints []DomConstraint
 
-	ranges := strings.FieldsFunc(field, func(r rune) bool { return r == ',' })
+	ranges, err := splitList(field, r.name)
+	if err != nil {
+		return 0, nil, err
+	}
 	for _, expr := range ranges {
 		exprUpper := strings.ToUpper(expr)
 
@@ -1267,8 +1291,11 @@ func parseDomWConstraint(expr, exprUpper string) (DomConstraint, error) {
 // the field represents or error parsing field value.  A "field" is a comma-separated
 // list of "ranges".
 func getField(field string, r bounds) (uint64, error) {
+	ranges, err := splitList(field, r.name)
+	if err != nil {
+		return 0, err
+	}
 	var bits uint64
-	ranges := strings.FieldsFunc(field, func(r rune) bool { return r == ',' })
 	for _, expr := range ranges {
 		bit, err := getRange(expr, r)
 		if err != nil {

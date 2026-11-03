@@ -1908,6 +1908,8 @@ Parse returns a Schedule from a cron spec or error if invalid.
 
 A range cannot start with `*` or `?`: `0 *-5 * * *` returns `hour field: "*" cannot start a range: "*-5"`. robfig/cron reads such a range as the wildcard alone.
 
+A field needs at least one value: `* , * * *` returns `hour field has no values: ","`. Empty items inside a list that has values are dropped, so `1,,5` is `1,5`. robfig/cron accepts a field of commas only and never runs it.
+
 #### func (Parser) WithHashKey
 
 ```go

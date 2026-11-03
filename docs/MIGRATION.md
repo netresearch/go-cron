@@ -208,6 +208,19 @@ _, err := c.AddFunc("0 *-5 * * *", myFunc)
 
 Write the range you mean (`0 0-5 * * *`) or the wildcard alone (`0 * * * *`).
 
+#### Fields Without Values (#476)
+
+robfig/cron accepts a field of commas only, such as `* , * * *`. The field
+selects no values, so the schedule never runs; with `DowOrDom`, `0 0 , * 1`
+runs every Monday. go-cron rejects such a field, also with `RobfigCompat`:
+
+```go
+_, err := c.AddFunc("* , * * *", myFunc)
+// err: hour field has no values: ","
+```
+
+Empty items inside a list that has values are still dropped: `1,,5` is `1,5`.
+
 #### Minimum @every Duration
 
 **Before (robfig/cron):**
