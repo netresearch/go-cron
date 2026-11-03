@@ -355,7 +355,6 @@ func TestAnalyzeSpec(t *testing.T) {
 	}
 }
 
-// TestAnalyzeSpecTimezone tests timezone handling in analysis.
 // TestAnalyzeSpecDescription checks that AnalyzeSpec carries the
 // description and its note, as DescribeSpec and DescribeSpecNote give them.
 func TestAnalyzeSpecDescription(t *testing.T) {
@@ -383,6 +382,7 @@ func TestAnalyzeSpecDescription(t *testing.T) {
 	}
 }
 
+// TestAnalyzeSpecTimezone tests timezone handling in analysis.
 func TestAnalyzeSpecTimezone(t *testing.T) {
 	result := AnalyzeSpec("TZ=America/New_York 0 9 * * *")
 	if !result.Valid {
