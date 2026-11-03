@@ -333,6 +333,30 @@ func TestParserDescribeSpec(t *testing.T) {
 	}
 }
 
+// TestDescribeSpecStrictDaysNoKey checks that, with no hash key, a spec
+// with H gets the description it gets without StrictDays, as the result would
+// otherwise depend on the placeholder key, while a spec without H and a parser
+// with a key keep the day check.
+func TestDescribeSpecStrictDaysNoKey(t *testing.T) {
+	strict := Minute | Hour | Dom | Month | Dow | Hash | StrictDays
+	// "job-a" accepts the first spec; "job-a" and "job-b" both reject the second.
+	for _, spec := range []string{"0 0 H(29-31) 2 *", "0 0 H(28-31) 2 *"} {
+		want, err := DescribeSpec(spec, WithParseOptions(strict&^StrictDays))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, err := DescribeSpec(spec, WithParseOptions(strict)); err != nil || got != want {
+			t.Errorf("DescribeSpec(%q) with StrictDays = %q, %v; want %q, nil", spec, got, err, want)
+		}
+	}
+	if _, err := DescribeSpec("0 0 30 2 *", WithParseOptions(strict)); err == nil {
+		t.Error(`DescribeSpec("0 0 30 2 *") with StrictDays: want an error`)
+	}
+	if _, err := NewParser(strict).WithHashKey("job-a").DescribeSpec("0 0 H(28-31) 2 *"); err == nil {
+		t.Error(`DescribeSpec("0 0 H(28-31) 2 *") with key "job-a" and StrictDays: want an error`)
+	}
+}
+
 // literalForm matches the field-by-field fallback and bare descriptors.
 var literalForm = regexp.MustCompile(`^(?:@|(?:second|minute|hour|day of month|month|day of week|year) )`)
 

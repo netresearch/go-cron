@@ -53,9 +53,14 @@ func DescribeSpec(spec string, opts ...DescribeOption) (string, error) {
 // each written field by name, as written: "minute 0, hour 9, day of month *,
 // month *, day of week 1-5". A descriptor such as "@daily" is returned as
 // written. H needs no hash key here: the description does not depend on it.
+// With no key, StrictDays does not check a spec with H, as the day the key
+// picks decides that check.
 func (p Parser) DescribeSpec(spec string, _ ...DescribeOption) (string, error) {
 	if p.hashKey == "" {
 		p.hashKey = "describe"
+		if containsHashExpr(strings.Fields(spec)) {
+			p.options &^= StrictDays // the result would depend on the placeholder key
+		}
 	}
 	if _, err := p.Parse(spec); err != nil {
 		return "", err
