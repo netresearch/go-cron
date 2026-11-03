@@ -499,6 +499,13 @@ var describeGoldens = []struct {
 	{spec: "H/15 5 * * * *", opts: []DescribeOption{withSecHash}, want: "4 runs within minute 5 in every hour, 15 seconds apart, starting from a fixed second; the hash key fixes the second"},
 	{spec: "H/15 0 * * * *", opts: []DescribeOption{withSecHash}, want: "4 runs past the top of every hour, 15 seconds apart, starting from a fixed second; the hash key fixes the second"},
 	{spec: "H/15 * 9-17 * * *", opts: []DescribeOption{withSecHash}, want: "4 runs in every minute from 9 am thru 5:59 pm, 15 seconds apart, starting from a fixed second; the hash key fixes the second"},
+	// Wrapped ranges in every field: seconds, and a hashed minute step on a wrapped hour step
+	{spec: "50-10 * * * * *", opts: []DescribeOption{withSeconds}, want: "at seconds 0 thru 10 and 50 thru 59 within a minute"},
+	{spec: "50-10/5 * * * * *", opts: []DescribeOption{withSeconds}, want: "at seconds 0, 5, 10, 50, and 55 within a minute"},
+	{spec: "H(50-10) * * * * *", opts: []DescribeOption{withSecHash}, want: "at a fixed second between seconds 0 and 10 or 50 and 59 within a minute; the hash key fixes the second"},
+	{spec: "H(50-10)/15 * * * * *", opts: []DescribeOption{withSecHash}, want: "1 or 2 runs in every minute between seconds 0 and 10 or 50 and 59, 15 seconds apart, starting from a fixed second; the hash key fixes the second"},
+	{spec: "H/15 20-10/2 * * *", opts: []DescribeOption{withHash}, want: "4 runs in every hour, 15 minutes apart, starting from a fixed minute, every 2 hours from the midnight hour thru the 10 am hour and the 8 pm hour thru the 10 pm hour in every day; the hash key fixes the minute"},
+
 	// T3 and T11: a field that covers its range, beside H
 	{spec: "0 9 * * 0-6,H", opts: []DescribeOption{withHash}, want: "at 9 am every day"},
 	{spec: "0 9 * * 1-7,H", opts: []DescribeOption{withHash}, want: "at 9 am every day"},
