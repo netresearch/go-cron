@@ -105,7 +105,8 @@ the 5th field (day of week) would mean Mondays, Wednesdays and Fridays.
 Hyphen ( - )
 
 Hyphens are used to define ranges. For example, 9-17 would indicate every
-hour between 9am and 5pm inclusive.
+hour between 9am and 5pm inclusive. '*' and '?' stand for the whole field and
+cannot start a range: "*-5" is an error.
 
 # Wraparound Ranges
 

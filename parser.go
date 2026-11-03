@@ -66,8 +66,8 @@ const Extended = DowNth | DowLast | DomL | DomW
 //   - The parser accepts specs robfig/cron rejects, for example 7 for
 //     Sunday, wraparound ranges like 22-2, quoted TZ= values and go-cron-only
 //     descriptors such as @triggered and @every_aligned. It rejects specs
-//     longer than 1024 characters and an empty TZ= value, which robfig/cron
-//     accepts.
+//     longer than 1024 characters, an empty TZ= value and a range that starts
+//     with * or ? (such as *-5), which robfig/cron accepts.
 //   - EveryRoundUp rounds up to the parser's minimum @every interval, so
 //     Parser.WithMinEveryInterval(time.Minute) turns "@every 30s" into 1m,
 //     where robfig/cron keeps 30s, and Parser.WithMinEveryInterval(0) keeps
@@ -1287,8 +1287,13 @@ func getField(field string, r bounds) (uint64, error) {
 
 // parseRangeBounds parses the start/end bounds from a cron range expression.
 // Returns start, end values, extra bits (starBit if wildcard), and any error.
-func parseRangeBounds(lowAndHigh []string, r bounds) (start, end uint, extra uint64, err error) {
+// A wildcard stands for the whole field, so it cannot start a range: "*-5" is
+// an error, not "*".
+func parseRangeBounds(expr string, lowAndHigh []string, r bounds) (start, end uint, extra uint64, err error) {
 	if lowAndHigh[0] == "*" || lowAndHigh[0] == "?" {
+		if len(lowAndHigh) > 1 {
+			return 0, 0, 0, fmt.Errorf("%s field: %q cannot start a range: %q", r.name, lowAndHigh[0], expr)
+		}
 		return r.min, r.max, starBit, nil
 	}
 
@@ -1362,7 +1367,7 @@ func getRange(expr string, r bounds) (uint64, error) {
 	lowAndHigh := strings.Split(rangeAndStep[0], "-")
 	singleDigit := len(lowAndHigh) == 1
 
-	start, end, extra, err := parseRangeBounds(lowAndHigh, r)
+	start, end, extra, err := parseRangeBounds(expr, lowAndHigh, r)
 	if err != nil {
 		return 0, err
 	}

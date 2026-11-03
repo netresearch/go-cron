@@ -59,6 +59,8 @@ func FuzzParseStandard(f *testing.F) {
 	f.Add("* * * * 8")
 	f.Add("*/0 * * * *")
 	f.Add("5-3 * * * *")
+	f.Add("0 *-5 * * *")
+	f.Add("*-/2 * * * *")
 	f.Add("TZ= * * * * *")
 	f.Add("TZ=Invalid/Zone * * * * *")
 

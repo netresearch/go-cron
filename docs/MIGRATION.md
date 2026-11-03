@@ -195,6 +195,19 @@ parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.
 c := cron.New(cron.WithParser(parser))
 ```
 
+#### Ranges Starting with a Wildcard (#475)
+
+robfig/cron reads a range whose low end is `*` or `?` as the wildcard and
+ignores the high end, so `0 *-5 * * *` runs every hour and `*-/2 * * * *` runs
+as `*/2 * * * *`. go-cron rejects such a range, also with `RobfigCompat`:
+
+```go
+_, err := c.AddFunc("0 *-5 * * *", myFunc)
+// err: hour field: "*" cannot start a range: "*-5"
+```
+
+Write the range you mean (`0 0-5 * * *`) or the wildcard alone (`0 * * * *`).
+
 #### Minimum @every Duration
 
 **Before (robfig/cron):**

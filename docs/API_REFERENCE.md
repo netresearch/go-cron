@@ -1906,6 +1906,8 @@ func (p Parser) Parse(spec string) (Schedule, error)
 
 Parse returns a Schedule from a cron spec or error if invalid.
 
+A range cannot start with `*` or `?`: `0 *-5 * * *` returns `hour field: "*" cannot start a range: "*-5"`. robfig/cron reads such a range as the wildcard alone.
+
 #### func (Parser) WithHashKey
 
 ```go
