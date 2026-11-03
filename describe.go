@@ -600,7 +600,7 @@ func partWords(parts [][2]uint, at func(h uint) string) string {
 // minutes, or one minute on named hours (T4, R7).
 func clockTimes(s uint, minute, hour timeField) (string, bool) {
 	oneHour := hour.single() && len(minute.vals) <= valueLimit
-	oneMinute := minute.single() && hour.named()
+	oneMinute := minute.single() && hour.kind() == namedHours // T3: every hour is not a list
 	if !oneHour && !oneMinute {
 		return "", false
 	}

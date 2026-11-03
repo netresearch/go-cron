@@ -64,8 +64,8 @@ which form a spec gets. Each has an ID, which the grammar cites.
 |---|---|
 | T1 | Values lead. Seconds and minutes list up to 6 values. Past that, evenly spaced values show the first 3, "…", the last, and a note: "(every 7 minutes, starting over each hour)". Two fields cut short share one parenthesis, joined with "; ". "starting over each …" appears when the gap across the boundary differs from the step. Hours follow R8, R9 and T4 |
 | T2 | A list renders the union of its values, sorted and once each, with consecutive values as a range. A list that a step describes exactly renders as that step (`1,3,5,7,9,11,13,15` reads like `1-15/2`) |
-| T3 | A field that covers its range is every value. After a leading "every …", such fields are left out |
-| T4 | Clock times when the second is fixed and either one hour has up to 6 minutes, or one minute falls on hours written as a list (all values) or a range of up to 6 hours |
+| T3 | A field that covers its range is every value. After a leading "every …", such fields are left out. T3 comes first: however the field is written (a range, a list, a wrapped range), it reads as the star before T4 applies |
+| T4 | Clock times when the second is fixed and either one hour has up to 6 minutes, or one minute falls on hours written as a list (all values; a list of every hour is T3) or a range of up to 6 hours |
 | T5 | Span form: several minutes over one hour range open with the first and last run of the day: "from 9 am thru 5:56 pm every day, at minutes 0, 7, 14, … 56 past each hour" |
 | T6 | Hours read in clock order: a wrapped range is shorthand for two ranges ("at midnight, 2 am, and 10 pm") |
 | J1 | "for" joins a value. "in every …" follows a step. Plain "every day" follows clock times, the span and an hour range |

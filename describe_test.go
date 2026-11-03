@@ -146,6 +146,12 @@ var describeGoldens = []struct {
 	{spec: "5 0 23-5 * * *", opts: []DescribeOption{withSeconds}, want: "at 5 seconds past the top of every hour from midnight thru 5 am and at 11:00:05 pm every day"},
 	{spec: "5 0 18-0 * * *", opts: []DescribeOption{withSeconds}, want: "at 12:00:05 am and at 5 seconds past the top of every hour from 6 pm thru 11 pm every day"},
 
+	// T3 first: a field that covers its range is every value, however written
+	{spec: "5 0-11,12-23 * * *", want: "at 5 minutes past the hour"},
+	{spec: "0 0-11,12-23 * * *", want: "at the top of every hour"},
+	{spec: "5 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23 * * *", want: "at 5 minutes past the hour"},
+	{spec: "5 1-0 * * *", want: "at 5 minutes past the hour"},
+
 	// Literal fallback: the whole spec renders field by field
 	{spec: "0 9 * * 1-5", want: "minute 0, hour 9, day of month *, month *, day of week 1-5", literal: true},
 	{spec: "15 0 9 1 * *", opts: []DescribeOption{withSeconds}, want: "second 15, minute 0, hour 9, day of month 1, month *, day of week *", literal: true},
