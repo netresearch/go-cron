@@ -508,6 +508,11 @@ var describeGoldens = []struct {
 	// G11: the day the key picks decides, so H in a date field is not checked
 	{spec: "0 0 H(30-31) 2 *", opts: []DescribeOption{withHash}, want: "at midnight on a fixed day of the month between the 30th and 31st in February; the hash key fixes the day"},
 
+	// H6: two hashed values of one unit merge in the hash clause
+	{spec: "H 0 H * H", opts: []DescribeOption{withHash}, want: "at a fixed minute during the midnight hour on a fixed day of the month when it falls on a fixed day of the week; the hash key fixes the minute and both days"},
+	{spec: "H,H(0-29) 0 H * *", opts: []DescribeOption{withHash}, want: "1 or 2 runs in every hour during the midnight hour, at a fixed minute and a fixed minute between minutes 0 and 29 on a fixed day of the month; the hash key fixes both minutes and the day"},
+	{spec: "H H H * H", opts: []DescribeOption{withHash}, want: "at a fixed minute at a fixed hour on a fixed day of the month when it falls on a fixed day of the week; the hash key fixes the minute, the hour, and both days"},
+
 	// Literal fallback: the whole spec renders field by field
 	// H in the date fields without a form (H20)
 	{spec: "0 0 H/10 * 1", opts: []DescribeOption{withHash}, want: "minute 0, hour 0, day of month H/10, month *, day of week 1", literal: true},
@@ -843,7 +848,7 @@ func describeGrammars() (descRe, noteRe *regexp.Regexp) {
 		alt("it", before)+" runs only in months of "+num+" days"+opt(" or more"),
 	)
 
-	hashkey := "; the hash key fixes " + alt(list("the "+unit), "both "+units) // H1
+	hashkey := "; the hash key fixes " + list(alt("the "+unit, "both "+units)) // H1, H6
 	schedule := time + opt(" "+day) + opt(" "+month) + opt(" "+year) + opt(note) + "(?:" + short + ")*" + opt(hashkey)
 	// P3: an interval as it runs, from its anchor
 	dur := `[-+]?(?:(?:(?:\d+\.?\d*|\.\d+)(?:ns|us|µs|μs|ms|s|m|h))+|0)` // Go's duration: "1.s", ".5m", "0"

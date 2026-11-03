@@ -271,12 +271,14 @@ func hashKeyClause(units []string) string {
 	if len(units) == 0 {
 		return ""
 	}
-	if len(units) == 2 && units[0] == units[1] {
-		return "; the hash key fixes both " + units[0] + "s"
-	}
-	words := make([]string, len(units))
-	for i, u := range units {
-		words[i] = "the " + u
+	var words []string
+	for i := 0; i < len(units); i++ {
+		if i+1 < len(units) && units[i] == units[i+1] {
+			words = append(words, "both "+units[i]+"s")
+			i++
+			continue
+		}
+		words = append(words, "the "+units[i])
 	}
 	return "; the hash key fixes " + andList(words)
 }

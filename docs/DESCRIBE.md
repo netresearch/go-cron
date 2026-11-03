@@ -138,7 +138,7 @@ which form a spec gets. Each has an ID, which the grammar cites.
 | H3 | A range: "a fixed minute between minutes 0 and 29"; a wrapped range in two parts, sorted (T9): "between minutes 0 and 10 or 50 and 59", a part of one value as that value: "between minutes 0 and 5 or 59"; hours by name: "a fixed hour between the 9 am and 5 pm hours" |
 | H4 | `0,H` follows R4: "at the top of the hour and a fixed minute past it" |
 | H5 | `0,H/15`: the plain value first: "at the top of the hour and every 15 minutes starting from a fixed minute" |
-| H6 | `H,H(0-29)`: "at a fixed minute and a fixed minute between minutes 0 and 29; the hash key fixes both minutes" |
+| H6 | `H,H(0-29)`: "at a fixed minute and a fixed minute between minutes 0 and 29; the hash key fixes both minutes". Two hashed values of one unit merge in that clause wherever they stand: "the minute and both days", "both minutes and the day" |
 | H7 | A fixed minute in named hours takes "during" (R6): "at a fixed minute during the 9 am hour every day" |
 | H8 | A fixed second under one minute and named hours is set clock times: "at a fixed second at 9 am every day"; with every minute, C1: "at a fixed second within every minute during the 9 am hour" |
 | H9 | "every day" follows set times |
@@ -279,7 +279,8 @@ overlap: "the" "top" "of" "the" "hour" "and" fixed "past" "it"             // H4
        | "the" "top" "of" fixed "and" fixed                               // H21
 fixed: "a" "fixed" unit [between | "between" hours]                       // H1, H3
 between: "between" units (INT "and" INT ["or" INT ["and" INT]] | INT "or" INT "and" INT)   // H3, T9
-hashkey: ";" "the" "hash" "key" "fixes" (list{"the" unit} | "both" units)   // H1
+hashkey: ";" "the" "hash" "key" "fixes" list{keyunit}                      // H1, H6
+keyunit: "the" unit | "both" units
 
 hours: "the" clock "hour" | "the" (CLOCK12 | "noon") hourtail | "midnight" hourtail   // R3
 hourtail: ("and" clock | ("," clock)+ "," "and" clock) "hours"            // R3: no article before a list that starts with midnight
