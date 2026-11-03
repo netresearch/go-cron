@@ -84,7 +84,7 @@ which form a spec gets. Each has an ID, which the grammar cites.
 | T5 | Span form: several minutes over one hour range open with the first and last run of the day: "from 9 am thru 5:56 pm every day, at minutes 0, 7, 14, … 56 past each hour" |
 | T6 | Hours read in clock order: a wrapped range is shorthand for two ranges ("at midnight, 2 am, and 10 pm every day"; on a named day "at 12 am, 2 am, and 10 pm on Friday") |
 | J1 | "for" joins a value. "in every …" follows a step. Plain "every day" follows clock times, the span and an hour range. A day clause takes the place of "every day" and "in every day" |
-| T9 | A range reads "thru". Two adjacent values name both ("5 and 6"). A wrapped range reads in two parts and a wrapped step lists in full, sorted low to high: "at minutes 0 thru 10 and 50 thru 59 past the hour", "on the 1st thru 5th and 25th thru 31st of the month". Days of the week and months are the exception (D4, D6). An hour range's two parts share one "from": "from midnight thru 5:56 am and 8 pm thru 11:56 pm every day". So do a wrapped hour step's, each from its first run to its last: "every 2 hours from midnight thru 10 am and 8 pm thru 10 pm in every day". A part of one run reads "at" its time: "every 2 hours from midnight thru 10 am and at 10 pm in every day"; with minutes in front, "during" its hour: "every minute every 2 hours from the midnight hour thru the 10 am hour and during the 10 pm hour in every day". With one minute, a part of one hour of a wrapped range reads "at" its run: "at 30 minutes past every hour from midnight thru 5 am and at 11:30 pm every day", "at 12:30 am and at 30 minutes past every hour from 6 pm thru 11 pm every day"; with one second leading, "at 5 seconds past the top of every hour from midnight thru 5 am and at 11:00:05 pm every day". Several seconds or every second read that part "during" its hour, or as the hour past the top: "at seconds 0 and 30 within minute 5 in every hour from midnight thru 5 am and during the 11 pm hour every day", "at seconds 0 and 30 past the top of the midnight hour and every hour from 6 pm thru 11 pm every day". A named day changes nothing: "from 12 am thru 5:30 am and 8 pm thru 11:30 pm, at minutes 0 and 30 past each hour on Monday" |
+| T9 | A range reads "thru". Two adjacent values name both ("5 and 6"). A wrapped range reads in two parts and a wrapped step lists in full, sorted low to high: "at minutes 0 thru 10 and 50 thru 59 past the hour", "on the 1st thru 5th and 25th thru 31st of the month". Days of the week and months are the exception (D4, D6). An hour range's two parts share one "from": "from midnight thru 5:56 am and 8 pm thru 11:56 pm every day". So do a wrapped hour step's, each from its first run to its last: "every 2 hours from midnight thru 10 am and 8 pm thru 10 pm in every day". A part of one run reads "at" its time: "every 2 hours from midnight thru 10 am and at 10 pm in every day"; with minutes in front, "during" its hour: "every minute every 2 hours from the midnight hour thru the 10 am hour and during the 10 pm hour in every day". With one minute, a part of one hour of a wrapped range reads "at" its run: "at 30 minutes past every hour from midnight thru 5 am and at 11:30 pm every day", "at 12:30 am and at 30 minutes past every hour from 6 pm thru 11 pm every day"; with one second leading, "at 5 seconds past the top of every hour from midnight thru 5 am and at 11:00:05 pm every day". Several seconds or every second read that part "during" its hour, or as the hour past the top: "at seconds 0 and 30 within minute 5 in every hour from midnight thru 5 am and during the 11 pm hour every day", "at seconds 0 and 30 past the top of the midnight hour and every hour from 6 pm thru 11 pm every day". A hashed minute reads the same: "at a fixed minute past every hour from midnight thru 5 am and the 11 pm hour every day", "4 runs in every hour during the midnight hour and from 6 pm thru 11 pm, 15 minutes apart, starting from a fixed minute". A named day changes nothing: "from 12 am thru 5:30 am and 8 pm thru 11:30 pm, at minutes 0 and 30 past each hour on Monday" |
 | T11 | A range starting with `*` or `?`, and a list with a star item or an item that covers the range (`0-6,H`), read as the star |
 | T12 | A time on the hour drops the minutes ("2 am"); "12:30 am", "12:30 pm"; never "12 pm" |
 
@@ -254,6 +254,8 @@ hcrange: "the" clock "hour" "thru" "the" clock "hour"                    // R11,
 
 // H1–H16: values the hash key fixes
 hashed: "at" fixed "past" "every" "hour" hourrange [everyday]             // R9
+      | "at" fixed "past" "every" "hour" "from" crange "and" "the" clock "hour" [everyday]   // T9: a last part of one hour
+      | "at" fixed "past" "the" clock "hour" "and" "every" "hour" "from" crange [everyday]   // T9: a first part of one hour
       | "at" fixed "during" hours [everyday | inevery]                    // H7, R10
       | "at" fixed hstep                                                  // R11
       | "at" (fixed | "minute" INT | "minutes" vlist) "at" fixed [everyday]   // H16
@@ -264,13 +266,13 @@ hashed: "at" fixed "past" "every" "hour" hourrange [everyday]             // R9
       | "at" fixed "at" "the" "top" "of" fixed [everyday]                 // H24, H16
 counted: [toplead ","] count "in" "every" unit [cplace] apart             // H2
        | ("every" "minute" | "at" "minutes" vlist | "at" fixed) "during" cnt "hours" "in" "every" "day" apart   // H14, H22
-       | count "in" "every" unit [hourrange | "during" hours] "," "at" overlap   // H6, H15, H21
+       | count "in" "every" unit [cplace] "," "at" overlap   // H6, H15, H21
        | count "in" "every" unit apart "," hstep                        // H23
        | count ("within" ("minute" INT | "minutes" vlist) [hourjoin] | "past" "the" "top" "of" tophours) apart   // H24
 toplead: "at" "the" "top" "of" "the" "hour" | "at" INT ("minute" | "minutes") "past" "the" "hour"
 cnt: INT | INT "or" INT
 count: cnt ("run" | "runs")
-cplace: between | hourrange | "during" hours
+cplace: between | hourrange | "during" hours | "from" crange "and" "during" "the" clock "hour" | "during" "the" clock "hour" "and" "from" crange
 apart: "," INT units "apart" "," "starting" "from" fixed
 overlap: "the" "top" "of" "the" "hour" "and" fixed "past" "it"             // H4
        | fixed "and" fixed                                                // H6
@@ -364,6 +366,8 @@ ntime: "at" ("seconds" | "minutes") vals tplace where [tail]
      | "at" ("seconds" | "minutes") toutcomes tplace "," "depending" "on" "the" "hash"   // N2, N4: a wrapped range lists
      | hlead "a" "fixed" "hour" "between" clock "and" clock "and" "every" INT "hours" "after" "it" ["thru" clock]   // N7, N8
 tplace: "past" "the" "hour" | "during" hours | "past" "every" "hour" hourrange | "within" "a" "minute"   // R6, R9, C1
+      | "past" "every" "hour" "from" clock "thru" clock "and" "the" clock "hour"   // T9: a last part of one hour
+      | "past" "the" clock "hour" "and" "every" "hour" "from" clock "thru" clock   // T9: a first part of one hour
       | "within" "every" "minute" ("during" hours | hourrange)             // C1, R12
       | "within" ("minute" INT | "minutes" vlist) "in" "every" "hour"      // C1
       | "past" "the" "top" "of" "every" "hour"                              // C1, R4

@@ -107,7 +107,7 @@ func (n *noter) minutePlace(hour timeField, hh hashField) (string, bool) {
 	case namedHours, stepHours:
 		return " during " + n.d.hourNames(hour), true
 	case longRange:
-		return " past every hour " + fromThru(hour.items[0], n.d.onHour, n.d.onHour), true
+		return " past " + n.d.everyHourParts(hour.items[0]), true
 	case longStep:
 		for _, part := range stepParts(hour.items[0], hours) {
 			if part[0] == part[1] && !wholeDay(hour.items[0]) {

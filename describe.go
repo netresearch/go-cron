@@ -1154,13 +1154,25 @@ func (d *describer) onTheHour(lead string, hour timeField, at func(h uint) strin
 			return lead + " every hour from " + d.partRange(p[0]) + " and at " + at(p[1][0]) + d.everyDay()
 		case p[0][0] == p[0][1] && at != nil:
 			return "at " + at(p[0][0]) + " and " + lead + " every hour from " + d.partRange(p[1]) + d.everyDay()
-		case p[1][0] == p[1][1]:
-			return lead + " every hour from " + d.partRange(p[0]) + " and the " + d.onHour(p[1][0]) + " hour" + d.everyDay()
-		case p[0][0] == p[0][1]:
-			return lead + " the " + d.onHour(p[0][0]) + " hour and every hour from " + d.partRange(p[1]) + d.everyDay()
 		}
 	}
-	return lead + " every hour " + fromThru(it, d.onHour, d.onHour) + d.everyDay()
+	return lead + " " + d.everyHourParts(it) + d.everyDay()
+}
+
+// everyHourParts names a long hour range: "every hour from 9 am thru 5 pm";
+// a part of one hour of a wrapped range reads as that hour (T9): "every hour
+// from midnight thru 5 am and the 11 pm hour", "the midnight hour and every
+// hour from 6 pm thru 11 pm".
+func (d *describer) everyHourParts(it timeItem) string {
+	if p := it.parts(hours); len(p) == 2 {
+		switch {
+		case p[1][0] == p[1][1]:
+			return "every hour from " + d.partRange(p[0]) + " and the " + d.onHour(p[1][0]) + " hour"
+		case p[0][0] == p[0][1]:
+			return "the " + d.onHour(p[0][0]) + " hour and every hour from " + d.partRange(p[1])
+		}
+	}
+	return "every hour " + fromThru(it, d.onHour, d.onHour)
 }
 
 // joinHours joins the hours to inner, the seconds and minutes (R6, R9–R12,
@@ -1211,12 +1223,11 @@ func (d *describer) wrappedPart(inner string, sec, minute timeField, it timeItem
 	if len(p) != 2 {
 		return "", false
 	}
-	m := minute.vals[0]
 	switch {
-	case p[1][0] == p[1][1] && sec.single():
-		return inner + " in every hour from " + d.partRange(p[0]) + " and at " + d.clock(p[1][0], m, sec.vals[0]) + d.everyDay(), true
+	case p[1][0] == p[1][1] && sec.single(): // a hashed minute has no sec
+		return inner + " in every hour from " + d.partRange(p[0]) + " and at " + d.clock(p[1][0], minute.vals[0], sec.vals[0]) + d.everyDay(), true
 	case p[0][0] == p[0][1] && sec.single():
-		return "at " + d.clock(p[0][0], m, sec.vals[0]) + " and " + inner + " in every hour from " + d.partRange(p[1]) + d.everyDay(), true
+		return "at " + d.clock(p[0][0], minute.vals[0], sec.vals[0]) + " and " + inner + " in every hour from " + d.partRange(p[1]) + d.everyDay(), true
 	case p[1][0] == p[1][1]:
 		return inner + " in every hour from " + d.partRange(p[0]) + " and during the " + d.onHour(p[1][0]) + " hour" + d.everyDay(), true
 	case p[0][0] == p[0][1]:

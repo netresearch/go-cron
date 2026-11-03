@@ -396,7 +396,16 @@ func (d *describer) stepPlace(unit string, x hashed, r bounds, hour timeField) (
 	case k == namedHours || k == stepHours:
 		return " during " + d.hourNames(hour), true
 	case k == longRange && unit == unitMinute:
-		return " " + fromThru(hour.items[0], d.onHour, d.onHour), true
+		it := hour.items[0]
+		if p := it.parts(hours); len(p) == 2 { // T9, R11: a part of one hour
+			switch {
+			case p[1][0] == p[1][1]:
+				return " from " + d.partRange(p[0]) + " and during the " + d.onHour(p[1][0]) + " hour", true
+			case p[0][0] == p[0][1]:
+				return " during the " + d.onHour(p[0][0]) + " hour and from " + d.partRange(p[1]), true
+			}
+		}
+		return " " + fromThru(it, d.onHour, d.onHour), true
 	case k == longRange:
 		// R12: seconds run in every minute, so the last run is minute 59.
 		last := func(h uint) string { return d.clock(h, 59, 0) }
@@ -467,7 +476,7 @@ func (d *describer) hashMinute(mh hashField, minute timeField, ms hashShape, hou
 		case longStep:
 			return lead + " " + d.stepClause(hour), true // R11
 		}
-		return lead + " past every hour " + fromThru(hour.items[0], d.onHour, d.onHour) + d.everyDay(), true // R9
+		return lead + " past " + d.everyHourParts(hour.items[0]) + d.everyDay(), true // R9
 	case hashStep:
 		x := mh.steps[0]
 		if hour.kind() == longStep && x.whole {

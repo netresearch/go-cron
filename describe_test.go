@@ -506,6 +506,18 @@ var describeGoldens = []struct {
 	{spec: "H(50-10)/15 * * * * *", opts: []DescribeOption{withSecHash}, want: "1 or 2 runs in every minute between seconds 0 and 10 or 50 and 59, 15 seconds apart, starting from a fixed second; the hash key fixes the second"},
 	{spec: "H/15 20-10/2 * * *", opts: []DescribeOption{withHash}, want: "4 runs in every hour, 15 minutes apart, starting from a fixed minute, every 2 hours from the midnight hour thru the 10 am hour and the 8 pm hour thru the 10 pm hour in every day; the hash key fixes the minute"},
 
+	// T9: a part of one hour under a hashed minute, x to x reads x
+	{spec: "H 23-5 * * *", opts: []DescribeOption{withHash}, want: "at a fixed minute past every hour from midnight thru 5 am and the 11 pm hour every day; the hash key fixes the minute"},
+	{spec: "H 18-0 * * *", opts: []DescribeOption{withHash}, want: "at a fixed minute past the midnight hour and every hour from 6 pm thru 11 pm every day; the hash key fixes the minute"},
+	{spec: "H(0-29) 23-5 * * *", opts: []DescribeOption{withHash}, want: "at a fixed minute between minutes 0 and 29 past every hour from midnight thru 5 am and the 11 pm hour every day; the hash key fixes the minute"},
+	{spec: "H/15 23-5 * * *", opts: []DescribeOption{withHash}, want: "4 runs in every hour from midnight thru 5 am and during the 11 pm hour, 15 minutes apart, starting from a fixed minute; the hash key fixes the minute"},
+	{spec: "H/15 18-0 * * *", opts: []DescribeOption{withHash}, want: "4 runs in every hour during the midnight hour and from 6 pm thru 11 pm, 15 minutes apart, starting from a fixed minute; the hash key fixes the minute"},
+	{spec: "H H 23-5 * * *", opts: []DescribeOption{withSecHash}, want: "at a fixed second within a fixed minute in every hour from midnight thru 5 am and during the 11 pm hour every day; the hash key fixes the second and the minute"},
+	{spec: "H H 7-0 * * *", opts: []DescribeOption{withSecHash}, want: "at a fixed second within a fixed minute during the midnight hour and in every hour from 7 am thru 11 pm every day; the hash key fixes the second and the minute"},
+
+	{spec: "H,H(0-29) 2-0 * * *", opts: []DescribeOption{withHash}, want: "1 or 2 runs in every hour during the midnight hour and from 2 am thru 11 pm, at a fixed minute and a fixed minute between minutes 0 and 29; the hash key fixes both minutes"},
+	{spec: "H,H(0-29) 23-5 * * *", opts: []DescribeOption{withHash}, want: "1 or 2 runs in every hour from midnight thru 5 am and during the 11 pm hour, at a fixed minute and a fixed minute between minutes 0 and 29; the hash key fixes both minutes"},
+
 	// T3 and T11: a field that covers its range, beside H
 	{spec: "0 9 * * 0-6,H", opts: []DescribeOption{withHash}, want: "at 9 am every day"},
 	{spec: "0 9 * * 1-7,H", opts: []DescribeOption{withHash}, want: "at 9 am every day"},
@@ -568,6 +580,8 @@ var describeNoteGoldens = []struct {
 	{spec: "0 9 * * H/4", opts: []DescribeOption{withHash}, want: "on Sunday and Thursday; Monday and Friday; Tuesday and Saturday; or Wednesday, depending on the hash"},
 	{spec: "0 9 * * H(1-5)/2", opts: []DescribeOption{withHash}, want: "on Monday, Wednesday, and Friday; or Tuesday and Thursday, depending on the hash"},
 	{spec: "0 9 * * H(5-1)/2", opts: []DescribeOption{withHash}, want: "on Friday and Sunday; or Saturday and Monday, depending on the hash"},
+	{spec: "H/15 23-5 * * *", opts: []DescribeOption{withHash}, want: "at minutes h, h+15, h+30, and h+45 past every hour from midnight thru 5 am and the 11 pm hour, where h is a hashed minute from 0 to 14"},
+	{spec: "H/15 18-0 * * *", opts: []DescribeOption{withHash}, want: "at minutes h, h+15, h+30, and h+45 past the midnight hour and every hour from 6 pm thru 11 pm, where h is a hashed minute from 0 to 14"},
 	// N4: a step that does not divide the whole range walks from its start
 	{spec: "0 9 * * H(1-7)/2", opts: []DescribeOption{withHash}, want: "on Monday, Wednesday, Friday, and Sunday; or Tuesday, Thursday, and Saturday, depending on the hash"},
 	{spec: "0 9 * * H(1-7)/3", opts: []DescribeOption{withHash}, want: "on Monday, Thursday, and Sunday; Tuesday and Friday; or Wednesday and Saturday, depending on the hash"},
@@ -811,9 +825,11 @@ func describeGrammars() (descRe, noteRe *regexp.Regexp) {
 		"every "+alt("minute", "second")+" "+hourrange+opt(everyday),
 		secs+" within every minute "+hourrange+opt(everyday),
 		// H in the time fields
-		"at "+fixed+" past every hour "+hourrange+opt(everyday),                      // R9
-		"at "+fixed+" during "+hours+opt(alt(everyday, inevery)),                     // H7, R10
-		"at "+fixed+" "+hstep,                                                        // R11
+		"at "+fixed+" past every hour "+hourrange+opt(everyday),                             // R9
+		"at "+fixed+" past every hour from "+crange+" and the "+clock+" hour"+opt(everyday), // T9
+		"at "+fixed+" past the "+clock+" hour and every hour from "+crange+opt(everyday),    // T9
+		"at "+fixed+" during "+hours+opt(alt(everyday, inevery)),                            // H7, R10
+		"at "+fixed+" "+hstep, // R11
 		"at "+alt(fixed, "minute "+num, "minutes "+vlist)+" at "+fixed+opt(everyday), // H16
 		"at the top of "+fixed+opt(everyday),                                         // R4
 		"every minute during "+fixed,                                                 // R6
@@ -822,9 +838,9 @@ func describeGrammars() (descRe, noteRe *regexp.Regexp) {
 		"at "+fixed+" at the top of "+fixed+opt(everyday),                            // H24
 		// H2, H14, H15: the count forms
 		opt(alt("at the top of the hour", "at "+num+" minutes? past the hour")+", ")+cnt+" runs? in every "+unit+
-			opt(" "+alt("between "+units+" "+nrange, hourrange, "during "+hours))+apart,
+			opt(" "+alt("between "+units+" "+nrange, hourrange, "during "+hours, "from "+crange+" and "+hone, hone+" and from "+crange))+apart,
 		alt("every minute", "at minutes "+vlist, "at "+fixed)+" during "+cnt+" hours in every day"+apart, // H14, H22
-		cnt+" runs in every "+unit+opt(" "+alt(hourrange, "during "+hours))+", at "+alt( // H6, H15, H21
+		cnt+" runs in every "+unit+opt(" "+alt(hourrange, "during "+hours, "from "+crange+" and "+hone, hone+" and from "+crange))+", at "+alt( // H6, H15, H21
 			"the top of the hour and "+fixed+" past it", fixed+" and "+fixed,
 			"the top of the hour and every "+num+" "+units+" starting from "+fixed, clock+" and the top of "+fixed,
 			"the top of "+fixed+" and "+fixed),
@@ -894,7 +910,9 @@ func describeGrammars() (descRe, noteRe *regexp.Regexp) {
 	where := ", where " + v + " is a hashed " + alt("second", "minute", "day", "month") + " from " + bound + opt(" to "+bound) + opt(" or "+bound+opt(" to "+bound))
 	tail := "; " + vterm + " runs only when " + v + " is below " + num
 	nhstep := "every " + num + " hours " + alt("starting with "+hours, "from "+list(hcrange)) // R11
-	tplace := alt(" past the hour", " during "+hours, " past every hour "+hourrange, " within a minute",
+	tplace := alt(" past the hour", " during "+hours, " past every hour "+hourrange,
+		" past every hour from "+clock+" thru "+clock+" and the "+clock+" hour", " past the "+clock+" hour and every hour from "+clock+" thru "+clock, // T9
+		" within a minute",
 		" within every minute "+alt("during "+hours, hourrange),                                         // C1, R12
 		" within "+alt("minute "+num, "minutes "+vlist)+" in every hour", " past the top of every hour", // C1
 		" "+nhstep)
