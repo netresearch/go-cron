@@ -69,7 +69,7 @@ which form a spec gets. Each has an ID, which the grammar cites.
 | T5 | Span form: several minutes over one hour range open with the first and last run of the day: "from 9 am thru 5:56 pm every day, at minutes 0, 7, 14, … 56 past each hour" |
 | T6 | Hours read in clock order: a wrapped range is shorthand for two ranges ("at midnight, 2 am, and 10 pm") |
 | J1 | "for" joins a value. "in every …" follows a step. Plain "every day" follows clock times, the span and an hour range |
-| T9 | A range reads "thru". Two adjacent values name both ("5 and 6"). A wrapped range reads in two parts and a wrapped step lists in full, sorted low to high: "at minutes 0 thru 10 and 50 thru 59 past the hour". An hour range's two parts share one "from": "from midnight thru 5:56 am and 8 pm thru 11:56 pm every day". So do a wrapped hour step's, each from its first run to its last: "every 2 hours from midnight thru 10 am and 8 pm thru 10 pm in every day". A part of one run reads "at" its time: "every 2 hours from midnight thru 10 am and at 10 pm in every day"; with minutes in front, "during" its hour: "every minute every 2 hours from the midnight hour thru the 10 am hour and during the 10 pm hour in every day". With one minute, a part of one hour of a wrapped range reads "at" its run: "at 30 minutes past every hour from midnight thru 5 am and at 11:30 pm every day", "at 12:30 am and at 30 minutes past every hour from 6 pm thru 11 pm every day"; with one second leading, "at 5 seconds past the top of every hour from midnight thru 5 am and at 11:00:05 pm every day" |
+| T9 | A range reads "thru". Two adjacent values name both ("5 and 6"). A wrapped range reads in two parts and a wrapped step lists in full, sorted low to high: "at minutes 0 thru 10 and 50 thru 59 past the hour". An hour range's two parts share one "from": "from midnight thru 5:56 am and 8 pm thru 11:56 pm every day". So do a wrapped hour step's, each from its first run to its last: "every 2 hours from midnight thru 10 am and 8 pm thru 10 pm in every day". A part of one run reads "at" its time: "every 2 hours from midnight thru 10 am and at 10 pm in every day"; with minutes in front, "during" its hour: "every minute every 2 hours from the midnight hour thru the 10 am hour and during the 10 pm hour in every day". With one minute, a part of one hour of a wrapped range reads "at" its run: "at 30 minutes past every hour from midnight thru 5 am and at 11:30 pm every day", "at 12:30 am and at 30 minutes past every hour from 6 pm thru 11 pm every day"; with one second leading, "at 5 seconds past the top of every hour from midnight thru 5 am and at 11:00:05 pm every day". Several seconds or every second read that part "during" its hour, or as the hour past the top: "at seconds 0 and 30 within minute 5 in every hour from midnight thru 5 am and during the 11 pm hour every day", "at seconds 0 and 30 past the top of the midnight hour and every hour from 6 pm thru 11 pm every day" |
 | T11 | A range starting with `*` or `?`, and a list with a star item, read as the star |
 | T12 | A time on the hour drops the minutes ("2 am"); "12:30 am", "12:30 pm"; never "12 pm" |
 
@@ -127,6 +127,7 @@ oneparts: "from" crange "and" "at" clock | "at" clock "and" "from" crange   // R
 parts: inner [hourjoin]
      | top tophours                                                       // R4, R9, R10
      | "at" clock "and" top "every" "hour" "from" crange [everyday]      // R9, T9: a first part of one hour
+     | "at" clock "and" inner "in" "every" "hour" "from" crange [everyday]   // C1, T9: a first part of one hour
      | "every" ("minute" | "second") hourrange [everyday]                 // R12
      | secs "within" "every" "minute" hourrange [everyday]                // C1, R12
 
@@ -146,6 +147,8 @@ top: "at" "the" "top" "of"                                                // R4
 tophours: "the" "hour"                                                    // R6
         | "every" "hour" [hourrange] [everyday]                           // R9, J1
         | "every" "hour" "from" crange "and" "at" clock [everyday]         // R9, T9: a last part of one hour
+        | "every" "hour" "from" crange "and" "the" clock "hour" [everyday] // T9: a last part, several seconds
+        | "the" clock "hour" "and" "every" "hour" "from" crange [everyday] // T9: a first part, several seconds
         | hours [inevery]                                                 // R3, R10, J1
         | hstep                                                           // R11
 
@@ -154,6 +157,8 @@ hourjoin: "past" "the" "hour"                                             // R6
         | "in" "every" "hour" [hourrange [everyday]]                      // J1, R9
         | "during" hours [inevery]                                        // R6, R10
         | hstep                                                           // R11
+        | "in" "every" "hour" "from" crange "and" ("at" clock | "during" "the" clock "hour") [everyday]   // C1, T9: a last part of one hour
+        | "during" "the" clock "hour" "and" "in" "every" "hour" "from" crange [everyday]   // C1, T9: a first part of one hour
 hstep: "every" INT "hours" ("starting" "with" hours | "from" list{hcrange} | hone) [inevery]   // R11
 hone: "from" hcrange "and" "during" "the" clock "hour" | "during" "the" clock "hour" "and" "from" hcrange   // R11, T9: a part of one run
 hcrange: "the" clock "hour" "thru" "the" clock "hour"                    // R11, T9: a wrapped step is two, in clock order

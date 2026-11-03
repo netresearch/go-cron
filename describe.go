@@ -456,7 +456,8 @@ func minuteAt(m uint) string {
 //
 // at writes the run in hour h when the lead fixes one minute and one
 // second; a part of one hour of a wrapped range then reads "at" that run
-// (R9, T9): "from midnight thru 5 am and at 11:30 pm". Otherwise at is nil.
+// (R9, T9): "from midnight thru 5 am and at 11:30 pm". Otherwise at is nil,
+// and that part reads as its hour: "from 6 pm thru 11 pm and the 5 am hour".
 func onTheHour(lead string, hour timeField, at func(h uint) string) string {
 	switch hour.kind() {
 	case everyHour:
@@ -472,12 +473,16 @@ func onTheHour(lead string, hour timeField, at func(h uint) string) string {
 		return lead + " " + stepClause(hour)
 	}
 	it := hour.items[0]
-	if p := it.parts(hours); at != nil && len(p) == 2 {
+	if p := it.parts(hours); len(p) == 2 {
 		switch {
+		case p[1][0] == p[1][1] && at != nil:
+			return lead + " every hour from " + partRange(p[0]) + " and at " + at(p[1][0]) + everyDaySuffix
+		case p[0][0] == p[0][1] && at != nil:
+			return "at " + at(p[0][0]) + " and " + lead + " every hour from " + partRange(p[1]) + everyDaySuffix
 		case p[1][0] == p[1][1]:
-			return lead + " every hour from " + onHour(p[0][0]) + thruSep + onHour(p[0][1]) + " and at " + at(p[1][0]) + everyDaySuffix
+			return lead + " every hour from " + partRange(p[0]) + " and the " + onHour(p[1][0]) + " hour" + everyDaySuffix
 		case p[0][0] == p[0][1]:
-			return "at " + at(p[0][0]) + " and " + lead + " every hour from " + onHour(p[1][0]) + thruSep + onHour(p[1][1]) + everyDaySuffix
+			return lead + " the " + onHour(p[0][0]) + " hour and every hour from " + partRange(p[1]) + everyDaySuffix
 		}
 	}
 	return lead + " every hour " + fromThru(it, onHour, onHour) + everyDaySuffix
@@ -518,7 +523,27 @@ func joinHours(inner, every string, sec, minute, hour timeField) string {
 		last := func(h uint) string { return clockTime(h, 59, s) }
 		return inner + " " + fromThru(it, onHour, last) + everyDaySuffix
 	}
-	return inner + " in every hour " + fromThru(it, onHour, onHour) + everyDaySuffix // R9
+	// R9: one minute. A part of one hour reads "at" its run under one second,
+	// otherwise "during" its hour (T9, R11).
+	if p := it.parts(hours); len(p) == 2 {
+		m := minute.vals[0]
+		switch {
+		case p[1][0] == p[1][1] && sec.single():
+			return inner + " in every hour from " + partRange(p[0]) + " and at " + clockTime(p[1][0], m, sec.vals[0]) + everyDaySuffix
+		case p[0][0] == p[0][1] && sec.single():
+			return "at " + clockTime(p[0][0], m, sec.vals[0]) + " and " + inner + " in every hour from " + partRange(p[1]) + everyDaySuffix
+		case p[1][0] == p[1][1]:
+			return inner + " in every hour from " + partRange(p[0]) + " and during the " + onHour(p[1][0]) + " hour" + everyDaySuffix
+		case p[0][0] == p[0][1]:
+			return inner + " during the " + onHour(p[0][0]) + " hour and in every hour from " + partRange(p[1]) + everyDaySuffix
+		}
+	}
+	return inner + " in every hour " + fromThru(it, onHour, onHour) + everyDaySuffix
+}
+
+// partRange names a part of an hour range: "midnight thru 5 am".
+func partRange(p [2]uint) string {
+	return onHour(p[0]) + thruSep + onHour(p[1])
 }
 
 // wholeDay reports an hour step over the whole day that divides 24 (R8, R11).

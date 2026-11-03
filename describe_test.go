@@ -146,6 +146,16 @@ var describeGoldens = []struct {
 	{spec: "5 0 23-5 * * *", opts: []DescribeOption{withSeconds}, want: "at 5 seconds past the top of every hour from midnight thru 5 am and at 11:00:05 pm every day"},
 	{spec: "5 0 18-0 * * *", opts: []DescribeOption{withSeconds}, want: "at 12:00:05 am and at 5 seconds past the top of every hour from 6 pm thru 11 pm every day"},
 
+	// T9: a part of one hour under seconds, x to x reads x
+	{spec: "5 30 23-5 * * *", opts: []DescribeOption{withSeconds}, want: "at 5 seconds within minute 30 in every hour from midnight thru 5 am and at 11:30:05 pm every day"},
+	{spec: "5 30 18-0 * * *", opts: []DescribeOption{withSeconds}, want: "at 12:30:05 am and at 5 seconds within minute 30 in every hour from 6 pm thru 11 pm every day"},
+	{spec: "*/30 0 18-0 * * *", opts: []DescribeOption{withSeconds}, want: "at seconds 0 and 30 past the top of the midnight hour and every hour from 6 pm thru 11 pm every day"},
+	{spec: "*/30 0 23-5 * * *", opts: []DescribeOption{withSeconds}, want: "at seconds 0 and 30 past the top of every hour from midnight thru 5 am and the 11 pm hour every day"},
+	{spec: "*/30 5 18-0 * * *", opts: []DescribeOption{withSeconds}, want: "at seconds 0 and 30 within minute 5 during the midnight hour and in every hour from 6 pm thru 11 pm every day"},
+	{spec: "*/30 5 23-5 * * *", opts: []DescribeOption{withSeconds}, want: "at seconds 0 and 30 within minute 5 in every hour from midnight thru 5 am and during the 11 pm hour every day"},
+	{spec: "* 59 6-0 * * *", opts: []DescribeOption{withSeconds}, want: "every second for minute 59 during the midnight hour and in every hour from 6 am thru 11 pm every day"},
+	{spec: "* 0 23-5 * * *", opts: []DescribeOption{withSeconds}, want: "every second for minute 0 in every hour from midnight thru 5 am and during the 11 pm hour every day"},
+
 	// T3 first: a field that covers its range is every value, however written
 	{spec: "5 0-11,12-23 * * *", want: "at 5 minutes past the hour"},
 	{spec: "0 0-11,12-23 * * *", want: "at the top of every hour"},
@@ -214,9 +224,13 @@ func describeGrammar() *regexp.Regexp {
 	top := alt("at the top of", "at "+num+" minutes? past", secs+" past the top of")
 	crange := clock + " thru " + clock
 	tophours := alt("the hour", "every hour"+opt(" "+hourrange)+opt(everyday), hours+opt(inevery), hstep,
-		"every hour from "+crange+" and at "+clock+opt(everyday))
+		"every hour from "+crange+" and at "+clock+opt(everyday),
+		"every hour from "+crange+" and the "+clock+" hour"+opt(everyday),
+		"the "+clock+" hour and every hour from "+crange+opt(everyday))
 	// R6, R9, R10, R11: the hours joined to what comes before
-	hourjoin := alt("past the hour", "in every hour"+opt(" "+hourrange+opt(everyday)), "during "+hours+opt(inevery), hstep)
+	hourjoin := alt("past the hour", "in every hour"+opt(" "+hourrange+opt(everyday)), "during "+hours+opt(inevery), hstep,
+		"in every hour from "+crange+" and "+alt("at "+clock, hone)+opt(everyday),
+		hone+" and in every hour from "+crange+opt(everyday))
 
 	time := alt(
 		// clocktime
@@ -230,6 +244,7 @@ func describeGrammar() *regexp.Regexp {
 		inner+opt(" "+hourjoin),
 		top+" "+tophours,
 		"at "+clock+" and "+top+" every hour from "+crange+opt(everyday),
+		"at "+clock+" and "+inner+" in every hour from "+crange+opt(everyday),
 		"every "+alt("minute", "second")+" "+hourrange+opt(everyday),
 		secs+" within every minute "+hourrange+opt(everyday),
 	)
