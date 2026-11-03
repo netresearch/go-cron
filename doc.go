@@ -767,7 +767,9 @@ New features available after migration:
   - Context support: Graceful shutdown via context cancellation
   - Run-once jobs: Single-execution jobs that auto-remove after running
 
-All existing code will work unchanged. The migration is a drop-in replacement.
+The API is a drop-in replacement. Some specs robfig/cron accepts are errors
+here, such as a minute step of 60, "0 *-5 * * *" and "* , * * *";
+docs/MIGRATION.md lists them.
 
 # Implementation
 
