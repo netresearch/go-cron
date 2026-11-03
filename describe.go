@@ -116,14 +116,12 @@ func (p Parser) describeDays(d *describer, domField, dowField string) (day, shor
 	dowSet := !isWildcard(dowField)
 	or := domSet && dowSet && p.dowOrDom(domField, dowField)
 	domAll, dowAll := len(md.vals) == 31, len(wd.vals) == 7
-	switch {
-	case or && (domAll || dowAll):
+	if or && (domAll || dowAll) {
 		return "", "", false // T3: one side of the OR is every day
-	case domAll:
-		domSet = false
-	case dowAll:
-		dowSet = false
 	}
+	// T3 comes first: a field that covers its range drops out on its own.
+	domSet = domSet && !domAll
+	dowSet = dowSet && !dowAll
 
 	var domText string
 	if domSet {

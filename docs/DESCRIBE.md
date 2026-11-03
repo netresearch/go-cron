@@ -65,7 +65,7 @@ which form a spec gets. Each has an ID, which the grammar cites.
 |---|---|
 | T1 | Values lead. Seconds and minutes list up to 6 values. Past that, evenly spaced values show the first 3, "…", the last, and a note: "(every 7 minutes, starting over each hour)". Two fields cut short share one parenthesis, joined with "; ". "starting over each …" appears when the gap across the boundary differs from the step. Hours follow R8, R9 and T4 |
 | T2 | A list renders the union of its values, sorted and once each, with consecutive values as a range. A list that a step describes exactly renders as that step (`1,3,5,7,9,11,13,15` reads like `1-15/2`) |
-| T3 | A field that covers its range is every value. After a leading "every …", such fields are left out. T3 comes first: however the field is written (a range, a list, a wrapped range), it reads as the star before T4 applies |
+| T3 | A field that covers its range is every value. After a leading "every …", such fields are left out. T3 comes first: however the field is written (a range, a list, `1-7`, a wrapped range), it reads as the star before T4 and D7 apply |
 | T4 | Clock times when the second is fixed and either one hour has up to 6 minutes, or one minute falls on hours written as a list (all values; a list of every hour is T3) or a range of up to 6 hours |
 | T5 | Span form: several minutes over one hour range open with the first and last run of the day: "from 9 am thru 5:56 pm every day, at minutes 0, 7, 14, … 56 past each hour" |
 | T6 | Hours read in clock order: a wrapped range is shorthand for two ranges ("at midnight, 2 am, and 10 pm every day"; on a named day "at 12 am, 2 am, and 10 pm on Friday") |
@@ -102,7 +102,7 @@ which form a spec gets. Each has an ID, which the grammar cites.
 | D4 | Days of the week are names, from the values the parser selects. Sunday appears once. A step walks the seven days as the parser does (`DowStepToSaturday` included). A wrapped range reads unsplit, in week order: "on Friday thru Monday"; two days name both, "on Saturday and Sunday"; a wrapped step lists in week order: "on Friday and Sunday" |
 | D5 | Both day fields: "when it falls on" (AND, the default), "or on any" (`DowOrDom`). With `StepWildcard`, a field starting with `*` or `?` is unrestricted |
 | D6 | Months are names. A wrapped range reads unsplit, in year order: "in November thru February"; two months name both, "in December and January"; a wrapped step lists in year order: "in November and January". Years name the unit ("in year 2027", "in years 2026 thru 2028") and list up to 6 values |
-| D7 | A named day is Sunday thru Saturday: a day of the week in the day clause, alone, in a list or range, or with "any". A day of the month or a month is not a named day: "at midnight on the 1st of the month", "at 12 am on the 13th of the month when it falls on Friday" |
+| D7 | A named day is Sunday thru Saturday: a day of the week in the day clause, alone, in a list or range, or with "any". A day of the week field that covers the week is every day, not a named day (T3). A day of the month or a month is not a named day: "at midnight on the 1st of the month", "at 12 am on the 13th of the month when it falls on Friday" |
 
 ## Grammar (EBNF)
 

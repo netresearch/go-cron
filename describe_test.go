@@ -235,6 +235,16 @@ var describeGoldens = []struct {
 	{spec: "5 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23 * * *", want: "at 5 minutes past the hour"},
 	{spec: "5 1-0 * * *", want: "at 5 minutes past the hour"},
 
+	// T3 first in the date fields
+	{spec: "0 0 * * 0-6", want: "at midnight every day"},
+	{spec: "0 9 * * 1-7", want: "at 9 am every day"},
+	{spec: "0 9 * * 0-7", want: "at 9 am every day"},
+	{spec: "0 0 * * 0,1,2,3,4,5,6", want: "at midnight every day"},
+	{spec: "0 9 * * 1-0", want: "at 9 am every day"},
+	{spec: "0 9 1-31 * 0-6", want: "at 9 am every day"},
+	{spec: "0 0 15 * 0-6", want: "at midnight on the 15th of the month"},
+	{spec: "0 0 15 * 0-6", opts: []DescribeOption{withDowOrDom}, want: "at midnight every day"},
+
 	// Literal fallback: the whole spec renders field by field
 	{spec: "0 0 L * *", opts: []DescribeOption{WithParseOptions(Minute | Hour | Dom | Month | Dow | DomL)}, want: "minute 0, hour 0, day of month L, month *, day of week *", literal: true},
 	{spec: "0 0 * * 5#3", opts: []DescribeOption{WithParseOptions(Minute | Hour | Dom | Month | Dow | DowNth)}, want: "minute 0, hour 0, day of month *, month *, day of week 5#3", literal: true},
