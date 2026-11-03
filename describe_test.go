@@ -521,7 +521,7 @@ var describeGoldens = []struct {
 	{spec: "0 H(9-17)/2 * * *", opts: []DescribeOption{withHash}, want: "minute 0, hour H(9-17)/2, day of month *, month *, day of week *", literal: true},
 }
 
-// describeNoteGoldens are the binding notes (docs/DESCRIBE.md, N1–N7).
+// describeNoteGoldens are the binding notes (docs/DESCRIBE.md, N1–N8).
 var describeNoteGoldens = []struct {
 	spec string
 	opts []DescribeOption
@@ -559,6 +559,28 @@ var describeNoteGoldens = []struct {
 	{spec: "H/30 0 * * H/2", opts: []DescribeOption{withHash}, want: "at minutes h and h+30 during the midnight hour, where h is a hashed minute from 0 to 29, on Sunday, Tuesday, Thursday, and Saturday; or Monday, Wednesday, and Friday, depending on the hash"},
 	{spec: "0 0 H/10 H/4 *", opts: []DescribeOption{withHash}, want: "on days h, h+10, h+20, and h+30 of every month, where h is a hashed day from 1 to 10; h+30 runs only when h is below 2, in months k, k+4, and k+8, where k is a hashed month from 1 (January) to 4 (April)"},
 	{spec: "0 0 H(31-5) * *", opts: []DescribeOption{withHash}, want: "on day h of every month, where h is a hashed day from 1 to 5 or 31; a month without day h is skipped"},
+	// N8: the minutes of a hashed hour step; N2 in more hour contexts (R11,
+	// R12, C1); N2, N4: a wrapped hashed range lists; N7 over a wrapped range
+	{spec: "30 H/6 * * *", opts: []DescribeOption{withHash}, want: "at 30 minutes past a fixed hour between midnight and 5 am and every 6 hours after it"},
+	{spec: "* H/6 * * *", opts: []DescribeOption{withHash}, want: "every minute during a fixed hour between midnight and 5 am and every 6 hours after it"},
+	{spec: "0,30 H/6 * * *", opts: []DescribeOption{withHash}, want: "at minutes 0 and 30 during a fixed hour between midnight and 5 am and every 6 hours after it"},
+	{spec: "*/15 H/6 * * *", opts: []DescribeOption{withHash}, want: "at minutes 0, 15, 30, and 45 during a fixed hour between midnight and 5 am and every 6 hours after it"},
+	{spec: "0-30 H/6 * * *", opts: []DescribeOption{withHash}, want: "at minutes 0 thru 30 during a fixed hour between midnight and 5 am and every 6 hours after it"},
+	{spec: "H H/6 * * *", opts: []DescribeOption{withHash}, want: "at a fixed minute during a fixed hour between midnight and 5 am and every 6 hours after it"},
+	{spec: "H(0-29) H/6 * * *", opts: []DescribeOption{withHash}, want: "at a fixed minute between minutes 0 and 29 during a fixed hour between midnight and 5 am and every 6 hours after it"},
+	{spec: "H/15 */2 * * *", opts: []DescribeOption{withHash}, want: "at minutes h, h+15, h+30, and h+45 every 2 hours starting with the midnight hour, where h is a hashed minute from 0 to 14"},
+	{spec: "H/7 */2 * * *", opts: []DescribeOption{withHash}, want: "at minutes h, h+7, h+14, … h+56 every 2 hours starting with the midnight hour, where h is a hashed minute from 0 to 6; h+56 runs only when h is below 4"},
+	{spec: "H/40 */2 * * *", opts: []DescribeOption{withHash}, want: "at minutes h and h+40 every 2 hours starting with the midnight hour, where h is a hashed minute from 0 to 39; h+40 runs only when h is below 20"},
+	{spec: "H/15 * 9 * * *", opts: []DescribeOption{withSecHash}, want: "at seconds h, h+15, h+30, and h+45 within every minute during the 9 am hour, where h is a hashed second from 0 to 14"},
+	{spec: "H/15 * 9-17 * * *", opts: []DescribeOption{withSecHash}, want: "at seconds h, h+15, h+30, and h+45 within every minute from 9 am thru 5:59 pm, where h is a hashed second from 0 to 14"},
+	{spec: "H/15 5 * * * *", opts: []DescribeOption{withSecHash}, want: "at seconds h, h+15, h+30, and h+45 within minute 5 in every hour, where h is a hashed second from 0 to 14"},
+	{spec: "H/15 0 * * * *", opts: []DescribeOption{withSecHash}, want: "at seconds h, h+15, h+30, and h+45 past the top of every hour, where h is a hashed second from 0 to 14"},
+	{spec: "H/15 20-10/2 * * *", opts: []DescribeOption{withHash}, want: "at minutes h, h+15, h+30, and h+45 every 2 hours from the midnight hour thru the 10 am hour and the 8 pm hour thru the 10 pm hour, where h is a hashed minute from 0 to 14"},
+	{spec: "H/15 20-5 * * *", opts: []DescribeOption{withHash}, want: "at minutes h, h+15, h+30, and h+45 past every hour from midnight thru 5 am and 8 pm thru 11 pm, where h is a hashed minute from 0 to 14"},
+	{spec: "H(50-10)/5 * * * *", opts: []DescribeOption{withHash}, want: "at minutes 0, 5, 10, 50, and 55; 1, 6, 51, and 56; 2, 7, 52, and 57; 3, 8, 53, and 58; or 4, 9, 54, and 59 past the hour, depending on the hash"},
+	{spec: "H(50-10)/15 * * * * *", opts: []DescribeOption{withSecHash}, want: "at seconds 5 and 50; 6 and 51; 7 and 52; 8 and 53; 9 and 54; 10 and 55; 56; 57; 58; 59; 0; 1; 2; 3; or 4 within a minute, depending on the hash"},
+	{spec: "0 H(22-4)/2 * * *", opts: []DescribeOption{withHash}, want: "at the top of a fixed hour between 10 pm and 11 pm and every 2 hours after it thru 4 am"},
+	{spec: "H/15 50-10 * * * *", opts: []DescribeOption{withSecHash}, want: "at seconds h, h+15, h+30, and h+45 within minutes 0 thru 10 and 50 thru 59 in every hour, where h is a hashed second from 0 to 14"},
 }
 
 func TestDescribeSpecNote(t *testing.T) {
@@ -605,6 +627,9 @@ func TestStepOutcomes(t *testing.T) {
 		{"0 0 9 * * H/4", 5},
 		{"0 0 9 * * H(1-5)/2", 5},
 		{"0 0 9 * * H(5-1)/2", 5},
+		{"H(50-10)/15 * * * * *", 0},
+		{"0 H(50-10)/5 * * * *", 1},
+		{"0 0 H(22-4)/2 * * *", 2},
 	} {
 		_, _, fields, _, _ := p.specFields(tt.spec)
 		r := []bounds{seconds, minutes, hours, dom, months, p.dowBounds()}[tt.field]
@@ -817,16 +842,24 @@ func describeGrammars() (descRe, noteRe *regexp.Regexp) {
 		opt(` \(written as `+dur+", "+alt("rounded up to the "+dur+" minimum", "rounded up to whole seconds", "cut to whole seconds")+`\)`)
 	descRe = regexp.MustCompile("^" + alt(schedule, "never runs", "only when triggered", interval) + "$")
 
-	// N1–N7: the note, one clause per hashed field
+	// N1–N8: the note, one clause per hashed field
 	v := `[hkjmnp]`
 	vterm := v + `(?:\+\d+)?`
 	vals := alt(vterm+" and "+vterm, vterm+"(?:, "+vterm+")+, and "+vterm, vterm+", "+vterm+", "+vterm+", … "+vterm)
 	bound := num + opt(` \(`+monthname+`\)`)
 	where := ", where " + v + " is a hashed " + alt("second", "minute", "day", "month") + " from " + bound + opt(" to "+bound) + opt(" or "+bound+opt(" to "+bound))
 	tail := "; " + vterm + " runs only when " + v + " is below " + num
-	tplace := alt(" past the hour", " during "+hours, " past every hour "+hourrange, " within a minute")
+	nhstep := "every " + num + " hours " + alt("starting with "+hours, "from "+list(hcrange)) // R11
+	tplace := alt(" past the hour", " during "+hours, " past every hour "+hourrange, " within a minute",
+		" within every minute "+alt("during "+hours, hourrange),                                         // C1, R12
+		" within "+alt("minute "+num, "minutes "+vlist)+" in every hour", " past the top of every hour", // C1
+		" "+nhstep)
+	toutcomes := list(num) + "(?:; " + list(num) + ")*; or " + list(num) // N2, N4: a wrapped range lists
+	hlead := alt("at the top of", "at "+num+" minutes? past", "every minute during", "at minutes "+vlist+" during",
+		"at a fixed minute"+opt(" between minutes "+num+" and "+num)+" during") // N8
 	ntime := alt("at "+alt("seconds", "minutes")+" "+vals+tplace+where+opt(tail),
-		"at the top of a fixed hour between "+clock+" and "+clock+" and every "+num+" hours after it"+opt(" thru "+clock))
+		"at "+alt("seconds", "minutes")+" "+toutcomes+tplace+", depending on the hash",
+		hlead+" a fixed hour between "+clock+" and "+clock+" and every "+num+" hours after it"+opt(" thru "+clock)) // N7, N8
 	outcome := alt(list(dayname), list(monthname), "the "+ord+opt(" and "+ord), "the "+ord+"(?:, "+ord+")+, and "+ord, "the "+ord+", "+ord+", "+ord+", … "+ord)
 	outcomes := outcome + "(?:; " + outcome + ")*; or " + outcome
 	nday := alt("on days "+vals+" of every month"+where+opt(tail),

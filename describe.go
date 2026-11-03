@@ -91,7 +91,7 @@ func (p Parser) DescribeSpecNote(spec string, _ ...DescribeOption) (string, erro
 	return note, err
 }
 
-// describe returns the description of spec and its note (N1–N7).
+// describe returns the description of spec and its note (N1–N8).
 func (p Parser) describe(spec string) (desc, note string, err error) {
 	if p.hashKey == "" {
 		p.hashKey = "describe"

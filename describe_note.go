@@ -36,14 +36,14 @@ func (p Parser) hashNote(d *describer, h, hd [3]hashField, dates [3]string) stri
 	sec := newTimeField(h[0].plain, unitSecond, unitMinute, seconds)
 	minute := newTimeField(h[1].plain, unitMinute, unitHour, minutes)
 	hour := newTimeField(h[2].plain, unitHour, "day", hours)
-	secPlace, secOK := " within a minute", minute.every() && hour.every() && !h[1].hashes() && !h[2].hashes()
+	secPlace, secOK := n.secondPlace(minute, hour, h[1].hashes() || h[2].hashes())
 	minPlace, minOK := n.minutePlace(hour, h[2])
 	minOK = minOK && sec.single() && sec.vals[0] == 0 && !h[0].hashes()
 	var clauses []string
 	for _, c := range []func() (string, bool){
 		func() (string, bool) { return n.stepNote(h[0], unitSecond, seconds, secPlace, secOK) },
 		func() (string, bool) { return n.stepNote(h[1], unitMinute, minutes, minPlace, minOK) },
-		func() (string, bool) { return n.hourNote(h[2], sec, minute, h[0].hashes() || h[1].hashes()) },
+		func() (string, bool) { return n.hourNote(h[2], sec, minute, h[0], h[1]) },
 		func() (string, bool) { return n.domNote(hd[0], newDomField(dates[0])) },
 		func() (string, bool) { return n.outcomeNote(hd[1], p.dowBounds(), p.newDowField(dates[1])) },
 		func() (string, bool) { return n.outcomeNote(hd[2], months, newMonthField(dates[2])) },
@@ -59,9 +59,41 @@ func (p Parser) hashNote(d *describer, h, hd [3]hashField, dates [3]string) stri
 	return strings.Join(clauses, ", ")
 }
 
-// minutePlace is where a hashed minute step falls, by the hours (R6, R9):
-// " past the hour", " during the 9 am hour", " past every hour from 9 am
-// thru 5 pm". ok is false for other hours.
+// secondPlace is where a hashed second step falls, by the written minutes
+// and hours (C1, R12): " within a minute", " within every minute during the
+// 9 am hour", " within every minute from 9 am thru 5:59 pm", " within minute
+// 5 in every hour", " past the top of every hour", " within minutes 0 thru
+// 10 and 50 thru 59 in every hour". ok is false for other fields.
+func (n *noter) secondPlace(minute, hour timeField, hashed bool) (string, bool) {
+	switch {
+	case hashed:
+		return "", false
+	case minute.every() && hour.every():
+		return " within a minute", true
+	case minute.every():
+		switch hour.kind() {
+		case namedHours, stepHours:
+			return " within every minute during " + n.d.hourNames(hour), true
+		case longRange:
+			last := func(h uint) string { return n.d.clock(h, 59, 0) } // R12: the last run is minute 59
+			return " within every minute " + fromThru(hour.items[0], n.d.onHour, last), true
+		}
+	case !hour.every():
+	case minute.single() && minute.vals[0] == 0:
+		return " past the top of every hour", true
+	case minute.single():
+		return fmt.Sprintf(" within minute %d in every hour", minute.vals[0]), true
+	default:
+		text, _ := minute.nums()
+		return " within minutes " + text + " in every hour", true
+	}
+	return "", false
+}
+
+// minutePlace is where a hashed minute step falls, by the hours (R6, R9,
+// R11): " past the hour", " during the 9 am hour", " past every hour from
+// 9 am thru 5 pm", " every 2 hours starting with the midnight hour". ok is
+// false for other hours, and for a step with a part of one run.
 func (n *noter) minutePlace(hour timeField, hh hashField) (string, bool) {
 	if hh.hashes() {
 		return "", false
@@ -73,6 +105,13 @@ func (n *noter) minutePlace(hour timeField, hh hashField) (string, bool) {
 		return " during " + n.d.hourNames(hour), true
 	case longRange:
 		return " past every hour " + fromThru(hour.items[0], n.d.onHour, n.d.onHour), true
+	case longStep:
+		for _, part := range stepParts(hour.items[0], hours) {
+			if part[0] == part[1] && !wholeDay(hour.items[0]) {
+				return "", false
+			}
+		}
+		return " " + strings.TrimSuffix(n.d.stepClause(hour), inEveryDaySuffix), true
 	}
 	return "", false
 }
@@ -106,8 +145,11 @@ func (n *noter) stepNote(f hashField, unit string, r bounds, place string, place
 	}
 	x, ok := oneStep(f)
 	x = whole(x, r)
-	if !ok || !placeOK || x.lo > x.hi {
+	if !ok || !placeOK {
 		return "", false
+	}
+	if x.lo > x.hi {
+		return "at " + unit + "s " + timeOutcomes(x, r) + place + ", depending on the hash", true
 	}
 	v := n.next()
 	vals, top, tail := stepValues(v, x, valueLimit)
@@ -115,26 +157,57 @@ func (n *noter) stepNote(f hashField, unit string, r bounds, place string, place
 	return "at " + unit + "s " + vals + place + where + tail, true
 }
 
-// hourNote is the clause of a hashed hour step (N7): "at the top of a fixed
-// hour between midnight and 5 am and every 6 hours after it", with "thru"
-// the range's last hour when the range is not the whole day.
-func (n *noter) hourNote(f hashField, sec, minute timeField, hashedBelow bool) (string, bool) {
+// hourNote is the clause of a hashed hour step (N7, N8): the minutes as the
+// description names them, then the fixed hour's range and the step: "at the
+// top of a fixed hour between midnight and 5 am and every 6 hours after it",
+// with "thru" the range's last hour when the range is not the whole day. A
+// wrapped range reads in clock order from its start: "between 10 pm and 11
+// pm and every 2 hours after it thru 4 am".
+func (n *noter) hourNote(f hashField, sec, minute timeField, hs, hm hashField) (string, bool) {
 	if len(f.steps) == 0 {
 		return "", true
 	}
 	x, ok := oneStep(f)
 	x = whole(x, hours)
-	zero := sec.single() && sec.vals[0] == 0 && minute.single() && minute.vals[0] == 0
-	if !ok || !zero || hashedBelow || x.lo > x.hi {
+	lead, leadOK := hourLead(minute, hm)
+	if !ok || !leadOK || hs.hashes() || !sec.single() || sec.vals[0] != 0 {
 		return "", false
 	}
-	_, top, _ := stepValues("", x, valueLimit)
-	text := fmt.Sprintf("at the top of a fixed hour between %s and %s and every %d hours after it",
-		n.d.onHour(x.lo), n.d.onHour(top), x.step)
+	span := hours.max - hours.min + 1
+	top := (x.lo + min(x.step, cyclicRangeSize(x.lo, x.hi, hours)) - 1) % span
+	text := fmt.Sprintf("%s a fixed hour between %s and %s and every %d hours after it",
+		lead, n.d.onHour(x.lo), n.d.onHour(top), x.step)
 	if !x.whole {
 		text += " thru " + n.d.onHour(x.hi)
 	}
 	return text, true
+}
+
+// hourLead names the minutes before a hashed hour step as the description
+// does (R4, R5, H14, H22, N8): "at the top of", "at 30 minutes past", "every
+// minute during", "at minutes 0 and 30 during", "at a fixed minute between
+// minutes 0 and 29 during". ok is false for a hashed minute step, or a
+// hashed minute beside other items or over a wrapped range.
+func hourLead(minute timeField, hm hashField) (string, bool) {
+	switch {
+	case len(hm.steps) > 0:
+		return "", false
+	case len(hm.fixed) > 0:
+		x := hm.fixed[0]
+		if len(hm.fixed) > 1 || hm.plain != "" || x.lo > x.hi {
+			return "", false
+		}
+		if x.whole {
+			return "at a fixed minute during", true
+		}
+		return fmt.Sprintf("at a fixed minute between minutes %d and %d during", x.lo, x.hi), true
+	case minute.every():
+		return "every minute during", true
+	case minute.single():
+		return minuteAt(minute.vals[0]), true
+	}
+	text, _ := minute.nums()
+	return "at minutes " + text + " during", true
 }
 
 // stepValues writes the values of a hashed step with the variable v (N2,
@@ -229,6 +302,25 @@ func (n *noter) outcomeNote(f hashField, r bounds, plain timeField) (string, boo
 	}
 	return fmt.Sprintf("%s%ss %s%s, where %s is a hashed %s from %s to %s%s",
 		in, unit, vals, of, v, unit, bound(x.lo), bound(top), tail), true
+}
+
+// timeOutcomes lists the values a wrapped hashed step in the second or
+// minute field selects for each start, ordered by the start, each low to
+// high (N2, N4, T9): "0, 5, 10, 50, and 55; 1, 6, 51, and 56; …; or 4, 9,
+// 54, and 59".
+func timeOutcomes(x hashed, r bounds) string {
+	outs := stepOutcomes(x, r)
+	words := make([]string, len(outs))
+	for i, o := range outs {
+		vals := slices.Sorted(slices.Values(o))
+		nums := make([]string, len(vals))
+		for j, v := range vals {
+			nums[j] = number(v)
+		}
+		words[i] = andList(nums)
+	}
+	last := len(words) - 1
+	return strings.Join(words[:last], "; ") + "; or " + words[last]
 }
 
 // stepOutcomes returns the values a hashed step selects for each start the

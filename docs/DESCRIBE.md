@@ -46,7 +46,7 @@ func WithParseOptions(o ParseOption) DescribeOption // package function only
 - `DescribeSpecNote` spells out the values the hash key picks, which the
   description leaves as "a fixed …": "at minutes h, h+15, h+30, and h+45
   past the hour, where h is a hashed minute from 0 to 14". It is "" unless
-  a field has a hashed step or a hashed day of the month (N1–N7).
+  a field has a hashed step or a hashed day of the month (N1–N8).
 - **Coverage:** the second, minute and hour fields, and the day of month, day
   of week, month and year written as values, ranges, steps and lists; the
   `L` and `W` days of month (`DomL`, `DomW`) and the `#` days of week
@@ -169,12 +169,13 @@ which form a spec gets. Each has an ID, which the grammar cites.
 | ID | Rule |
 |---|---|
 | N1 | The note is "" unless a field has a hashed step or a hashed day of the month (`H`, `H(1-15)`, `1,H`); a plain hashed second, minute, hour, day of the week or month needs none. A description rendered field by field still gets its note. A field whose hashed items have no note form leaves the whole note "" |
-| N2 | A hashed step in the second or minute field reads as its values with a variable, unit first (R5), in the hours of the description (R6, R9, C1): "at minutes h, h+15, h+30, and h+45 past the hour, where h is a hashed minute from 0 to 14" |
+| N2 | A hashed step in the second or minute field reads as its values with a variable, unit first (R5), in the hours of the description (R6, R9, R11, R12, C1), or of the written fields when the description is field by field: "at minutes h, h+15, h+30, and h+45 past the hour, where h is a hashed minute from 0 to 14"; "at seconds h, h+15, h+30, and h+45 within minutes 0 thru 10 and 50 thru 59 in every hour, …". A wrapped hashed range lists its outcomes as N4 does: "at minutes 0, 5, 10, 50, and 55; 1, 6, 51, and 56; …; or 4, 9, 54, and 59 past the hour, depending on the hash" |
 | N3 | The values run to the last one any h has; past the T1 limit, the first 3, "…", the last ("h, h+5, h+10, … h+55"). When only some h have the last value, a tail says which: "at minutes h and h+40 past the hour, where h is a hashed minute from 0 to 39; h+40 runs only when h is below 20" |
 | N4 | The day of the week always lists its outcomes; the day of the month and the month list up to 3, and a wrapped range, otherwise the variable form. Outcomes are ordered by h: "on Sunday, Tuesday, Thursday, and Saturday; or Monday, Wednesday, and Friday, depending on the hash". Days of the month read low to high; a wrapped week or year in its order ("on Friday and Sunday; or Saturday and Monday") |
 | N5 | A hashed day of the month: "on day h of every month, where h is a hashed day from 1 to 31; a month without day h is skipped"; beside a plain value "on the 1st and day h of every month, …; a month without day h runs on the 1st only". The tail only when h can pass the 28th |
 | N6 | Each clause carries its own explanation; clauses in field order, joined with ", "; the variables h, k, j, m, n, p in turn. Midnight reads as in the description (R2, D7) |
-| N7 | A hashed hour step names the fixed hour's range and the step: "at the top of a fixed hour between midnight and 5 am and every 6 hours after it"; "thru" the range's last hour when the range is not the whole day |
+| N7 | A hashed hour step names the fixed hour's range and the step: "at the top of a fixed hour between midnight and 5 am and every 6 hours after it"; "thru" the range's last hour when the range is not the whole day; over a wrapped range, in clock order from its start: "at the top of a fixed hour between 10 pm and 11 pm and every 2 hours after it thru 4 am" |
+| N8 | A hashed hour step's note opens with the minutes as its description names them (R4, R5, H14, H22), then N7's hours: "at minutes 0 and 30 during a fixed hour between midnight and 5 am and every 6 hours after it", "at 30 minutes past a fixed hour …", "every minute during a fixed hour …", "at a fixed minute during a fixed hour …" |
 
 ## Grammar (EBNF)
 
@@ -356,10 +357,23 @@ notetext: nclause ("," nclause)*                                            // N
 
 nclause: ntime | nday | nmonth
 
-// N2, N3: a hashed step in a time field, with a variable; N7: hour steps
+// N2, N3: a hashed step in a time field, with a variable; N7, N8: hour steps
 ntime: "at" ("seconds" | "minutes") vals tplace where [tail]
-     | "at" "the" "top" "of" "a" "fixed" "hour" "between" clock "and" clock "and" "every" INT "hours" "after" "it" ["thru" clock]   // N7
+     | "at" ("seconds" | "minutes") toutcomes tplace "," "depending" "on" "the" "hash"   // N2, N4: a wrapped range lists
+     | hlead "a" "fixed" "hour" "between" clock "and" clock "and" "every" INT "hours" "after" "it" ["thru" clock]   // N7, N8
 tplace: "past" "the" "hour" | "during" hours | "past" "every" "hour" hourrange | "within" "a" "minute"   // R6, R9, C1
+      | "within" "every" "minute" ("during" hours | hourrange)             // C1, R12
+      | "within" ("minute" INT | "minutes" vlist) "in" "every" "hour"      // C1
+      | "past" "the" "top" "of" "every" "hour"                              // C1, R4
+      | nhstep                                                              // R11
+nhstep: "every" INT "hours" ("starting" "with" hours | "from" list{hcrange})   // R11, T9
+// N8: the minutes of a hashed hour step, as the description names them
+hlead: "at" "the" "top" "of"                                                // R4
+     | "at" INT ("minute" | "minutes") "past"                              // R5
+     | "every" "minute" "during"                                            // H14
+     | "at" "minutes" vlist "during"                                        // H22
+     | "at" "a" "fixed" "minute" ["between" "minutes" INT "and" INT] "during"   // H22, H3
+toutcomes: list{INT} (";" list{INT})* ";" "or" list{INT}                    // N2, N4: values low to high, ordered by h
 
 // N4, N5: date fields
 nday: "on" "days" vals "of" "every" "month" where [tail]
