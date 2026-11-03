@@ -117,13 +117,25 @@ func (n *noter) minutePlace(hour timeField, hh hashField) (string, bool) {
 }
 
 // whole returns x over its field's range when it covers every value, so a
-// wrapped range of every value counts from the range's start (H10).
+// wrapped range of every value counts from the range's start (H10). A step
+// that does not divide the range keeps its written start: the parser walks
+// from there, so the start decides the values (N4).
 func whole(x hashed, r bounds) hashed {
-	if x.whole {
-		_, _, cr := dowCycle(r.min, r.max, r)
-		x.lo, x.hi = cr.min, cr.max
+	if !x.whole {
+		return x
 	}
+	_, _, cr := dowCycle(r.min, r.max, r)
+	if x.step > 1 && (cr.max-cr.min+1)%x.step != 0 {
+		return x
+	}
+	x.lo, x.hi = cr.min, cr.max
 	return x
+}
+
+// startsElsewhere reports a step over the whole range kept at a written
+// start other than the field's first value (whole).
+func startsElsewhere(x hashed, r bounds) bool {
+	return x.whole && x.lo != r.min
 }
 
 // oneStep returns f's one hashed step, alone in its field. ok is false when
@@ -145,8 +157,8 @@ func (n *noter) stepNote(f hashField, unit string, r bounds, place string, place
 	}
 	x, ok := oneStep(f)
 	x = whole(x, r)
-	if !ok || !placeOK {
-		return "", false
+	if !ok || !placeOK || startsElsewhere(x, r) {
+		return "", false // N4: no list that long, and no plain form is true
 	}
 	if x.lo > x.hi {
 		return "at " + unit + "s " + timeOutcomes(x, r) + place + ", depending on the hash", true
@@ -177,7 +189,7 @@ func (n *noter) hourNote(f hashField, sec, minute timeField, hs, hm hashField) (
 	top := (x.lo + min(x.step, cyclicRangeSize(x.lo, x.hi, hours)) - 1) % span
 	text := fmt.Sprintf("%s a fixed hour between %s and %s and every %d hours after it",
 		lead, n.d.onHour(x.lo), n.d.onHour(top), x.step)
-	if !x.whole {
+	if !x.whole || startsElsewhere(x, hours) {
 		text += " thru " + n.d.onHour(x.hi)
 	}
 	return text, true

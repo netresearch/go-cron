@@ -561,6 +561,15 @@ var describeNoteGoldens = []struct {
 	{spec: "0 9 * * H/4", opts: []DescribeOption{withHash}, want: "on Sunday and Thursday; Monday and Friday; Tuesday and Saturday; or Wednesday, depending on the hash"},
 	{spec: "0 9 * * H(1-5)/2", opts: []DescribeOption{withHash}, want: "on Monday, Wednesday, and Friday; or Tuesday and Thursday, depending on the hash"},
 	{spec: "0 9 * * H(5-1)/2", opts: []DescribeOption{withHash}, want: "on Friday and Sunday; or Saturday and Monday, depending on the hash"},
+	// N4: a step that does not divide the whole range walks from its start
+	{spec: "0 9 * * H(1-7)/2", opts: []DescribeOption{withHash}, want: "on Monday, Wednesday, Friday, and Sunday; or Tuesday, Thursday, and Saturday, depending on the hash"},
+	{spec: "0 9 * * H(1-7)/3", opts: []DescribeOption{withHash}, want: "on Monday, Thursday, and Sunday; Tuesday and Friday; or Wednesday and Saturday, depending on the hash"},
+	{spec: "0 9 * * H(5-4)/2", opts: []DescribeOption{withHash}, want: "on Friday, Sunday, Tuesday, and Thursday; or Saturday, Monday, and Wednesday, depending on the hash"},
+	{spec: "0 0 1 H(2-1)/5 *", opts: []DescribeOption{withHash}, want: "in February, July, and December; March, August, and January; April and September; May and October; or June and November, depending on the hash"},
+	{spec: "H(1-0)/15 * * * *", opts: []DescribeOption{withHash}, want: "at minutes h, h+15, h+30, and h+45 past the hour, where h is a hashed minute from 0 to 14"},
+	{spec: "0 H(5-4)/7 * * *", opts: []DescribeOption{withHash}, want: "at the top of a fixed hour between 5 am and 11 am and every 7 hours after it thru 4 am"},
+	{spec: "0 H(1-0)/5 * * *", opts: []DescribeOption{withHash}, want: "at the top of a fixed hour between 1 am and 5 am and every 5 hours after it thru midnight"},
+	{spec: "H(5-4)/7 * * * *", opts: []DescribeOption{withHash}, want: ""},
 	{spec: "0 0 1 H/2 *", opts: []DescribeOption{withHash}, want: "in January, March, May, July, September, and November; or February, April, June, August, October, and December, depending on the hash"},
 	{spec: "0 0 1 H/3 *", opts: []DescribeOption{withHash}, want: "in January, April, July, and October; February, May, August, and November; or March, June, September, and December, depending on the hash"},
 	{spec: "0 0 1 H/4 *", opts: []DescribeOption{withHash}, want: "in months h, h+4, and h+8, where h is a hashed month from 1 (January) to 4 (April)"},
@@ -605,7 +614,7 @@ var describeNoteGoldens = []struct {
 func TestDescribeSpecNote(t *testing.T) {
 	g := describeNoteGrammar()
 	for _, tt := range describeNoteGoldens {
-		if !g.MatchString(tt.want) {
+		if tt.want != "" && !g.MatchString(tt.want) { // N1: no note has no form
 			t.Errorf("%q: note %q is outside the note grammar", tt.spec, tt.want)
 		}
 		got, err := DescribeSpecNote(tt.spec, tt.opts...)
@@ -649,6 +658,14 @@ func TestStepOutcomes(t *testing.T) {
 		{"H(50-10)/15 * * * * *", 0},
 		{"0 H(50-10)/5 * * * *", 1},
 		{"0 0 H(22-4)/2 * * *", 2},
+		{"0 0 9 * * H(1-7)/2", 5},
+		{"0 0 9 * * H(1-7)/3", 5},
+		{"0 0 9 * * H(5-4)/2", 5},
+		{"0 0 9 * * H(1-0)/2", 5},
+		{"0 H(1-0)/15 * * * *", 1},
+		{"0 0 H(5-4)/7 * * *", 2},
+		{"0 0 H(5-4)/6 * * *", 2},
+		{"0 0 0 1 H(2-1)/5 *", 4},
 	} {
 		_, _, fields, _, _ := p.specFields(tt.spec)
 		r := []bounds{seconds, minutes, hours, dom, months, p.dowBounds()}[tt.field]
