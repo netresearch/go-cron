@@ -318,7 +318,7 @@ type timeField struct {
 	container string // the unit a step starts over in; "" for none
 	r         bounds
 	items     []timeItem
-	vals      []uint            // values once each: sorted, except one item of a date field in firing order
+	vals      []uint            // values once each: sorted, except one item of a day of the week or month in firing order
 	word      func(uint) string // names a value; nil writes the number
 	limit     int               // values listed before a step is cut short; 0 for valueLimit
 }
@@ -332,10 +332,11 @@ func (f timeField) w(v uint) string {
 }
 
 // newTimeField parses the field text, which has already parsed as a spec,
-// into its items and the values they fire on, once each. Seconds, minutes
-// and hours sort: a wrapped range is shorthand for two ranges, so it reads
-// in clock order (T6, T9). A date field keeps the firing order of a single
-// item (D4).
+// into its items and the values they fire on, once each. Seconds, minutes,
+// hours and days of the month sort: a wrapped range is shorthand for two
+// ranges, so it reads low to high (T6, T9). A day of the week or a month
+// keeps the firing order of a single item: a wrapped range reads in week or
+// year order (D4, D6).
 func newTimeField(text, unit, container string, r bounds) timeField {
 	f := timeField{unit: unit, container: container, r: r}
 	for _, expr := range strings.FieldsFunc(text, func(r rune) bool { return r == ',' }) {
@@ -356,7 +357,7 @@ func newTimeField(text, unit, container string, r bounds) timeField {
 		f.items = append(f.items, it)
 		f.vals = append(f.vals, it.fires(r)...)
 	}
-	if len(f.items) > 1 || unit == "second" || unit == "minute" || unit == "hour" {
+	if len(f.items) > 1 || !f.cyclic() {
 		slices.Sort(f.vals) // a list renders the union of its items
 	}
 	f.vals = uniq(f.vals)
@@ -492,12 +493,31 @@ func (f timeField) nums() (text, note string) {
 	return text, note
 }
 
-// runWords names vals as runs of consecutive values: "0 thru 10", "15", "30".
+// cyclic reports a day of the week or a month, whose values read in week or
+// year order (D4, D6).
+func (f timeField) cyclic() bool {
+	return isDowBounds(f.r) || f.unit == "month"
+}
+
+// next returns the value after v: Saturday is followed by Sunday, and
+// December by January (D4, D6).
+func (f timeField) next(v uint) uint {
+	switch {
+	case isDowBounds(f.r):
+		return (v + 1) % 7
+	case f.cyclic() && v == f.r.max: // a month
+		return f.r.min
+	}
+	return v + 1
+}
+
+// runWords names vals as runs of consecutive values: "0 thru 10", "15", "30",
+// "Friday thru Monday".
 func (f timeField) runWords(vals []uint) []string {
 	var words []string
 	for i := 0; i < len(vals); {
 		j := i
-		for j+1 < len(vals) && vals[j+1] == vals[j]+1 {
+		for j+1 < len(vals) && vals[j+1] == f.next(vals[j]) {
 			j++
 		}
 		words = append(words, f.rangeWords(vals[i], vals[j])...)
@@ -512,7 +532,7 @@ func (f timeField) rangeWords(lo, hi uint) []string {
 	switch hi {
 	case lo:
 		return []string{l}
-	case lo + 1:
+	case f.next(lo):
 		return []string{l, h}
 	}
 	return []string{l + thruSep + h}

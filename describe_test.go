@@ -193,6 +193,17 @@ var describeGoldens = []struct {
 	{spec: "0 0 13 * 1-5", want: "at 12 am on the 13th of the month when it falls on Monday thru Friday"},
 	{spec: "*/30 20-5 * * 1", want: "from 12 am thru 5:30 am and 8 pm thru 11:30 pm, at minutes 0 and 30 past each hour on Monday"},
 
+	// Wrapped date ranges: days of the month low to high (T9); days of the
+	// week and months unsplit, in week or year order (D4, D6)
+	{spec: "0 0 25-5 * *", want: "at midnight on the 1st thru 5th and 25th thru 31st of the month; the 29th, 30th, and 31st run only in months that have them"},
+	{spec: "0 0 25-5/2 * *", want: "at midnight on the 2nd, 4th, 25th, 27th, 29th, and 31st of the month; the 29th and 31st run only in months that have them"},
+	{spec: "0 0 31-1 * *", want: "at midnight on the 1st and 31st of the month; the 31st runs only in months that have one"},
+	{spec: "0 9 * * 5-1", want: "at 9 am on Friday thru Monday"},
+	{spec: "0 9 * * 6-0", want: "at 9 am on Saturday and Sunday"},
+	{spec: "0 0 1 11-2 *", want: "at midnight on the 1st of the month in November thru February"},
+	{spec: "0 0 1 11-2/2 *", want: "at midnight on the 1st of the month in November and January"},
+	{spec: "0 0 1 12-1 *", want: "at midnight on the 1st of the month in December and January"},
+
 	// Wrapped hour spans: two parts in clock order (T9)
 	{spec: "* 20-5 * * *", want: "every minute from midnight thru 5:59 am and 8 pm thru 11:59 pm every day"},
 	{spec: "30 20-5 * * *", want: "at 30 minutes past every hour from midnight thru 5 am and 8 pm thru 11 pm every day"},
