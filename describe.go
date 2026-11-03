@@ -530,22 +530,32 @@ func joinHours(inner, every string, sec, minute, hour timeField) string {
 		last := func(h uint) string { return clockTime(h, 59, s) }
 		return inner + " " + fromThru(it, onHour, last) + everyDaySuffix
 	}
-	// R9: one minute. A part of one hour reads "at" its run under one second,
-	// otherwise "during" its hour (T9, R11).
-	if p := it.parts(hours); len(p) == 2 {
-		m := minute.vals[0]
-		switch {
-		case p[1][0] == p[1][1] && sec.single():
-			return inner + " in every hour from " + partRange(p[0]) + " and at " + clockTime(p[1][0], m, sec.vals[0]) + everyDaySuffix
-		case p[0][0] == p[0][1] && sec.single():
-			return "at " + clockTime(p[0][0], m, sec.vals[0]) + " and " + inner + " in every hour from " + partRange(p[1]) + everyDaySuffix
-		case p[1][0] == p[1][1]:
-			return inner + " in every hour from " + partRange(p[0]) + " and during the " + onHour(p[1][0]) + " hour" + everyDaySuffix
-		case p[0][0] == p[0][1]:
-			return inner + " during the " + onHour(p[0][0]) + " hour and in every hour from " + partRange(p[1]) + everyDaySuffix
-		}
+	if out, ok := wrappedPart(inner, sec, minute, it); ok {
+		return out
 	}
-	return inner + " in every hour " + fromThru(it, onHour, onHour) + everyDaySuffix
+	return inner + " in every hour " + fromThru(it, onHour, onHour) + everyDaySuffix // R9
+}
+
+// wrappedPart joins one minute on a wrapped hour range with a part of one
+// hour: the part reads "at" its run under one second, otherwise "during" its
+// hour (T9, R11). ok is false when neither part is one hour.
+func wrappedPart(inner string, sec, minute timeField, it timeItem) (string, bool) {
+	p := it.parts(hours)
+	if len(p) != 2 {
+		return "", false
+	}
+	m := minute.vals[0]
+	switch {
+	case p[1][0] == p[1][1] && sec.single():
+		return inner + " in every hour from " + partRange(p[0]) + " and at " + clockTime(p[1][0], m, sec.vals[0]) + everyDaySuffix, true
+	case p[0][0] == p[0][1] && sec.single():
+		return "at " + clockTime(p[0][0], m, sec.vals[0]) + " and " + inner + " in every hour from " + partRange(p[1]) + everyDaySuffix, true
+	case p[1][0] == p[1][1]:
+		return inner + " in every hour from " + partRange(p[0]) + " and during the " + onHour(p[1][0]) + " hour" + everyDaySuffix, true
+	case p[0][0] == p[0][1]:
+		return inner + " during the " + onHour(p[0][0]) + " hour and in every hour from " + partRange(p[1]) + everyDaySuffix, true
+	}
+	return "", false
 }
 
 // partRange names a part of an hour range: "midnight thru 5 am".
