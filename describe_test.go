@@ -245,6 +245,16 @@ var describeGoldens = []struct {
 	{spec: "0 0 15 * 0-6", want: "at midnight on the 15th of the month"},
 	{spec: "0 0 15 * 0-6", opts: []DescribeOption{withDowOrDom}, want: "at midnight every day"},
 
+	// G11: a day that none of the written months and years has
+	{spec: "0 0 30 2 *", want: "never runs"},
+	{spec: "0 0 31 4,6,9,11 *", want: "never runs"},
+	{spec: "0 0 30,31 2 *", want: "never runs"},
+	{spec: "0 0 29 2 * 2027", opts: []DescribeOption{withYear}, want: "never runs"},
+	{spec: "0 0 30 2 1", want: "never runs"},
+	{spec: "0 0 29 2 * 2028", opts: []DescribeOption{withYear}, want: "at midnight on the 29th of the month in February in year 2028; the 29th runs only in months that have one"},
+	{spec: "0 0 29 2 * 2027,2028", opts: []DescribeOption{withYear}, want: "at midnight on the 29th of the month in February in years 2027 and 2028; the 29th runs only in months that have one"},
+	{spec: "0 0 30 2 1", opts: []DescribeOption{withDowOrDom}, want: "at 12 am on the 30th of the month or on any Monday in February; the 30th runs only in months that have one"},
+
 	// Literal fallback: the whole spec renders field by field
 	{spec: "0 0 L * *", opts: []DescribeOption{WithParseOptions(Minute | Hour | Dom | Month | Dow | DomL)}, want: "minute 0, hour 0, day of month L, month *, day of week *", literal: true},
 	{spec: "0 0 * * 5#3", opts: []DescribeOption{WithParseOptions(Minute | Hour | Dom | Month | Dow | DowNth)}, want: "minute 0, hour 0, day of month *, month *, day of week 5#3", literal: true},
@@ -347,7 +357,7 @@ func describeGrammar() *regexp.Regexp {
 	short := "; the " + list(ord) + " " + alt("runs", "run") + " only in months that have " + alt("one", "them")
 
 	schedule := time + opt(" "+day) + opt(" "+month) + opt(" "+year) + opt(note) + "(?:" + short + ")*"
-	return regexp.MustCompile("^" + schedule + "$")
+	return regexp.MustCompile("^" + alt(schedule, "never runs") + "$")
 }
 
 func TestDescribeSpecGrammar(t *testing.T) {

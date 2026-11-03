@@ -57,7 +57,8 @@ func DescribeSpec(spec string, opts ...DescribeOption) (string, error) {
 // DescribeSpec returns an English description of spec as p parses it, or the
 // parse error. The description follows the grammar in docs/DESCRIBE.md and
 // leaves out the time zone; callers show the location beside it. A valid spec
-// always gets a description and a nil error. Specs outside the fields covered so far (see docs/DESCRIBE.md) get
+// always gets a description and a nil error; one that never runs is "never
+// runs". Specs outside the fields covered so far (see docs/DESCRIBE.md) get
 // each written field by name, as written: "minute 0, hour 0, day of month L,
 // month *, day of week *". A descriptor such as "@daily" is returned as
 // written. H needs no hash key here: the description does not depend on it.
@@ -71,7 +72,8 @@ func (p Parser) DescribeSpec(spec string, _ ...DescribeOption) (string, error) {
 			p.options &^= StrictDays // the result would depend on the placeholder key
 		}
 	}
-	if _, err := p.Parse(spec); err != nil {
+	sch, err := p.Parse(spec)
+	if err != nil {
 		return "", err
 	}
 	// The spec parsed, so the split cannot fail.
@@ -81,6 +83,9 @@ func (p Parser) DescribeSpec(spec string, _ ...DescribeOption) (string, error) {
 	}
 	if containsHashExpr(fields) || !allDescribable(fields) || !describable(yearField) {
 		return p.describeLiteral(spec, fields, yearField), nil
+	}
+	if p.dayMissing(sch) {
+		return "never runs", nil
 	}
 	var d describer
 	day, short, dayName := p.describeDays(&d, fields[3], fields[5])
@@ -101,6 +106,36 @@ type describer struct {
 	dayName   bool     // the day clause names a day of the week (R2, D7)
 	notes     []string // the time fields' notes
 	dateNotes []string // the date fields' notes, after the time's (G7)
+}
+
+// dayMissing reports a day of the month that none of the written months and
+// years has (G11): "0 0 30 2 *", "0 0 29 2 * 2027".
+func (p Parser) dayMissing(sch Schedule) bool {
+	s, ok := sch.(*SpecSchedule)
+	if !ok {
+		return false
+	}
+	or := p.options&DowOrDom != 0
+	if dayNeverMatches(s.Dom, s.Month, s.Dow, s.DomConstraints, or) {
+		return true
+	}
+	if len(s.Year) == 0 || len(s.DomConstraints) > 0 || or && s.Dom&starBit == 0 && s.Dow&starBit == 0 {
+		return false
+	}
+	for y := range s.Year {
+		for m := time.January; m <= time.December; m++ {
+			if s.Month&(1<<uint(m)) == 0 {
+				continue
+			}
+			last := time.Date(y, m+1, 0, 0, 0, 0, 0, time.UTC).Day()
+			for d := 1; d <= last; d++ {
+				if s.Dom&(1<<uint(d)) != 0 {
+					return false
+				}
+			}
+		}
+	}
+	return true
 }
 
 // describeDays describes the day of month and day of week, "" when neither

@@ -27,7 +27,7 @@ func WithParseOptions(o ParseOption) DescribeOption // package function only
   or the options given with `WithParseOptions`. The `Parser` method uses the
   parser's own settings and ignores `WithParseOptions`.
 - An invalid spec returns the parse error. A valid spec always gets a
-  description and a nil error.
+  description and a nil error. A spec that never runs reads "never runs".
   Specs outside the fields covered so far, and specs with `H`, get the
   literal form: each written field by name, as written ("minute 0, hour 9,
   day of month *, month *, day of week 1-5"). A descriptor such as `@daily`
@@ -58,6 +58,7 @@ which form a spec gets. Each has an ID, which the grammar cites.
 | G7 | Clause order: time, day, month, year, then the note, then the short-month clause |
 | G8 | No comma before a trailing clause such as "every day". A list of three or more takes the serial comma: "at minutes 0, 15, 30, and 45 past the hour" |
 | G10 | A combination of fields the grammar has no form for renders field by field |
+| G11 | A spec that never runs reads "never runs": a day that none of the written months and years has (`0 0 30 2 *`, `0 0 29 2 * 2027`) |
 
 ### Time fields
 
@@ -121,6 +122,7 @@ limits (T1, T4, R8–R12), the hour order (T6) and the values themselves (G1).
 // Spaces between words are implied.
 
 start: schedule
+     | "never" "runs"                                                     // G11
 
 schedule: time [day] [month] [year] [note] short*                         // G7
 
