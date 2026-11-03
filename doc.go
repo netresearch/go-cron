@@ -100,12 +100,15 @@ increment until the end of that specific range.  It does not wrap around.
 Comma ( , )
 
 Commas are used to separate items of a list. For example, using "MON,WED,FRI" in
-the 5th field (day of week) would mean Mondays, Wednesdays and Fridays.
+the 5th field (day of week) would mean Mondays, Wednesdays and Fridays. Empty
+items are dropped ("1,,5" is 1 and 5), but a field needs at least one item:
+a field of commas only, such as ",", is an error.
 
 Hyphen ( - )
 
 Hyphens are used to define ranges. For example, 9-17 would indicate every
-hour between 9am and 5pm inclusive.
+hour between 9am and 5pm inclusive. '*' and '?' stand for the whole field and
+cannot start a range: "*-5" is an error.
 
 # Wraparound Ranges
 
@@ -764,7 +767,9 @@ New features available after migration:
   - Context support: Graceful shutdown via context cancellation
   - Run-once jobs: Single-execution jobs that auto-remove after running
 
-All existing code will work unchanged. The migration is a drop-in replacement.
+The API is a drop-in replacement. Some specs robfig/cron accepts are errors
+here, such as a minute step of 60, "0 *-5 * * *" and "* , * * *";
+docs/MIGRATION.md lists them.
 
 # Implementation
 

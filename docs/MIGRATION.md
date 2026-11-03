@@ -195,6 +195,32 @@ parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.
 c := cron.New(cron.WithParser(parser))
 ```
 
+#### Ranges Starting with a Wildcard (#475)
+
+robfig/cron reads a range whose low end is `*` or `?` as the wildcard and
+ignores the high end, so `0 *-5 * * *` runs every hour and `*-/2 * * * *` runs
+as `*/2 * * * *`. go-cron rejects such a range, also with `RobfigCompat`:
+
+```go
+_, err := c.AddFunc("0 *-5 * * *", myFunc)
+// err: hour field: "*" cannot start a range: "*-5"
+```
+
+Write the range you mean (`0 0-5 * * *`) or the wildcard alone (`0 * * * *`).
+
+#### Fields Without Values (#476)
+
+robfig/cron accepts a field of commas only, such as `* , * * *`. The field
+selects no values, so the schedule never runs; with `DowOrDom`, `0 0 , * 1`
+runs every Monday. go-cron rejects such a field, also with `RobfigCompat`:
+
+```go
+_, err := c.AddFunc("* , * * *", myFunc)
+// err: hour field has no values: ","
+```
+
+Empty items inside a list that has values are still dropped: `1,,5` is `1,5`.
+
 #### Minimum @every Duration
 
 **Before (robfig/cron):**

@@ -78,9 +78,10 @@ type DowConstraint struct {
 type bounds struct {
 	min, max     uint
 	names        map[string]uint
-	wraparound   bool // whether this field supports wraparound ranges (e.g., 22-2 for hours)
-	lenientSteps bool // whether a step at or above the range size is accepted (LenientSteps)
-	stepEnd      uint // if nonzero, an "N/step" range selects no values past it (DowStepToSaturday)
+	wraparound   bool   // whether this field supports wraparound ranges (e.g., 22-2 for hours)
+	lenientSteps bool   // whether a step at or above the range size is accepted (LenientSteps)
+	stepEnd      uint   // if nonzero, an "N/step" range selects no values past it (DowStepToSaturday)
+	name         string // field name for error messages, e.g. "minute"
 }
 
 // YearBase is the minimum valid year for the Year field.
@@ -97,11 +98,11 @@ const YearMax = 1<<31 - 1 // 2147483647
 // The bounds for each field.
 // Fields with wraparound=true support ranges where start > end (e.g., 22-2 for hours).
 var (
-	seconds = bounds{0, 59, nil, true, false, 0}              // cyclic: supports wraparound
-	minutes = bounds{0, 59, nil, true, false, 0}              // cyclic: supports wraparound
-	hours   = bounds{0, 23, nil, true, false, 0}              // cyclic: supports wraparound
-	dom     = bounds{1, 31, nil, true, false, 0}              // cyclic: supports wraparound (non-existent days skipped)
-	years   = bounds{YearBase, YearMax, nil, false, false, 0} // non-cyclic: no wraparound
+	seconds = bounds{0, 59, nil, true, false, 0, "second"}            // cyclic: supports wraparound
+	minutes = bounds{0, 59, nil, true, false, 0, "minute"}            // cyclic: supports wraparound
+	hours   = bounds{0, 23, nil, true, false, 0, "hour"}              // cyclic: supports wraparound
+	dom     = bounds{1, 31, nil, true, false, 0, "day of month"}      // cyclic: supports wraparound (non-existent days skipped)
+	years   = bounds{YearBase, YearMax, nil, false, false, 0, "year"} // non-cyclic: no wraparound
 	months  = bounds{1, 12, map[string]uint{
 		"jan": 1,
 		"feb": 2,
@@ -115,7 +116,7 @@ var (
 		"oct": 10,
 		"nov": 11,
 		"dec": 12,
-	}, true, false, 0} // cyclic: supports wraparound (e.g., NOV-FEB)
+	}, true, false, 0, "month"} // cyclic: supports wraparound (e.g., NOV-FEB)
 	dow = bounds{0, 7, map[string]uint{
 		"sun": 0,
 		"mon": 1,
@@ -124,7 +125,7 @@ var (
 		"thu": 4,
 		"fri": 5,
 		"sat": 6,
-	}, true, false, 0} // cyclic: supports wraparound (e.g., FRI-MON)
+	}, true, false, 0, "day of week"} // cyclic: supports wraparound (e.g., FRI-MON)
 )
 
 const (

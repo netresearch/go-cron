@@ -60,7 +60,7 @@ func TestRange(t *testing.T) {
 	}
 
 	for _, c := range ranges {
-		actual, err := getRange(c.expr, bounds{c.min, c.max, nil, false, false, 0})
+		actual, err := getRange(c.expr, bounds{min: c.min, max: c.max})
 		if len(c.err) != 0 && (err == nil || !strings.Contains(err.Error(), c.err)) {
 			t.Errorf("%s => expected %v, got %v", c.expr, c.err, err)
 		}
@@ -86,7 +86,7 @@ func TestField(t *testing.T) {
 	}
 
 	for _, c := range fields {
-		actual, _ := getField(c.expr, bounds{c.min, c.max, nil, false, false, 0})
+		actual, _ := getField(c.expr, bounds{min: c.min, max: c.max})
 		if actual != c.expected {
 			t.Errorf("%s => expected %d, got %d", c.expr, c.expected, actual)
 		}
@@ -2603,6 +2603,168 @@ func TestStrictDays(t *testing.T) {
 			_, err := NewParser(fields | tt.options | StrictDays).Parse(tt.spec)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Parse(%q) with StrictDays: err = %v, wantErr %v", tt.spec, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestWildcardCannotStartRange covers #475: a range whose low end is * or ?
+// used to parse as the plain wildcard, ignoring the high end.
+func TestWildcardCannotStartRange(t *testing.T) {
+	t.Parallel()
+
+	standard := NewParser(Minute | Hour | Dom | Month | Dow)
+	seconds := NewParser(Second | Minute | Hour | Dom | Month | Dow)
+	extended := NewParser(Minute | Hour | Dom | Month | Dow | Extended)
+	hashed := NewParser(Minute | Hour | Dom | Month | Dow | Hash).WithHashKey("job")
+
+	tests := []struct {
+		name    string
+		parser  Parser
+		spec    string
+		wantErr string
+	}{
+		{"star to number", standard, "0 *-5 * * *", `hour field: "*" cannot start a range: "*-5"`},
+		{"star to junk", standard, "0 *-zzz * * *", `hour field: "*" cannot start a range: "*-zzz"`},
+		{"star to nothing with step", standard, "*-/2 * * * *", `minute field: "*" cannot start a range: "*-/2"`},
+		{"star to star", standard, "*-* * * * *", `minute field: "*" cannot start a range: "*-*"`},
+		{"question mark in dom", standard, "0 0 ?-3 * 1", `day of month field: "?" cannot start a range: "?-3"`},
+		{"question mark in dow", standard, "0 0 * * ?-FRI", `day of week field: "?" cannot start a range: "?-FRI"`},
+		{"star in month", standard, "0 0 1 *-3 *", `month field: "*" cannot start a range: "*-3"`},
+		{"star in list", standard, "0 1,*-5 * * *", `hour field: "*" cannot start a range: "*-5"`},
+		{"star in second", seconds, "*-5 * * * * *", `second field: "*" cannot start a range: "*-5"`},
+		{"dom with L", extended, "0 0 *-5,L * *", `day of month field: "*" cannot start a range: "*-5"`},
+		{"dow with #", extended, "0 0 * * *-2,FRI#3", `day of week field: "*" cannot start a range: "*-2"`},
+		{"with hash", hashed, "H *-5 * * *", `hour field: "*" cannot start a range: "*-5"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := tt.parser.Parse(tt.spec)
+			if err == nil || err.Error() != tt.wantErr {
+				t.Errorf("Parse(%q) error = %v, want %q", tt.spec, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestWildcardForms keeps the accepted wildcard forms next to the ranges
+// TestWildcardCannotStartRange rejects.
+func TestWildcardForms(t *testing.T) {
+	t.Parallel()
+
+	standard := NewParser(Minute | Hour | Dom | Month | Dow)
+	tests := []struct {
+		spec   string
+		minute uint64
+		dom    uint64
+	}{
+		{"* * * * *", getBits(0, 59, 1) | starBit, getBits(1, 31, 1) | starBit},
+		{"? * ? * *", getBits(0, 59, 1) | starBit, getBits(1, 31, 1) | starBit},
+		{"*/2 * * * *", getBits(0, 59, 2), getBits(1, 31, 1) | starBit},
+		{"?/2 * */2 * *", getBits(0, 59, 2), getBits(1, 31, 2)},
+		{"*/1 * * * *", getBits(0, 59, 1) | starBit, getBits(1, 31, 1) | starBit},
+	}
+	for _, tt := range tests {
+		t.Run(tt.spec, func(t *testing.T) {
+			t.Parallel()
+			sched, err := standard.Parse(tt.spec)
+			if err != nil {
+				t.Fatalf("Parse(%q) error = %v", tt.spec, err)
+			}
+			spec, ok := sched.(*SpecSchedule)
+			if !ok {
+				t.Fatalf("Parse(%q) = %T, want *SpecSchedule", tt.spec, sched)
+			}
+			if spec.Minute != tt.minute || spec.Dom != tt.dom {
+				t.Errorf("Parse(%q) minute = %b, dom = %b; want %b, %b", tt.spec, spec.Minute, spec.Dom, tt.minute, tt.dom)
+			}
+		})
+	}
+}
+
+// TestFieldWithoutValues covers #476: a field of commas only used to parse,
+// select no values and never run (or, with DowOrDom, run on the day of week
+// alone).
+func TestFieldWithoutValues(t *testing.T) {
+	t.Parallel()
+
+	standard := NewParser(Minute | Hour | Dom | Month | Dow)
+	seconds := NewParser(Second | Minute | Hour | Dom | Month | Dow)
+	withYear := NewParser(Minute | Hour | Dom | Month | Dow | Year)
+	dowOrDom := NewParser(Minute | Hour | Dom | Month | Dow | DowOrDom)
+	extended := NewParser(Minute | Hour | Dom | Month | Dow | Extended)
+	hashed := NewParser(Minute | Hour | Dom | Month | Dow | Hash).WithHashKey("job")
+
+	tests := []struct {
+		name    string
+		parser  Parser
+		spec    string
+		wantErr string
+	}{
+		{"minute", standard, ", * * * *", `minute field has no values: ","`},
+		{"hour", standard, "* , * * *", `hour field has no values: ","`},
+		{"day of month", standard, "0 0 ,, * *", `day of month field has no values: ",,"`},
+		{"month", standard, "0 0 1 , *", `month field has no values: ","`},
+		{"day of week", standard, "0 0 * * ,", `day of week field has no values: ","`},
+		{"second", seconds, ", * * * * *", `second field has no values: ","`},
+		{"year", withYear, "0 0 1 1 * ,", `year field has no values: ","`},
+		{"day of month with DowOrDom", dowOrDom, "0 0 , * 1", `day of month field has no values: ","`},
+		{"day of month with Extended", extended, "0 0 , * *", `day of month field has no values: ","`},
+		{"with hash", hashed, "H , * * *", `hour field has no values: ","`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := tt.parser.Parse(tt.spec)
+			if err == nil || err.Error() != tt.wantErr {
+				t.Errorf("Parse(%q) error = %v, want %q", tt.spec, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestFieldParsersRejectNoValues calls the field parsers that Parse does not
+// reach with a field of commas only: the L/W and #n parsers run only on a
+// field that contains those letters, and getField has no caller in Parse.
+func TestFieldParsersRejectNoValues(t *testing.T) {
+	t.Parallel()
+
+	if _, _, err := getDomFieldWithConstraints(",", dom, true, true, "", false); err == nil || err.Error() != `day of month field has no values: ","` {
+		t.Errorf("getDomFieldWithConstraints(\",\") error = %v", err)
+	}
+	if _, _, err := getDowFieldWithConstraints(",", dow, true, true, "", false); err == nil || err.Error() != `day of week field has no values: ","` {
+		t.Errorf("getDowFieldWithConstraints(\",\") error = %v", err)
+	}
+	if _, err := getField(",", minutes); err == nil || err.Error() != `minute field has no values: ","` {
+		t.Errorf("getField(\",\") error = %v", err)
+	}
+}
+
+// TestListWithEmptyItems keeps empty items inside a list that has values
+// accepted next to the fields TestFieldWithoutValues rejects.
+func TestListWithEmptyItems(t *testing.T) {
+	t.Parallel()
+
+	standard := NewParser(Minute | Hour | Dom | Month | Dow)
+	tests := []struct {
+		spec   string
+		minute uint64
+	}{
+		{"1,,5 * * * *", 1<<1 | 1<<5},
+		{",1 * * * *", 1 << 1},
+		{"1, * * * *", 1 << 1},
+		{"* * * * *", getBits(0, 59, 1) | starBit},
+	}
+	for _, tt := range tests {
+		t.Run(tt.spec, func(t *testing.T) {
+			t.Parallel()
+			sched, err := standard.Parse(tt.spec)
+			if err != nil {
+				t.Fatalf("Parse(%q) error = %v", tt.spec, err)
+			}
+			if got := sched.(*SpecSchedule).Minute; got != tt.minute {
+				t.Errorf("Parse(%q) minute = %b, want %b", tt.spec, got, tt.minute)
 			}
 		})
 	}
