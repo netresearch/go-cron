@@ -513,6 +513,11 @@ var describeGoldens = []struct {
 	{spec: "H,H(0-29) 0 H * *", opts: []DescribeOption{withHash}, want: "1 or 2 runs in every hour during the midnight hour, at a fixed minute and a fixed minute between minutes 0 and 29 on a fixed day of the month; the hash key fixes both minutes and the day"},
 	{spec: "H H H * H", opts: []DescribeOption{withHash}, want: "at a fixed minute at a fixed hour on a fixed day of the month when it falls on a fixed day of the week; the hash key fixes the minute, the hour, and both days"},
 
+	// D5, X4: the field as written decides the OR; a plain day takes "any"
+	{spec: "0 0 1 * H,*/7", opts: []DescribeOption{WithParseOptions(Minute | Hour | Dom | Month | Dow | Hash | DowOrDom | StepWildcard)}, want: "at 12 am on the 1st of the month or on any Sunday and a fixed day of the week; the hash key fixes the day"},
+	{spec: "0 0 1 * H,1", opts: []DescribeOption{withHashOr}, want: "at 12 am on the 1st of the month or on any Monday and a fixed day of the week; the hash key fixes the day"},
+	{spec: "0 0 1 * H(1-5)", opts: []DescribeOption{withHashOr}, want: "at midnight on the 1st of the month or on a fixed day of the week between Monday and Friday; the hash key fixes the day"},
+
 	// Literal fallback: the whole spec renders field by field
 	// H in the date fields without a form (H20)
 	{spec: "0 0 H/10 * 1", opts: []DescribeOption{withHash}, want: "minute 0, hour 0, day of month H/10, month *, day of week 1", literal: true},
@@ -839,7 +844,8 @@ func describeGrammars() (descRe, noteRe *regexp.Regexp) {
 	// H18, D5: a fixed day joins the other day field
 	hdomfix := alt("a fixed day of the month"+opt(" between "+domlo+" and "+domhi), "the "+ord+" and a fixed day of the month")
 	hdowfix := alt("a fixed day of the week"+opt(" between "+dayname+" and "+dayname), dayname+" and a fixed day of the week")
-	andor := alt(" when it falls on "+alt(dow, hdowfix), " or on "+alt(list("any "+alt(dayrange, nth+" "+dayname)), hdowfix))
+	hdowany := alt("a fixed day of the week"+opt(" between "+dayname+" and "+dayname), "any "+dayname+" and a fixed day of the week") // X4
+	andor := alt(" when it falls on "+alt(dow, hdowfix), " or on "+alt(list("any "+alt(dayrange, nth+" "+dayname)), hdowany))
 	day := alt(alt(dom, "on "+hdomfix)+opt(andor), "on "+dow, "on "+hday)
 	month := "in " + alt(list(monthname+opt(" thru "+monthname)), hmonth)
 	year := alt("in year "+num, "in years "+vlist)

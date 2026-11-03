@@ -125,7 +125,7 @@ which form a spec gets. Each has an ID, which the grammar cites.
 | X1 | "the last day of the month", "the last weekday of the month", "the weekday nearest the 15th", "the third Friday", "the last Friday" |
 | X2 | `L-n`: "N days before the last day of the month", with no "on" |
 | X3 | A mixed list follows D2: the ordinals and the last day share one "the" ("the 1st, 15th, and last day of the month"). An item of another kind keeps its own words ("the weekday nearest the 15th and the last day of the month"). Items read in the order of the days they name, with the days before the last day at the end, closest first. A list starting with one takes no "on" |
-| X4 | Both day fields join as D5; an ORed item takes "any" ("any Monday and any last Friday") |
+| X4 | Both day fields join as D5; an ORed item takes "any" ("any Monday and any last Friday"), beside a hashed day too ("any Monday and a fixed day of the week"). "a fixed" itself takes none |
 | X5 | A nearest weekday above the 28th gets the short-month clause (D3): "; the 31st runs only in months that have one" |
 | X6 | `L-n` with n ≥ 28 runs only in months of more than n days. As the whole day clause, not ORed: "; it runs only in months of 31 days". In a list or ORed, the item is named: "; 30 days before the last day runs only in months of 31 days" |
 
@@ -293,7 +293,7 @@ clock: CLOCK12 | "midnight" | "noon"                                      // R1,
 // D1–D7: the date clauses
 day: "on" (dom | hdomfix) [andor] | before [andor] | "on" dow | "on" hday   // D5, D7, X2, H18
 andor: "when" "it" "falls" "on" (dow | hdowfix)                           // D5 AND, H18
-     | "or" "on" (list{anyitem} | hdowfix)                                // D5 OR, X4, H18
+     | "or" "on" (list{anyitem} | hdowany)                                // D5 OR, X4, H18
 anyitem: "any" (DAYNAME ["thru" DAYNAME] | NTH DAYNAME)
 dom: "the" olist "of" ("the" | "every") "month"                           // D2
    | "the" "weekday" "nearest" "the" ORD                                  // X1
@@ -319,6 +319,7 @@ hmonth: "a" "fixed" "month" [hmonthrange]
       | hcnt ("month" | "months") "in" "every" "year" [hmonthrange] "," INT "months" "apart" "," "starting" "from" "a" "fixed" "month"
 hdomfix: "a" "fixed" "day" "of" "the" "month" [hdomrange] | "the" ORD "and" "a" "fixed" "day" "of" "the" "month"   // H18, D5
 hdowfix: "a" "fixed" "day" "of" "the" "week" [hdowrange] | DAYNAME "and" "a" "fixed" "day" "of" "the" "week"        // H18, D5
+hdowany: "a" "fixed" "day" "of" "the" "week" [hdowrange] | "any" DAYNAME "and" "a" "fixed" "day" "of" "the" "week"   // H18, X4
 hdomrange: "between" "the" ORD ["or" "the" ORD] "and" ORD ["or" "the" ORD ["and" ORD]]   // H18, D2, T9
 hdowrange: "between" DAYNAME "and" DAYNAME
 hmonthrange: "between" MONTHNAME "and" MONTHNAME

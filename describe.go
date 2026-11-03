@@ -272,7 +272,7 @@ func (p Parser) describeDays(d *describer, domField, dowField string, hd, hw has
 	md := newDomField(strings.Join(domPlain, ","))
 	wd := p.newDowField(strings.Join(dowPlain, ","))
 	domSet, dowSet := restricted(domField, hd), restricted(dowField, hw)
-	or := domSet && dowSet && p.dowOrDom(domField, dowField)
+	or := domSet && dowSet && p.dowOrDom(hd.writtenOr(domField), hw.writtenOr(dowField))
 	domAll, dowAll := md.every(), wd.every()
 	if or && (domAll || dowAll) {
 		return "", "", !hd.hashes() && !hw.hashes() // T3: one side of the OR is every day
@@ -296,6 +296,10 @@ func (p Parser) describeDays(d *describer, domField, dowField string, hd, hw has
 	d.dayName = len(days)+len(nth) > 0 // a fixed day is not a named day (D7)
 	dowWords := dowItems(days, nth, or)
 	if hw.hashes() {
+		if or && len(wd.vals) > 0 { // X4: a plain day beside the hashed one takes "any"
+			word := wd.w
+			wd.word = func(v uint) string { return "any " + word(v) }
+		}
 		w, wok := p.hashDow(hw, wd, !domSet)
 		dowWords, ok = []string{w}, ok && wok
 	}

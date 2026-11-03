@@ -25,9 +25,18 @@ type hashed struct {
 // hashField is a field split into its plain items and the H items that
 // select by the hash, once each.
 type hashField struct {
-	plain string   // the plain items, H/1 and H(n-n) among them, comma-separated
-	fixed []hashed // H items of one value, the whole range first
-	steps []hashed // H items with a step
+	written string   // the field as written; the parser reads its first character (D5)
+	plain   string   // the plain items, H/1 and H(n-n) among them, comma-separated
+	fixed   []hashed // H items of one value, the whole range first
+	steps   []hashed // H items with a step
+}
+
+// writtenOr returns the field as written when it has H items, otherwise field.
+func (h hashField) writtenOr(field string) string {
+	if h.written != "" {
+		return h.written
+	}
+	return field
 }
 
 // splitHash splits field as the parser reads its H items (H10): H/1 is every
@@ -35,7 +44,7 @@ type hashField struct {
 // join the plain items; a step at or past the range size selects one value.
 // A field whose plain items select every value drops its H items (T11).
 func splitHash(field string, r bounds) hashField {
-	var h hashField
+	h := hashField{written: field}
 	var plain []string
 	for _, it := range strings.FieldsFunc(field, func(r rune) bool { return r == ',' }) {
 		x, isHash := readHash(it, r)
