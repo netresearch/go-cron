@@ -600,7 +600,11 @@ func hashDom(h hashField, md timeField, alone bool) (text, short string, ok bool
 
 // hashDow describes a hashed day of week, counted on the parser's seven-day
 // cycle (H18, H19).
-func (p Parser) hashDow(h hashField, wd timeField, alone bool) (string, bool) {
+func (p Parser) hashDow(h hashField, wd timeField, alone, or bool) (string, bool) {
+	if or && len(wd.vals) > 0 { // X4: a plain day beside the hashed one takes "any"
+		word := wd.w
+		wd.word = func(v uint) string { return "any " + word(v) }
+	}
 	runs := func(x hashed) (int, int) { return runRange(x, p.dowBounds(), nil) }
 	return hashDay(h, wd, "a fixed day of the week", "", runs, alone)
 }

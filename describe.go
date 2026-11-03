@@ -95,15 +95,24 @@ func (p Parser) DescribeSpecNote(spec string, _ ...DescribeOption) (string, erro
 	return note, err
 }
 
+// withPlaceholderKey gives a parser with no hash key one, as the description
+// does not depend on it. StrictDays is dropped when H is in the day of the
+// month or the month, where the result would depend on that key.
+func (p Parser) withPlaceholderKey(spec string) Parser {
+	if p.hashKey != "" {
+		return p
+	}
+	p.hashKey = "describe"
+	// A spec that fails to split fails again in Parse.
+	if _, _, fields, _, err := p.specFields(spec); err == nil && len(fields) > 4 && containsHashExpr(fields[3:5]) {
+		p.options &^= StrictDays
+	}
+	return p
+}
+
 // describe returns the description of spec and its note (N1–N8).
 func (p Parser) describe(spec string) (desc, note string, err error) {
-	if p.hashKey == "" {
-		p.hashKey = "describe"
-		// A spec that fails to split fails again in Parse below.
-		if _, _, fields, _, err := p.specFields(spec); err == nil && len(fields) > 4 && containsHashExpr(fields[3:5]) {
-			p.options &^= StrictDays // the result would depend on the placeholder key
-		}
-	}
+	p = p.withPlaceholderKey(spec)
 	sch, err := p.Parse(spec)
 	if err != nil {
 		return "", "", err
@@ -117,8 +126,7 @@ func (p Parser) describe(spec string) (desc, note string, err error) {
 	if !allDescribable(fields) || !describable(yearField) {
 		return p.describeLiteral(spec, fields, yearField), "", nil
 	}
-	// H in a date field: the day the key picks decides, so it is not checked.
-	if !containsHashExpr(fields[3:5]) && p.dayMissing(sch) {
+	if p.dayMissing(sch, fields) {
 		return "never runs", "", nil
 	}
 	var h [3]hashField
@@ -235,10 +243,11 @@ type describer struct {
 }
 
 // dayMissing reports a day of the month that none of the written months and
-// years has (G11): "0 0 30 2 *", "0 0 29 2 * 2027".
-func (p Parser) dayMissing(sch Schedule) bool {
+// years has (G11): "0 0 30 2 *", "0 0 29 2 * 2027". With H in a date field
+// the day the key picks decides, so it is not checked.
+func (p Parser) dayMissing(sch Schedule, fields []string) bool {
 	s, ok := sch.(*SpecSchedule)
-	if !ok {
+	if !ok || containsHashExpr(fields[3:5]) {
 		return false
 	}
 	or := p.options&DowOrDom != 0
@@ -300,11 +309,7 @@ func (p Parser) describeDays(d *describer, domField, dowField string, hd, hw has
 	d.dayName = len(days)+len(nth) > 0 // a fixed day is not a named day (D7)
 	dowWords := dowItems(days, nth, or)
 	if hw.hashes() {
-		if or && len(wd.vals) > 0 { // X4: a plain day beside the hashed one takes "any"
-			word := wd.w
-			wd.word = func(v uint) string { return "any " + word(v) }
-		}
-		w, wok := p.hashDow(hw, wd, !domSet)
+		w, wok := p.hashDow(hw, wd, !domSet, or)
 		dowWords, ok = []string{w}, ok && wok
 	}
 	return dayClause(domText, dowWords, or), short, ok
