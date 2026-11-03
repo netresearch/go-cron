@@ -255,6 +255,10 @@ var describeGoldens = []struct {
 	{spec: "0 0 29 2 * 2027,2028", opts: []DescribeOption{withYear}, want: "at midnight on the 29th of the month in February in years 2027 and 2028; the 29th runs only in months that have one"},
 	{spec: "0 0 30 2 1", opts: []DescribeOption{withDowOrDom}, want: "at 12 am on the 30th of the month or on any Monday in February; the 30th runs only in months that have one"},
 
+	// D2: the values decide, step or list
+	{spec: "0 0 1,8,15 * *", want: "at midnight on the 1st, 8th, and 15th of every month"},
+	{spec: "0 0 1-28/14 * *", want: "at midnight on the 1st and 15th of the month"},
+
 	// Literal fallback: the whole spec renders field by field
 	{spec: "0 0 L * *", opts: []DescribeOption{WithParseOptions(Minute | Hour | Dom | Month | Dow | DomL)}, want: "minute 0, hour 0, day of month L, month *, day of week *", literal: true},
 	{spec: "0 0 * * 5#3", opts: []DescribeOption{WithParseOptions(Minute | Hour | Dom | Month | Dow | DowNth)}, want: "minute 0, hour 0, day of month *, month *, day of week 5#3", literal: true},

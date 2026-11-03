@@ -98,7 +98,7 @@ which form a spec gets. Each has an ID, which the grammar cites.
 | ID | Rule |
 |---|---|
 | D1 | Date clauses follow the time: day, month, year. With the span form, the day follows "past each hour" |
-| D2 | Days of the month are ordinals, with one "the" before them: "the 1st, 5th, 7th, and 10th of the month". They list up to 12 values. A step whose days exist in every month says "of every month", otherwise "of the month" |
+| D2 | Days of the month are ordinals, with one "the" before them: "the 1st, 5th, 7th, and 10th of the month". They list up to 12 values. Three or more evenly spaced days that are not consecutive and all exist in every month say "of every month", written as a step or a list (T2); otherwise "of the month". The same days read the same |
 | D3 | Short months: "; the 31st runs only in months that have one", "; the 29th and 31st run only in months that have them" |
 | D4 | Days of the week are names, from the values the parser selects. Sunday appears once. A step walks the seven days as the parser does (`DowStepToSaturday` included). A wrapped range reads unsplit, in week order: "on Friday thru Monday"; two days name both, "on Saturday and Sunday"; a wrapped step lists in week order: "on Friday and Sunday" |
 | D5 | Both day fields: "when it falls on" (AND, the default), "or on any" (`DowOrDom`). With `StepWildcard`, a field starting with `*` or `?` is unrestricted |
