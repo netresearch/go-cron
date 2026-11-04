@@ -442,7 +442,7 @@ func (n *noter) outcomeTail(x hashed, outs [][]uint) string {
 // timeOutcomes lists the values a wrapped hashed step in the second or
 // minute field selects for each start, ordered by the start, each in the
 // order the parser walks them (N2, N4): "50, 55, 0, 5, and 10; 51, 56, 1,
-// and 6; …; or 54, 59, 4, and 9".
+// and 6; 52, 57, 2, and 7; 53, 58, 3, and 8; or 54, 59, 4, and 9".
 func timeOutcomes(x hashed, r bounds) string {
 	outs := stepOutcomes(x, r)
 	words := make([]string, len(outs))
