@@ -5,7 +5,6 @@ package cron
 
 import (
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 )
@@ -307,7 +306,11 @@ func (n *noter) outcomeNote(f hashField, r bounds, plain timeField) (string, boo
 			words[i] = outcomeWords(o, plain)
 		}
 		last := len(words) - 1
-		return in + strings.Join(words[:last], "; ") + "; or " + words[last] + of + ", depending on the hash", true
+		text := in + strings.Join(words[:last], "; ") + "; or " + words[last] + of + ", depending on the hash"
+		if x.lo > x.hi && plain.container == unitMonth {
+			text += "; a short month skips the days it lacks and changes the last step"
+		}
+		return text, true
 	}
 	v := n.next()
 	vals, top, tail := stepValues(v, x, dateLimit)
@@ -320,16 +323,15 @@ func (n *noter) outcomeNote(f hashField, r bounds, plain timeField) (string, boo
 }
 
 // timeOutcomes lists the values a wrapped hashed step in the second or
-// minute field selects for each start, ordered by the start, each low to
-// high (N2, N4, T9): "0, 5, 10, 50, and 55; 1, 6, 51, and 56; …; or 4, 9,
-// 54, and 59".
+// minute field selects for each start, ordered by the start, each in the
+// order the parser walks them (N2, N4): "50, 55, 0, 5, and 10; 51, 56, 1,
+// and 6; …; or 54, 59, 4, and 9".
 func timeOutcomes(x hashed, r bounds) string {
 	outs := stepOutcomes(x, r)
 	words := make([]string, len(outs))
 	for i, o := range outs {
-		vals := slices.Sorted(slices.Values(o))
-		nums := make([]string, len(vals))
-		for j, v := range vals {
+		nums := make([]string, len(o))
+		for j, v := range o {
 			nums[j] = number(v)
 		}
 		words[i] = andList(nums)
@@ -352,9 +354,9 @@ func stepOutcomes(x hashed, r bounds) [][]uint {
 	return out
 }
 
-// outcomeWords names one outcome: days of the month low to high with one
-// "the", cut short past dateLimit (T1): "the 1st, 3rd, 5th, … 31st"; days
-// of the week and months by name in the order they run.
+// outcomeWords names one outcome in the order it runs: days of the month
+// with one "the", cut short past dateLimit (T1): "the 1st, 3rd, 5th, … 31st";
+// days of the week and months by name.
 func outcomeWords(vals []uint, plain timeField) string {
 	if plain.container != unitMonth {
 		words := make([]string, len(vals))
@@ -363,7 +365,6 @@ func outcomeWords(vals []uint, plain timeField) string {
 		}
 		return andList(words)
 	}
-	vals = slices.Sorted(slices.Values(vals))
 	words := make([]string, len(vals))
 	for i, v := range vals {
 		words[i] = ordinal(v)

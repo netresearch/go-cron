@@ -197,8 +197,13 @@ func gcd(a, b uint64) uint64 {
 
 // between names the range of a hashed value or step: "between minutes 0 and
 // 29", "between minutes 0 and 10 or 50 and 59", "between minutes 0 and 5 or
-// 59" (H3, T9). ok is false for a wrapped range of one value per part.
+// 59" (H3, T9). A wrapped step reads from its start, where its walk starts:
+// "between minutes 50 and 10". ok is false for a wrapped range of one value
+// per part.
 func between(unit string, x hashed, r bounds) (string, bool) {
+	if x.step > 1 && x.lo > x.hi {
+		return fmt.Sprintf("between %ss %d and %d", unit, x.lo, x.hi), true
+	}
 	parts, ok := rangeParts(x, r, number, "", " and ")
 	return "between " + unit + "s " + parts, ok
 }
@@ -661,15 +666,16 @@ func hashDate(h hashField, f timeField, noun, the string, runs func(hashed) (int
 
 // dateBetween names the range of a hashed date value or step by its values:
 // " between Monday and Friday", " between the 1st and 15th" (H3, H18). A
-// wrapped day of the month splits low to high: " between the 1st and 5th or
-// the 25th and 31st"; a wrapped week or year reads in its order: " between
-// Friday and Monday", " between November and February". ok is false for a
-// wrapped day of the month of one value per part (H20).
+// wrapped fixed day of the month splits low to high: " between the 1st and
+// 5th or the 25th and 31st"; a wrapped step of days, week or year reads in its
+// order: " between the 25th and 5th", " between Friday and Monday", " between
+// November and February". ok is false for a wrapped day of the month of one
+// value per part (H20).
 func dateBetween(x hashed, f timeField, the string) (string, bool) {
 	switch {
 	case x.whole:
 		return "", true
-	case x.lo > x.hi && f.container == unitMonth:
+	case x.lo > x.hi && f.container == unitMonth && x.step <= 1:
 		parts, ok := rangeParts(x, f.r, f.w, the, " and ")
 		return " between " + parts, ok
 	}

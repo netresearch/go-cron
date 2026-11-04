@@ -379,7 +379,7 @@ var describeGoldens = []struct {
 	{spec: "H/15 9,17 * * *", opts: []DescribeOption{withHash}, want: "4 runs in every hour during the 9 am and 5 pm hours, 15 minutes apart, starting from a fixed minute; the hash key fixes the minute"},
 	{spec: "H/15 */6 * * *", opts: []DescribeOption{withHash}, want: "4 runs in every hour during midnight, 6 am, noon, and 6 pm hours, 15 minutes apart, starting from a fixed minute; the hash key fixes the minute"},
 	{spec: "H/15 20-5 * * *", opts: []DescribeOption{withHash}, want: "4 runs in every hour from midnight thru 5 am and 8 pm thru 11 pm, 15 minutes apart, starting from a fixed minute; the hash key fixes the minute"},
-	{spec: "H(50-10)/5 * * * *", opts: []DescribeOption{withHash}, want: "4 or 5 runs in every hour between minutes 0 and 10 or 50 and 59, 5 minutes apart, starting from a fixed minute; the hash key fixes the minute"},
+	{spec: "H(50-10)/5 * * * *", opts: []DescribeOption{withHash}, want: "4 or 5 runs in every hour between minutes 50 and 10, 5 minutes apart, starting from a fixed minute; the hash key fixes the minute"},
 	{spec: "30 H/6 * * *", opts: []DescribeOption{withHash}, want: "at 30 minutes past the hour, 4 runs in every day, 6 hours apart, starting from a fixed hour; the hash key fixes the hour"},
 	{spec: "* H/5 * * *", opts: []DescribeOption{withHash}, want: "every minute during 4 or 5 hours in every day, 5 hours apart, starting from a fixed hour; the hash key fixes the hour"},
 	{spec: "H * 9 * * *", opts: []DescribeOption{withSecHash}, want: "at a fixed second within every minute during the 9 am hour; the hash key fixes the second"},
@@ -426,7 +426,7 @@ var describeGoldens = []struct {
 	// high, a part of one value read as that value; a day of the week and a
 	// month read in week and year order (H3, H18, H19)
 	{spec: "0 0 H(25-5) * *", opts: []DescribeOption{withHash}, want: "at midnight on a fixed day of the month between the 1st and 5th or the 25th and 31st; the hash key fixes the day"},
-	{spec: "0 0 H(25-5)/7 * *", opts: []DescribeOption{withHash}, want: "at midnight on 0 to 2 days in every month between the 1st and 5th or the 25th and 31st, 7 days apart, starting from a fixed day; the hash key fixes the day"},
+	{spec: "0 0 H(25-5)/7 * *", opts: []DescribeOption{withHash}, want: "at midnight on 0 to 2 days in every month between the 25th and 5th, 7 days apart, starting from a fixed day; the hash key fixes the day"},
 	{spec: "0 9 * * H(5-1)", opts: []DescribeOption{withHash}, want: "at 9 am on a fixed day of the week between Friday and Monday; the hash key fixes the day"},
 	{spec: "0 9 * * H(5-1)/2", opts: []DescribeOption{withHash}, want: "at 9 am on 2 days in every week between Friday and Monday, 2 days apart, starting from a fixed day; the hash key fixes the day"},
 	{spec: "0 0 1 H(11-2) *", opts: []DescribeOption{withHash}, want: "at midnight on the 1st of the month in a fixed month between November and February; the hash key fixes the month"},
@@ -504,7 +504,7 @@ var describeGoldens = []struct {
 	{spec: "50-10 * * * * *", opts: []DescribeOption{withSeconds}, want: "at seconds 0 thru 10 and 50 thru 59 within a minute"},
 	{spec: "50-10/5 * * * * *", opts: []DescribeOption{withSeconds}, want: "at seconds 0, 5, 10, 50, and 55 within a minute"},
 	{spec: "H(50-10) * * * * *", opts: []DescribeOption{withSecHash}, want: "at a fixed second between seconds 0 and 10 or 50 and 59 within a minute; the hash key fixes the second"},
-	{spec: "H(50-10)/15 * * * * *", opts: []DescribeOption{withSecHash}, want: "1 or 2 runs in every minute between seconds 0 and 10 or 50 and 59, 15 seconds apart, starting from a fixed second; the hash key fixes the second"},
+	{spec: "H(50-10)/15 * * * * *", opts: []DescribeOption{withSecHash}, want: "1 or 2 runs in every minute between seconds 50 and 10, 15 seconds apart, starting from a fixed second; the hash key fixes the second"},
 	{spec: "H/15 20-10/2 * * *", opts: []DescribeOption{withHash}, want: "4 runs in every hour, 15 minutes apart, starting from a fixed minute, every 2 hours from the midnight hour thru the 10 am hour and the 8 pm hour thru the 10 pm hour in every day; the hash key fixes the minute"},
 
 	// T9: a part of one hour under a hashed minute, x to x reads x
@@ -605,7 +605,7 @@ var describeNoteGoldens = []struct {
 	{spec: "0 0 H/2 * *", opts: []DescribeOption{withHash}, want: "on the 1st, 3rd, 5th, … 31st; or the 2nd, 4th, 6th, … 30th of every month, depending on the hash"},
 	{spec: "0 0 H/10 * *", opts: []DescribeOption{withHash}, want: "on days h, h+10, h+20, and h+30 of every month, where h is a hashed day from 1 to 10; h+30 runs only when h is below 2"},
 	{spec: "0 0 H(1-28)/7 * *", opts: []DescribeOption{withHash}, want: "on days h, h+7, h+14, and h+21 of every month, where h is a hashed day from 1 to 7"},
-	{spec: "0 0 H(25-5)/7 * *", opts: []DescribeOption{withHash}, want: "on the 1st and 25th; the 2nd and 26th; the 3rd and 27th; the 4th and 28th; the 5th and 29th; the 30th; or the 31st of every month, depending on the hash"},
+	{spec: "0 0 H(25-5)/7 * *", opts: []DescribeOption{withHash}, want: "on the 25th and 1st; the 26th and 2nd; the 27th and 3rd; the 28th and 4th; the 29th and 5th; the 30th; or the 31st of every month, depending on the hash; a short month skips the days it lacks and changes the last step"},
 	{spec: "0 0 H * *", opts: []DescribeOption{withHash}, want: "on day h of every month, where h is a hashed day from 1 to 31; a month without day h is skipped"},
 	{spec: "0 0 1,H * *", opts: []DescribeOption{withHash}, want: "on the 1st and day h of every month, where h is a hashed day from 1 to 31; a month without day h runs on the 1st only"},
 	{spec: "0 0 H(1-15) * *", opts: []DescribeOption{withHash}, want: "on day h of every month, where h is a hashed day from 1 to 15"},
@@ -632,8 +632,8 @@ var describeNoteGoldens = []struct {
 	{spec: "H/15 0 * * * *", opts: []DescribeOption{withSecHash}, want: "at seconds h, h+15, h+30, and h+45 past the top of every hour, where h is a hashed second from 0 to 14"},
 	{spec: "H/15 20-10/2 * * *", opts: []DescribeOption{withHash}, want: "at minutes h, h+15, h+30, and h+45 every 2 hours from the midnight hour thru the 10 am hour and the 8 pm hour thru the 10 pm hour, where h is a hashed minute from 0 to 14"},
 	{spec: "H/15 20-5 * * *", opts: []DescribeOption{withHash}, want: "at minutes h, h+15, h+30, and h+45 past every hour from midnight thru 5 am and 8 pm thru 11 pm, where h is a hashed minute from 0 to 14"},
-	{spec: "H(50-10)/5 * * * *", opts: []DescribeOption{withHash}, want: "at minutes 0, 5, 10, 50, and 55; 1, 6, 51, and 56; 2, 7, 52, and 57; 3, 8, 53, and 58; or 4, 9, 54, and 59 past the hour, depending on the hash"},
-	{spec: "H(50-10)/15 * * * * *", opts: []DescribeOption{withSecHash}, want: "at seconds 5 and 50; 6 and 51; 7 and 52; 8 and 53; 9 and 54; 10 and 55; 56; 57; 58; 59; 0; 1; 2; 3; or 4 within a minute, depending on the hash"},
+	{spec: "H(50-10)/5 * * * *", opts: []DescribeOption{withHash}, want: "at minutes 50, 55, 0, 5, and 10; 51, 56, 1, and 6; 52, 57, 2, and 7; 53, 58, 3, and 8; or 54, 59, 4, and 9 past the hour, depending on the hash"},
+	{spec: "H(50-10)/15 * * * * *", opts: []DescribeOption{withSecHash}, want: "at seconds 50 and 5; 51 and 6; 52 and 7; 53 and 8; 54 and 9; 55 and 10; 56; 57; 58; 59; 0; 1; 2; 3; or 4 within a minute, depending on the hash"},
 	{spec: "0 H(22-4)/2 * * *", opts: []DescribeOption{withHash}, want: "at the top of a fixed hour between 10 pm and 11 pm and every 2 hours after it thru 4 am"},
 	{spec: "H/15 50-10 * * * *", opts: []DescribeOption{withSecHash}, want: "at seconds h, h+15, h+30, and h+45 within minutes 0 thru 10 and 50 thru 59 in every hour, where h is a hashed second from 0 to 14"},
 }
@@ -932,7 +932,7 @@ func describeGrammars() (descRe, noteRe *regexp.Regexp) {
 	outcomes := outcome + "(?:; " + outcome + ")*; or " + outcome
 	nday := alt("on days "+vals+" of every month"+where+opt(tail),
 		"on "+opt("the "+ord+" and ")+"day "+v+" of every month"+where+opt("; a month without day "+v+alt(" is skipped", " runs on the "+ord+" only")),
-		"on "+outcomes+opt(" of every month")+", depending on the hash")
+		"on "+outcomes+opt(" of every month")+", depending on the hash"+opt("; a short month skips the days it lacks and changes the last step"))
 	nmonth := alt("in months "+vals+where+opt(tail), "in "+outcomes+", depending on the hash")
 	nclause := alt(ntime, nday, nmonth)
 	noteRe = regexp.MustCompile("^" + nclause + "(?:, " + nclause + ")*$")
