@@ -1116,6 +1116,35 @@ func wideRange(spec string) bool {
 	return false
 }
 
+// repeatsEnd reports a range whose two ends read the same: "11 pm thru 11 pm".
+func repeatsEnd(text string) bool {
+	parts := strings.Split(text, " thru ")
+	for i := 1; i < len(parts); i++ {
+		before, after := strings.Fields(parts[i-1]), strings.Fields(parts[i])
+		for n := 1; n <= min(len(before), len(after)); n++ {
+			if slices.Equal(before[len(before)-n:], after[:n]) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func TestRepeatsEnd(t *testing.T) {
+	for text, want := range map[string]bool{
+		"from midnight thru 5 am and 11 pm thru 11 pm every day":                    true,
+		"every minute from the 6 am hour thru the 6 am hour":                        true,
+		"at minutes 5 thru 5 past the hour":                                         true,
+		"from midnight thru 5 am and 11 pm thru 11:59 pm every day":                 false,
+		"every 2 hours from the midnight hour thru the 10 am hour":                  false,
+		"at the top of a fixed hour between 5 am and 11 am and every 7 hours after": false,
+	} {
+		if got := repeatsEnd(text); got != want {
+			t.Errorf("repeatsEnd(%q) = %v, want %v", text, got, want)
+		}
+	}
+}
+
 // FuzzDescribeSpec checks that every spec that parses gets a description in
 // the grammar or the literal fallback, and the literal fallback only with H,
 // which has forms for some combinations (G10). Specs with a range of more than 100 values (years) are
@@ -1149,6 +1178,9 @@ func FuzzDescribeSpec(f *testing.F) {
 			}
 			if !g.MatchString(got) && !literalForm.MatchString(got) {
 				t.Fatalf("DescribeSpec(%q) = %q, outside the grammar", spec, got)
+			}
+			if repeatsEnd(got) {
+				t.Fatalf("DescribeSpec(%q) = %q: a range with one value (T9)", spec, got)
 			}
 			_, _, fields, _, _ := p.specFields(spec)
 			if literalForm.MatchString(got) && !containsHashExpr(fields) {
