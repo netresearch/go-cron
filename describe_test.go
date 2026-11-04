@@ -612,7 +612,7 @@ var describeNoteGoldens = []struct {
 	{spec: "0 0 H(25-5) * *", opts: []DescribeOption{withHash}, want: "on day h of every month, where h is a hashed day from 1 to 5 or 25 to 31; a month without day h is skipped"},
 	{spec: "0 0 H(10-1) * *", opts: []DescribeOption{withHash}, want: "on day h of every month, where h is a hashed day from 1 or 10 to 31; a month without day h is skipped"},
 	{spec: "H/30 0 * * H/2", opts: []DescribeOption{withHash}, want: "at minutes h and h+30 during the midnight hour, where h is a hashed minute from 0 to 29, on Sunday, Tuesday, Thursday, and Saturday; or Monday, Wednesday, and Friday, depending on the hash"},
-	{spec: "0 0 H/10 H/4 *", opts: []DescribeOption{withHash}, want: "on days h, h+10, h+20, and h+30 of every month, where h is a hashed day from 1 to 10; h+30 runs only when h is below 2, in months k, k+4, and k+8, where k is a hashed month from 1 (January) to 4 (April)"},
+	{spec: "0 0 H/10 H/4 *", opts: []DescribeOption{withHash}, want: "on days h, h+10, h+20, and h+30 of the month, where h is a hashed day from 1 to 10; h+30 runs only when h is below 2, in months k, k+4, and k+8, where k is a hashed month from 1 (January) to 4 (April)"},
 	{spec: "0 0 H(31-5) * *", opts: []DescribeOption{withHash}, want: "on day h of every month, where h is a hashed day from 1 to 5 or 31; a month without day h is skipped"},
 	// N8: the minutes of a hashed hour step; N2 in more hour contexts (R11,
 	// R12, C1); N2, N4: a wrapped hashed range lists; N7 over a wrapped range
@@ -632,6 +632,18 @@ var describeNoteGoldens = []struct {
 	{spec: "H/15 0 * * * *", opts: []DescribeOption{withSecHash}, want: "at seconds h, h+15, h+30, and h+45 past the top of every hour, where h is a hashed second from 0 to 14"},
 	{spec: "H/15 20-10/2 * * *", opts: []DescribeOption{withHash}, want: "at minutes h, h+15, h+30, and h+45 every 2 hours from the midnight hour thru the 10 am hour and the 8 pm hour thru the 10 pm hour, where h is a hashed minute from 0 to 14"},
 	{spec: "H/15 20-5 * * *", opts: []DescribeOption{withHash}, want: "at minutes h, h+15, h+30, and h+45 past every hour from midnight thru 5 am and 8 pm thru 11 pm, where h is a hashed minute from 0 to 14"},
+	{spec: "0 0 H 1 *", opts: []DescribeOption{withHash}, want: "on day h of the month in January, where h is a hashed day from 1 to 31"},
+	{spec: "0 0 H(29-31) 2 *", opts: []DescribeOption{withHash}, want: "on day h of the month in February, where h is a hashed day from 29 to 31; a month without day h is skipped"},
+	{spec: "0 0 H(1-15) 2,4 *", opts: []DescribeOption{withHash}, want: "on day h of the month in February and April, where h is a hashed day from 1 to 15"},
+	{spec: "0 0 H(1-30) 1-3 *", opts: []DescribeOption{withHash}, want: "on day h of the month in January thru March, where h is a hashed day from 1 to 30; a month without day h is skipped"},
+	{spec: "0 0 H(1-15)/5 3 *", opts: []DescribeOption{withHash}, want: "on days h, h+5, and h+10 of every month in March, where h is a hashed day from 1 to 5"},
+	{spec: "0 0 1,H 6 *", opts: []DescribeOption{withHash}, want: "on the 1st and day h of the month in June, where h is a hashed day from 1 to 31; a month without day h runs on the 1st only"},
+	{spec: "0 0 1,H 1 *", opts: []DescribeOption{withHash}, want: "on the 1st and day h of the month in January, where h is a hashed day from 1 to 31"},
+	{spec: "0 0 H(25-5)/3 1 *", opts: []DescribeOption{withHash}, want: "on the 25th, 28th, 31st, and 3rd; the 26th, 29th, 1st, and 4th; or the 27th, 30th, 2nd, and 5th of every month in January, depending on the hash"},
+	{spec: "0 0 H(25-5)/3 4 *", opts: []DescribeOption{withHash}, want: "on the 25th, 28th, 31st, and 3rd; the 26th, 29th, 1st, and 4th; or the 27th, 30th, 2nd, and 5th of every month in April, depending on the hash; a short month skips the days it lacks and changes the last step"},
+	{spec: "0 0 H H *", opts: []DescribeOption{withHash}, want: "on day h of the month, where h is a hashed day from 1 to 31; a month without day h is skipped"},
+	{spec: "0 0 H 1,H *", opts: []DescribeOption{withHash}, want: "on day h of the month, where h is a hashed day from 1 to 31; a month without day h is skipped"},
+	{spec: "0 0 H/10 H *", opts: []DescribeOption{withHash}, want: "on days h, h+10, h+20, and h+30 of the month, where h is a hashed day from 1 to 10; h+30 runs only when h is below 2"},
 	{spec: "H(50-10)/5 * * * *", opts: []DescribeOption{withHash}, want: "at minutes 50, 55, 0, 5, and 10; 51, 56, 1, and 6; 52, 57, 2, and 7; 53, 58, 3, and 8; or 54, 59, 4, and 9 past the hour, depending on the hash"},
 	{spec: "H(50-10)/15 * * * * *", opts: []DescribeOption{withSecHash}, want: "at seconds 50 and 5; 51 and 6; 52 and 7; 53 and 8; 54 and 9; 55 and 10; 56; 57; 58; 59; 0; 1; 2; 3; or 4 within a minute, depending on the hash"},
 	{spec: "0 H(22-4)/2 * * *", opts: []DescribeOption{withHash}, want: "at the top of a fixed hour between 10 pm and 11 pm and every 2 hours after it thru 4 am"},
@@ -930,9 +942,11 @@ func describeGrammars() (descRe, noteRe *regexp.Regexp) {
 		hlead+" a fixed hour between "+clock+" and "+clock+" and every "+num+" hours after it"+opt(" thru "+clock)) // N7, N8
 	outcome := alt(list(dayname), list(monthname), "the "+ord+opt(" and "+ord), "the "+ord+"(?:, "+ord+")+, and "+ord, "the "+ord+", "+ord+", "+ord+", … "+ord)
 	outcomes := outcome + "(?:; " + outcome + ")*; or " + outcome
-	nday := alt("on days "+vals+" of every month"+where+opt(tail),
-		"on "+opt("the "+ord+" and ")+"day "+v+" of every month"+where+opt("; a month without day "+v+alt(" is skipped", " runs on the "+ord+" only")),
-		"on "+outcomes+opt(" of every month")+", depending on the hash"+opt("; a short month skips the days it lacks and changes the last step"))
+	inMonths := opt(" in " + list(monthname+opt(" thru "+monthname))) // N5: a written month
+	ofDays := alt(" of every month"+inMonths, " of the month")
+	nday := alt("on days "+vals+ofDays+where+opt(tail),
+		"on "+opt("the "+ord+" and ")+"day "+v+alt(" of every month", " of the month"+inMonths)+where+opt("; a month without day "+v+alt(" is skipped", " runs on the "+ord+" only")),
+		"on "+outcomes+opt(ofDays)+", depending on the hash"+opt("; a short month skips the days it lacks and changes the last step"))
 	nmonth := alt("in months "+vals+where+opt(tail), "in "+outcomes+", depending on the hash")
 	nclause := alt(ntime, nday, nmonth)
 	noteRe = regexp.MustCompile("^" + nclause + "(?:, " + nclause + ")*$")
