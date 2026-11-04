@@ -126,6 +126,8 @@ const (
 	thruSep          = " thru "
 	everyDaySuffix   = " every day"
 	inEveryDaySuffix = " in every day"
+	everyHourFrom    = " every hour from "
+	inEveryHourFrom  = " in every hour from "
 )
 
 // valueLimit is how many second or minute values are listed before a step
@@ -483,11 +485,11 @@ func onTheHour(lead string, hour timeField, at func(h uint) string) string {
 	if p := it.parts(hours); len(p) == 2 {
 		switch {
 		case p[1][0] == p[1][1] && at != nil:
-			return lead + " every hour from " + partRange(p[0]) + " and at " + at(p[1][0]) + everyDaySuffix
+			return lead + everyHourFrom + partRange(p[0]) + " and at " + at(p[1][0]) + everyDaySuffix
 		case p[0][0] == p[0][1] && at != nil:
-			return "at " + at(p[0][0]) + " and " + lead + " every hour from " + partRange(p[1]) + everyDaySuffix
+			return "at " + at(p[0][0]) + " and " + lead + everyHourFrom + partRange(p[1]) + everyDaySuffix
 		case p[1][0] == p[1][1]:
-			return lead + " every hour from " + partRange(p[0]) + " and the " + onHour(p[1][0]) + " hour" + everyDaySuffix
+			return lead + everyHourFrom + partRange(p[0]) + " and the " + onHour(p[1][0]) + " hour" + everyDaySuffix
 		case p[0][0] == p[0][1]:
 			return lead + " the " + onHour(p[0][0]) + " hour and every hour from " + partRange(p[1]) + everyDaySuffix
 		}
@@ -547,11 +549,11 @@ func wrappedPart(inner string, sec, minute timeField, it timeItem) (string, bool
 	m := minute.vals[0]
 	switch {
 	case p[1][0] == p[1][1] && sec.single():
-		return inner + " in every hour from " + partRange(p[0]) + " and at " + clockTime(p[1][0], m, sec.vals[0]) + everyDaySuffix, true
+		return inner + inEveryHourFrom + partRange(p[0]) + " and at " + clockTime(p[1][0], m, sec.vals[0]) + everyDaySuffix, true
 	case p[0][0] == p[0][1] && sec.single():
-		return "at " + clockTime(p[0][0], m, sec.vals[0]) + " and " + inner + " in every hour from " + partRange(p[1]) + everyDaySuffix, true
+		return "at " + clockTime(p[0][0], m, sec.vals[0]) + " and " + inner + inEveryHourFrom + partRange(p[1]) + everyDaySuffix, true
 	case p[1][0] == p[1][1]:
-		return inner + " in every hour from " + partRange(p[0]) + " and during the " + onHour(p[1][0]) + " hour" + everyDaySuffix, true
+		return inner + inEveryHourFrom + partRange(p[0]) + " and during the " + onHour(p[1][0]) + " hour" + everyDaySuffix, true
 	case p[0][0] == p[0][1]:
 		return inner + " during the " + onHour(p[0][0]) + " hour and in every hour from " + partRange(p[1]) + everyDaySuffix, true
 	}
