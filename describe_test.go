@@ -742,29 +742,36 @@ func TestStepOutcomes(t *testing.T) {
 		for _, o := range stepOutcomes(x, r) {
 			want[fmt.Sprint(slices.Sorted(slices.Values(o)))] = true
 		}
-		got := map[string]bool{}
-		for k := range 1000 {
-			sch, err := p.WithHashKey(fmt.Sprint("key", k)).Parse(tt.spec)
-			if err != nil {
-				t.Fatal(err)
-			}
-			ss := sch.(*SpecSchedule)
-			bits := []uint64{ss.Second, ss.Minute, ss.Hour, ss.Dom, ss.Month, ss.Dow}[tt.field]
-			if tt.field == 5 && bits&(1<<7) != 0 {
-				bits = bits&^(1<<7) | 1 // Sunday is 0 and 7
-			}
-			var vals []uint
-			for v := r.min; v <= r.max; v++ {
-				if bits&(1<<v) != 0 {
-					vals = append(vals, v)
-				}
-			}
-			got[fmt.Sprint(vals)] = true
-		}
+		got := parserOutcomes(t, p, tt.spec, tt.field, r)
 		if !maps.Equal(got, want) {
 			t.Errorf("%s: parser outcomes %v, stepOutcomes %v", tt.spec, slices.Sorted(maps.Keys(got)), slices.Sorted(maps.Keys(want)))
 		}
 	}
+}
+
+// parserOutcomes returns the value sets field takes in spec over 1,000 keys.
+func parserOutcomes(t *testing.T, p Parser, spec string, field int, r bounds) map[string]bool {
+	t.Helper()
+	got := map[string]bool{}
+	for k := range 1000 {
+		sch, err := p.WithHashKey(fmt.Sprint("key", k)).Parse(spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ss := sch.(*SpecSchedule)
+		bits := []uint64{ss.Second, ss.Minute, ss.Hour, ss.Dom, ss.Month, ss.Dow}[field]
+		if field == 5 && bits&(1<<7) != 0 {
+			bits = bits&^(1<<7) | 1 // Sunday is 0 and 7
+		}
+		var vals []uint
+		for v := r.min; v <= r.max; v++ {
+			if bits&(1<<v) != 0 {
+				vals = append(vals, v)
+			}
+		}
+		got[fmt.Sprint(vals)] = true
+	}
+	return got
 }
 
 // TestDayStepCountsWrittenMonths binds the count of a hashed day step to the
@@ -787,25 +794,34 @@ func TestDayStepCountsWrittenMonths(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			s := keyed.(*SpecSchedule)
-			for _, y := range []int{2027, 2028} {
-				for m := time.January; m <= time.December; m++ {
-					if s.Month&(1<<uint(m)) == 0 || len(s.Year) > 0 && !yearWritten(s, y) {
-						continue
-					}
-					n := 0
-					end := time.Date(y, m+1, 1, 0, 0, 0, 0, time.UTC)
-					for at := keyed.Next(time.Date(y, m, 1, 0, 0, 0, 0, time.UTC).Add(-time.Second)); !at.IsZero() && at.Before(end); at = keyed.Next(at) {
-						n++
-					}
-					lo, hi = min(lo, n), max(hi, n)
-				}
-			}
+			keyLo, keyHi := writtenMonthRuns(keyed)
+			lo, hi = min(lo, keyLo), max(hi, keyHi)
 		}
 		if lo != wantLo || hi != wantHi {
 			t.Errorf("%s: parser runs %d to %d days in a month, count says %d to %d", spec, lo, hi, wantLo, wantHi)
 		}
 	}
+}
+
+// writtenMonthRuns returns the fewest and most runs in one written month of
+// 2027 and 2028.
+func writtenMonthRuns(sch Schedule) (lo, hi int) {
+	s := sch.(*SpecSchedule)
+	lo = 99
+	for _, y := range []int{2027, 2028} {
+		for m := time.January; m <= time.December; m++ {
+			if s.Month&(1<<uint(m)) == 0 || len(s.Year) > 0 && !yearWritten(s, y) {
+				continue
+			}
+			n := 0
+			end := time.Date(y, m+1, 1, 0, 0, 0, 0, time.UTC)
+			for at := sch.Next(time.Date(y, m, 1, 0, 0, 0, 0, time.UTC).Add(-time.Second)); !at.IsZero() && at.Before(end); at = sch.Next(at) {
+				n++
+			}
+			lo, hi = min(lo, n), max(hi, n)
+		}
+	}
+	return lo, hi
 }
 
 func yearWritten(s *SpecSchedule, y int) bool {
@@ -844,7 +860,7 @@ func TestNeverRunsMatchesParser(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if never := got == "never runs"; never == runs {
+		if (got == "never runs") == runs {
 			t.Errorf("%s reads %q; a run within the years: %v", spec, got, runs)
 		}
 	}
@@ -1315,28 +1331,35 @@ func FuzzDescribeSpec(f *testing.F) {
 			t.Skip("range of more than 100 years")
 		}
 		for _, p := range parsers {
-			if _, err := p.WithHashKey("fuzz").Parse(spec); err != nil {
-				continue
-			}
-			got, err := p.DescribeSpec(spec)
-			if err != nil {
-				t.Fatalf("DescribeSpec(%q): unexpected error %v", spec, err)
-			}
-			if !g.MatchString(got) && !literalForm.MatchString(got) {
-				t.Fatalf("DescribeSpec(%q) = %q, outside the grammar", spec, got)
-			}
-			if repeatsEnd(got) {
-				t.Fatalf("DescribeSpec(%q) = %q: a range with one value (T9)", spec, got)
-			}
-			_, _, fields, _, _ := p.specFields(spec)
-			if literalForm.MatchString(got) && !containsHashExpr(fields) {
-				t.Fatalf("DescribeSpec(%q) = %q: literal form without H", spec, got)
-			}
-			if note, _ := p.DescribeSpecNote(spec); note != "" && !ng.MatchString(note) {
-				t.Fatalf("DescribeSpecNote(%q) = %q, outside the note grammar", spec, note)
-			}
+			checkDescribed(t, p, spec, g, ng)
 		}
 	})
+}
+
+// checkDescribed checks what p says about spec, if p parses it: a nil error,
+// a description in the grammar or the literal form, and a note in its grammar.
+func checkDescribed(t *testing.T, p Parser, spec string, g, ng *regexp.Regexp) {
+	t.Helper()
+	if _, err := p.WithHashKey("fuzz").Parse(spec); err != nil {
+		return
+	}
+	got, err := p.DescribeSpec(spec)
+	if err != nil {
+		t.Fatalf("DescribeSpec(%q): unexpected error %v", spec, err)
+	}
+	if !g.MatchString(got) && !literalForm.MatchString(got) {
+		t.Fatalf("DescribeSpec(%q) = %q, outside the grammar", spec, got)
+	}
+	if repeatsEnd(got) {
+		t.Fatalf("DescribeSpec(%q) = %q: a range with one value (T9)", spec, got)
+	}
+	_, _, fields, _, _ := p.specFields(spec) //nolint:dogsled // only the fields matter here
+	if literalForm.MatchString(got) && !containsHashExpr(fields) {
+		t.Fatalf("DescribeSpec(%q) = %q: literal form without H", spec, got)
+	}
+	if note, _ := p.DescribeSpecNote(spec); note != "" && !ng.MatchString(note) {
+		t.Fatalf("DescribeSpecNote(%q) = %q, outside the note grammar", spec, note)
+	}
 }
 
 // TestDescribeSpecRejected checks that a spec the parser rejects returns the
