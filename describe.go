@@ -607,8 +607,8 @@ func monthsOf(days uint) string {
 }
 
 // dowOrDom reports a spec whose restricted day fields are ORed, as the parser
-// decides it: DowOrDom, unless StepWildcard keeps a field that starts with
-// "*" or "?" unrestricted.
+// decides it: DowOrDom, unless StepWildcard finds a field that starts with
+// "*" or "?", which keeps both fields ANDed.
 func (p Parser) dowOrDom(domField, dowField string) bool {
 	return p.options&DowOrDom != 0 &&
 		(p.options&StepWildcard == 0 || wildcardBit(domField)|wildcardBit(dowField) == 0)
