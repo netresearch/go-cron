@@ -3003,7 +3003,9 @@ DescribeSpec returns an English description of a cron expression, or the parse
 error. The package function parses as `AnalyzeSpec` does (the standard parser
 unless `WithParseOptions` is given; several calls OR together); the `Parser`
 method uses the parser's own settings and ignores `WithParseOptions`. Times are on the 12-hour clock. Descriptions carry no time zone. A
-valid spec always gets a description; one that never runs is "never runs".
+valid spec always gets a description; one that never runs is "never runs",
+but past 8,192 hash values each `H` is tested on its own, so a spec whose `H`
+values never fit together can read as running.
 Combinations of `H` without a form get each written field by name ("minute
 0, hour 0, day of month H/10, month *, day of week 1"). A descriptor reads as its cron equivalent, and
 `@triggered`, `@manual` and `@none` read "only when triggered". An interval
