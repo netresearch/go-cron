@@ -1302,6 +1302,7 @@ func FuzzDescribeSpec(f *testing.F) {
 	f.Add("0-59 0-23 * * *")
 	f.Add("+0 0 1 1 0")
 	f.Add("0 0 1 1 0 22-99")
+	f.Add("0 13 * * *")
 
 	g, ng := describeGrammars()
 	parsers := []Parser{

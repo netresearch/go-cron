@@ -130,9 +130,10 @@ import (
   and its rules, grammar and method are in `docs/DESCRIBE.md`. When a change
   alters what a spec means (a parse option, a field form), extend in
   `describe_test.go`: `describeGoldens` (the expected descriptions) and
-  `describeGrammar` (the EBNF as a regexp; every description must match),
-  `describeNoteGoldens` and `describeNoteGrammar` for the notes of
-  `DescribeSpecNote`, and update the EBNF in `docs/DESCRIBE.md` to match.
+  `describeGrammar` (the EBNF as a regexp; every description except the literal
+  form must match), `describeNoteGoldens` and `describeNoteGrammar` for the
+  notes of `DescribeSpecNote`, and update the EBNF in `docs/DESCRIBE.md` to
+  match.
 
 ## Architecture overview
 
