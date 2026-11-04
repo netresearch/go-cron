@@ -829,44 +829,93 @@ func monthLengths(s *SpecSchedule, m uint) []uint {
 	return days
 }
 
-// dayRuns returns the count of a hashed day step's days in a month (H19). One
-// hash picks the day and a hashed month (G11), so it counts the pairs they can
-// make, by walking the hash values. Past maxHashWalk it counts each on its own.
-func (p Parser) dayRuns(sch Schedule, fields []string) func(hashed) (int, int) {
-	lengths := monthDays(sch, hashReach(fields[4], p.fieldBounds(months)))
-	alone := func(x hashed) (int, int) { return dayRange(x, lengths) }
-	s, ok := sch.(*SpecSchedule)
-	if !ok || !splitHash(fields[4], p.fieldBounds(months)).hashes() {
-		return alone
-	}
-	return func(x hashed) (int, int) {
-		pick := *s
-		date := p.hashDateFields(&pick, s, fields)[:2] // the day of the week counts no days
-		period, ok := hashWalkPeriod(date)
-		if !ok {
-			return alone(x)
-		}
-		return walkDayRange(s, date[0], date[1], period)
+// dayDescriber returns a describer set up to count a hashed day step's days
+// (H19).
+func (p Parser) dayDescriber(sch Schedule, fields []string) describer {
+	return describer{
+		monthDays: monthDays(sch, hashReach(fields[4], p.fieldBounds(months))),
+		dayPairs:  p.dayPairs(sch, fields),
 	}
 }
 
-// walkDayRange returns the fewest and most days the hashed day runs on in a
-// month the hashed month picks, over period hash values.
-func walkDayRange(s *SpecSchedule, day, month hashDateField, period uint64) (lo, hi int) {
-	lo = int(dom.max)
+// dayPairs maps each set of days a hashed day step picks to the lengths of the
+// months a hashed month picks with it, as bits. One hash picks both (G11), so it
+// walks the hash values. It is nil when the fields do not pair, and past
+// maxHashWalk, where each counts on its own.
+func (p Parser) dayPairs(sch Schedule, fields []string) map[uint64]uint64 {
+	s, ok := sch.(*SpecSchedule)
+	if !ok || len(splitHash(fields[3], p.fieldBounds(dom)).steps) == 0 || !splitHash(fields[4], p.fieldBounds(months)).hashes() {
+		return nil
+	}
+	pick := *s
+	date := p.hashDateFields(&pick, s, fields)[:2] // the day of the week counts no days
+	period, ok := hashWalkPeriod(date)
+	if !ok {
+		return nil
+	}
+	var lengths [13]uint64
+	for m := uint(time.January); m <= uint(time.December); m++ {
+		for _, n := range monthLengths(s, m) {
+			lengths[m] |= 1 << n
+		}
+	}
+	pairs := make(map[uint64]uint64)
 	for h := range period {
-		days, picked := day.at(h), month.at(h)
+		days, picked := date[0].at(h), date[1].at(h)
 		for m := uint(time.January); m <= uint(time.December); m++ {
-			if picked&(1<<m) == 0 {
-				continue
+			if picked&(1<<m) != 0 {
+				pairs[days] |= lengths[m]
 			}
-			for _, n := range monthLengths(s, m) {
+		}
+	}
+	return pairs
+}
+
+// dayCount returns the fewest and most days the hashed day step x runs on in a
+// month (H19).
+func (d *describer) dayCount(x hashed) (lo, hi int) {
+	if d.dayPairs == nil {
+		return dayRange(x, d.monthDays)
+	}
+	lo = int(dom.max)
+	for days, lengths := range d.dayPairs {
+		for n := uint(28); n <= dom.max; n++ {
+			if lengths&(1<<n) != 0 {
 				c := mathbits.OnesCount64(days & (1<<(n+1) - 2)) // the days 1 to n
 				lo, hi = min(lo, c), max(hi, c)
 			}
 		}
 	}
 	return lo, hi
+}
+
+// lastPairedDay returns the last day any pair of dayPairs runs on (N3).
+func (d *describer) lastPairedDay() (last uint) {
+	for days, lengths := range d.dayPairs {
+		longest := mathbits.Len64(lengths) - 1
+		if run := days & (1<<(longest+1) - 2); run != 0 {
+			last = max(last, uint(mathbits.Len64(run))-1) // #nosec G115 -- at most 64
+		}
+	}
+	return last
+}
+
+// pairedOutcomes cuts each outcome of a hashed day step to the days the months
+// it pairs with have, and drops one left with none (N3, N4).
+func (d *describer) pairedOutcomes(outs [][]uint) [][]uint {
+	var res [][]uint
+	for _, o := range outs {
+		var days uint64
+		for _, v := range o {
+			days |= 1 << v
+		}
+		longest := uint(mathbits.Len64(d.dayPairs[days]))
+		kept := slices.DeleteFunc(slices.Clone(o), func(v uint) bool { return v >= longest })
+		if len(kept) > 0 {
+			res = append(res, kept)
+		}
+	}
+	return res
 }
 
 // dayRange returns the fewest and most days a hashed day-of-month step runs

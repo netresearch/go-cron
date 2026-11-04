@@ -673,6 +673,15 @@ var describeNoteGoldens = []struct {
 	{spec: "0 0 H/10 1 *", opts: []DescribeOption{withHash}, want: "on days h, h+10, h+20, and h+30 of every month in January, where h is a hashed day from 1 to 10; h+30 runs only when h is below 2"},
 	{spec: "0 0 H/10 4 *", opts: []DescribeOption{withHash}, want: "on days h, h+10, h+20, and h+30 of every month in April, where h is a hashed day from 1 to 10; h+30 runs only in months that have one"},
 	{spec: "0 0 H/10 2 *", opts: []DescribeOption{withHash}, want: "on days h, h+10, h+20, and h+30 of every month in February, where h is a hashed day from 1 to 10; h+20 and h+30 run only in months that have them"},
+	// One hash picks the day and a hashed month, so a value no month it pairs
+	// with has reads as if it were not there (N3).
+	{spec: "0 0 H/10 H(2-3) * 2028", opts: []DescribeOption{withHash, withYear}, want: "on days h, h+10, and h+20 of the month, where h is a hashed day from 1 to 10"},
+	{spec: "0 0 H/15 H(4-6) *", opts: []DescribeOption{withHash}, want: "on days h and h+15 of the month, where h is a hashed day from 1 to 15"},
+	{spec: "0 0 H/30 H(2-3) *", opts: []DescribeOption{withHash}, want: "on day h of the month, where h is a hashed day from 1 to 30"},
+	{spec: "0 0 H/10 H *", opts: []DescribeOption{withHash}, want: "on days h, h+10, h+20, and h+30 of the month, where h is a hashed day from 1 to 10; h+30 runs only when h is below 2"},
+	{spec: "0 0 H(28-30)/2 H(2-3) * 2027", opts: []DescribeOption{withHash, withYear}, want: "on the 28th; or the 29th of the month, depending on the hash"},
+	{spec: "0 0 H(29-31)/2 H(2-3) * 2027", opts: []DescribeOption{withHash, withYear}, want: "on the 30th of the month"},
+	{spec: "0 0 H/2 H(2-3) *", opts: []DescribeOption{withHash}, want: "on the 1st, 3rd, 5th, … 29th; or the 2nd, 4th, 6th, … 30th of the month, depending on the hash"},
 	{spec: "0 0 H/2 4 *", opts: []DescribeOption{withHash}, want: "on the 1st, 3rd, 5th, … 31st; or the 2nd, 4th, 6th, … 30th of every month in April, depending on the hash; the 31st runs only in months that have one"},
 	{spec: "0 0 H/2 2 *", opts: []DescribeOption{withHash}, want: "on the 1st, 3rd, 5th, … 31st; or the 2nd, 4th, 6th, … 30th of every month in February, depending on the hash; the 29th, 30th, and 31st run only in months that have them"},
 	{spec: "0 0 1,H 6 *", opts: []DescribeOption{withHash}, want: "on the 1st and day h of the month in June, where h is a hashed day from 1 to 31; a month without day h runs on the 1st only"},
@@ -793,7 +802,8 @@ func TestDayStepCountsWrittenMonths(t *testing.T) {
 			t.Fatal(err)
 		}
 		_, _, fields, _, _ := p.specFields(spec)
-		wantLo, wantHi := p.dayRuns(sch, fields)(splitHash(fields[3], dom).steps[0])
+		d := p.dayDescriber(sch, fields)
+		wantLo, wantHi := d.dayCount(splitHash(fields[3], dom).steps[0])
 		lo, hi := keyedMonthRuns(t, p, spec)
 		if lo != wantLo || hi != wantHi {
 			t.Errorf("%s: parser runs %d to %d days in a month, count says %d to %d", spec, lo, hi, wantLo, wantHi)
@@ -817,7 +827,8 @@ func TestDayRunsPastTheWalk(t *testing.T) {
 	}
 	x := splitHash(fields[3], dom).steps[0]
 	wantLo, wantHi := dayRange(x, []uint{28, 30, 31}) // the months of 2027
-	if lo, hi := p.dayRuns(sch, fields)(x); lo != wantLo || hi != wantHi {
+	d := p.dayDescriber(sch, fields)
+	if lo, hi := d.dayCount(x); lo != wantLo || hi != wantHi {
 		t.Errorf("%s counts %d to %d days; want %d to %d", spec, lo, hi, wantLo, wantHi)
 	}
 }
@@ -832,9 +843,45 @@ func TestDayRunsIgnoresDowPeriod(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, _, fields, _, _ := p.specFields(spec) //nolint:dogsled // only the fields matter
-	if lo, hi := p.dayRuns(sch, fields)(splitHash(fields[3], dom).steps[0]); lo != 3 || hi != 3 {
+	d := p.dayDescriber(sch, fields)
+	if lo, hi := d.dayCount(splitHash(fields[3], dom).steps[0]); lo != 3 || hi != 3 {
 		t.Errorf("%s counts %d to %d days; want 3", spec, lo, hi)
 	}
+}
+
+// TestPairedDaysMatchKeys binds the last day a paired note names to the parser:
+// the last day any key runs on in a month it picks.
+func TestPairedDaysMatchKeys(t *testing.T) {
+	p := MustNewParser(Minute | Hour | Dom | Month | Dow | Hash | Year)
+	for _, spec := range dayStepSpecs() {
+		sch, err := p.WithHashKey("key").Parse(spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _, fields, _, _ := p.specFields(spec)
+		d := p.dayDescriber(sch, fields)
+		if d.dayPairs == nil {
+			continue
+		}
+		if got, want := keyedLastDay(t, p, spec), d.lastPairedDay(); got != want {
+			t.Errorf("%s: last day a key runs on is %d, the note names %d", spec, got, want)
+		}
+	}
+}
+
+// keyedLastDay returns the last day any of 500 keys runs on in 2027 and 2028.
+func keyedLastDay(t *testing.T, p Parser, spec string) (last uint) {
+	t.Helper()
+	for k := range 500 {
+		sch, err := p.WithHashKey(fmt.Sprint("key", k)).Parse(spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for at := sch.Next(time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC)); !at.IsZero() && at.Year() <= 2028; at = sch.Next(at) {
+			last = max(last, uint(at.Day())) // #nosec G115 -- a day of the month
+		}
+	}
+	return last
 }
 
 // dayStepSpecs lists hashed day steps whose count TestDayStepCountsWrittenMonths
@@ -1313,7 +1360,8 @@ func describeGrammars() (descRe, noteRe *regexp.Regexp) {
 		"; the "+ord+" runs only in months that have one", "; the "+alt(ord+" and "+ord, ord+"(?:, "+ord+")+, and "+ord)+" run only in months that have them") // N3, N4
 	nday := alt("on days "+vals+ofDays+where+opt(alt(tail, shortTail)),
 		"on "+opt("the "+ord+" and ")+"day "+v+alt(" of every month", " of the month"+inMonths)+where+opt("; a month without day "+v+alt(" is skipped", " runs on the "+ord+" only")),
-		"on "+outcomes+opt(ofDays)+", depending on the hash"+opt(shortDays))
+		"on "+outcomes+opt(ofDays)+", depending on the hash"+opt(shortDays),
+		"on "+outcome+ofDays) // N3: one outcome left
 	nmonth := alt("in months "+vals+where+opt(tail), "in "+outcomes+", depending on the hash")
 	nclause := alt(ntime, nday, nmonth)
 	noteRe = regexp.MustCompile("^" + nclause + "(?:, " + nclause + ")*$")

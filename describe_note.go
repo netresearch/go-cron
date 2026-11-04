@@ -369,6 +369,7 @@ func (n *noter) outcomeNote(f hashField, r bounds, plain timeField) (string, boo
 	}
 	x = whole(x, r)
 	outs := stepOutcomes(x, r)
+	paired := plain.container == unitMonth && n.d.dayPairs != nil
 	in, of := "on ", ""
 	switch {
 	case plain.container == unitMonth:
@@ -377,17 +378,16 @@ func (n *noter) outcomeNote(f hashField, r bounds, plain timeField) (string, boo
 		in = "in "
 	}
 	if isDowBounds(r) || x.lo > x.hi || len(outs) <= 3 {
-		words := make([]string, len(outs))
-		for i, o := range outs {
-			words[i] = outcomeWords(o, plain)
+		if paired {
+			outs = n.d.pairedOutcomes(outs)
 		}
-		last := len(words) - 1
-		text := in + strings.Join(words[:last], "; ") + "; or " + words[last] + of + ", depending on the hash"
-		if plain.container == unitMonth {
-			text += n.outcomeTail(x, outs)
-		}
-		return text, true
+		return n.outcomeList(x, outs, plain, in, of), true
 	}
+	return n.outcomeVars(x, plain, in, of, paired), true
+}
+
+// outcomeVars writes a hashed step in the variable form (N3, N4).
+func (n *noter) outcomeVars(x hashed, plain timeField, in, of string, paired bool) string {
 	v := n.next()
 	vals, top, tail := stepValues(v, x, dateLimit)
 	if plain.container == unitMonth && n.monthWritten() && x.hi > n.shortest {
@@ -397,8 +397,34 @@ func (n *noter) outcomeNote(f hashField, r bounds, plain timeField) (string, boo
 	if unit == unitMonth {
 		bound = func(m uint) string { return fmt.Sprintf("%d (%s)", m, time.Month(m)) } // #nosec G115 -- a month, 1 to 12
 	}
-	return fmt.Sprintf("%s%ss %s%s, where %s is a hashed %s from %s to %s%s",
-		in, unit, vals, of, v, unit, bound(x.lo), bound(top), tail), true
+	plural := "s"
+	if paired {
+		x.hi = min(x.hi, n.d.lastPairedDay())
+		vals, _, tail = stepValues(v, x, dateLimit)
+		if x.hi-x.lo < x.step {
+			plural = ""
+		}
+	}
+	return fmt.Sprintf("%s%s%s %s%s, where %s is a hashed %s from %s to %s%s",
+		in, unit, plural, vals, of, v, unit, bound(x.lo), bound(top), tail)
+}
+
+// outcomeList writes outcomes in the listed form (N4). One outcome left, as
+// dayPairs can leave, is not up to the hash.
+func (n *noter) outcomeList(x hashed, outs [][]uint, plain timeField, in, of string) string {
+	words := make([]string, len(outs))
+	for i, o := range outs {
+		words[i] = outcomeWords(o, plain)
+	}
+	last := len(words) - 1
+	if last == 0 {
+		return in + words[0] + of
+	}
+	text := in + strings.Join(words[:last], "; ") + "; or " + words[last] + of + ", depending on the hash"
+	if plain.container == unitMonth {
+		text += n.outcomeTail(x, outs)
+	}
+	return text
 }
 
 // outcomeTail is what a short month changes in listed days of the month (N3,
