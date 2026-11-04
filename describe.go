@@ -71,8 +71,9 @@ func DescribeSpecNote(spec string, opts ...DescribeOption) (string, error) {
 // leaves out the time zone; callers show the location beside it. A valid spec
 // always gets a description and a nil error; one that never runs is "never
 // runs", within the limit on H in G11 of docs/DESCRIBE.md. Combinations of H
-// without a form (H17 and H20 in docs/DESCRIBE.md) get each written field by name, as written: "minute 0, hour 0, day of
-// month H/10, month *, day of week 1". A descriptor reads as its cron equivalent
+// without a form (H17 and H20 in docs/DESCRIBE.md) get each written field by
+// name, as written: "minute 0, hour 0, day of month H/10, month *, day of week
+// 1". A descriptor reads as its cron equivalent
 // ("@weekly" is "at 12 am on Sunday"), and "@triggered", "@manual" and "@none"
 // read "only when triggered". An interval reads as it runs, from its anchor,
 // with the parser's minimum: "every 1h30m from when scheduling started",
@@ -252,8 +253,8 @@ type describer struct {
 // day none of the written months and years has ("0 0 30 2 *", "0 0 29 2 *
 // 2027", "0 0 31W 4 *"), or a day that cannot be the counted day of the week
 // ("0 0 1 * MON#2"). With H in a date field it asks this of every set of values
-// a key can pick: "0 0 H(30-31) 2 *" never runs for any key, while "0 0 H(29-31)
-// 2 *" runs for some. It reads the calendar, not Next, which looks only some
+// a key can pick, up to maxHashWalk: "0 0 H(30-31) 2 *" never runs for any key,
+// while "0 0 H(29-31) 2 *" runs for some. It reads the calendar, not Next, which looks only some
 // years ahead: "0 0 * 2 MON#5" next runs in 2044.
 func (p Parser) dayMissing(sch Schedule, fields []string) bool {
 	s, ok := sch.(*SpecSchedule)

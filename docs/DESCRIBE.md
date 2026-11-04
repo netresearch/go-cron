@@ -29,7 +29,8 @@ func WithParseOptions(o ParseOption) DescribeOption // package function only
   or the options given with `WithParseOptions`. The `Parser` method uses the
   parser's own settings and ignores `WithParseOptions`.
 - An invalid spec returns the parse error. A valid spec always gets a
-  description and a nil error. A spec that never runs reads "never runs".
+  description and a nil error. A spec that never runs reads "never runs",
+  within the limit in G11.
   Combinations of `H` that have no form (H17, H20) get the literal
   form: each written field by name, as written ("minute 0, hour 9, day
   of month H/10, month *, day of week 1-5"). A descriptor reads as its

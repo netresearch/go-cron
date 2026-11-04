@@ -123,9 +123,10 @@ func hashReach(field string, r bounds) (bits uint64) {
 	return bits
 }
 
-// maxHashWalk bounds the hash values anyPick walks, and with MaxSpecLength its
-// cost. H over the date fields' whole ranges repeats within 5,208; a step far
-// past its range, or many H items of different sizes, can pass the bound.
+// maxHashWalk bounds the hash values anyPick and dayRuns walk, and with
+// MaxSpecLength their cost. H over the date fields' whole ranges repeats within
+// 5,208; a step far past its range, or many H items of different sizes, can pass
+// the bound.
 const maxHashWalk = 1 << 13
 
 // hashPeriod returns how many hash values H item it takes to repeat, as the
