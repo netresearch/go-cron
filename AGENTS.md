@@ -72,6 +72,8 @@ When proposing changes that conflict with an ADR, you MUST:
 2. Propose a new ADR that supersedes the old one
 3. Document why the original decision no longer applies
 
+Every ADR decision must be pinned by a test that fails when code violates it, as far as a test can express the decision. When touching code an ADR governs, find that test; if none exists, add it in the same PR. A test that only logs ("may or may not run") does not count. When ADR text and a test disagree, do not pick a side in the docs or the code: raise it as a decision for the maintainers.
+
 ## Global rules
 
 - Keep PRs small (~300 net LOC max)
