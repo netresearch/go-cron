@@ -5,6 +5,7 @@ package cron
 
 import (
 	"fmt"
+	mathbits "math/bits"
 	"regexp"
 	"slices"
 	"strconv"
@@ -738,8 +739,7 @@ func hashDay(h hashField, f timeField, noun, the string, runs func(hashed) (int,
 
 // hashDom describes a hashed day of month as a day clause, with the
 // short-month clause of its plain days (H18, H19, D3).
-func hashDom(h hashField, md timeField, lengths []uint, alone bool) (text, short string, ok bool) {
-	runs := func(x hashed) (int, int) { return dayRange(x, lengths) }
+func hashDom(h hashField, md timeField, runs func(hashed) (int, int), alone bool) (text, short string, ok bool) {
 	text, ok = hashDay(h, md, "a fixed day of the month", "the ", runs, alone)
 	return "on " + text, lateClause(md.vals), ok
 }
@@ -796,8 +796,7 @@ func dateBetween(x hashed, f timeField, the string) (string, bool) {
 
 // monthDays lists the lengths of the months a hashed day step can run in
 // (H19): those of the written months and years, with hashedMonths the months a
-// hashed month can pick. February is both 28 and 29 days unless the years
-// decide.
+// hashed month can pick.
 func monthDays(sch Schedule, hashedMonths uint64) []uint {
 	s, ok := sch.(*SpecSchedule)
 	if !ok {
@@ -805,20 +804,68 @@ func monthDays(sch Schedule, hashedMonths uint64) []uint {
 	}
 	var days []uint
 	for m := uint(time.January); m <= uint(time.December); m++ {
-		switch {
-		case (s.Month|hashedMonths)&(1<<m) == 0:
-		case m != uint(time.February):
-			days = append(days, maxDaysInMonth[m])
-		case len(s.Year) == 0:
-			days = append(days, 28, 29)
-		default:
-			for y := range s.Year {
-				days = append(days, uint(time.Date(y, time.March, 0, 0, 0, 0, 0, time.UTC).Day())) // #nosec G115 -- a day of the month
-			}
+		if (s.Month|hashedMonths)&(1<<m) != 0 {
+			days = append(days, monthLengths(s, m)...)
 		}
 	}
 	slices.Sort(days)
 	return slices.Compact(days)
+}
+
+// monthLengths lists the lengths of month m. February is both 28 and 29 days
+// unless the years decide.
+func monthLengths(s *SpecSchedule, m uint) []uint {
+	switch {
+	case m != uint(time.February):
+		return []uint{maxDaysInMonth[m]}
+	case len(s.Year) == 0:
+		return []uint{28, 29}
+	}
+	var days []uint
+	for y := range s.Year {
+		days = append(days, uint(time.Date(y, time.March, 0, 0, 0, 0, 0, time.UTC).Day())) // #nosec G115 -- a day of the month
+	}
+	return days
+}
+
+// dayRuns returns the count of a hashed day step's days in a month (H19). One
+// hash picks the day and a hashed month (G11), so it counts the pairs they can
+// make, by walking the hash values. Past maxHashWalk it counts each on its own.
+func (p Parser) dayRuns(sch Schedule, fields []string) func(hashed) (int, int) {
+	lengths := monthDays(sch, hashReach(fields[4], p.fieldBounds(months)))
+	alone := func(x hashed) (int, int) { return dayRange(x, lengths) }
+	s, ok := sch.(*SpecSchedule)
+	if !ok || !splitHash(fields[4], p.fieldBounds(months)).hashes() {
+		return alone
+	}
+	return func(x hashed) (int, int) {
+		pick := *s
+		date := p.hashDateFields(&pick, s, fields)
+		period, ok := hashWalkPeriod(date)
+		if !ok {
+			return alone(x)
+		}
+		return walkDayRange(s, date[0], date[1], period)
+	}
+}
+
+// walkDayRange returns the fewest and most days the hashed day runs on in a
+// month the hashed month picks, over period hash values.
+func walkDayRange(s *SpecSchedule, day, month hashDateField, period uint64) (lo, hi int) {
+	lo = int(dom.max)
+	for h := range period {
+		days, picked := day.at(h), month.at(h)
+		for m := uint(time.January); m <= uint(time.December); m++ {
+			if picked&(1<<m) == 0 {
+				continue
+			}
+			for _, n := range monthLengths(s, m) {
+				c := mathbits.OnesCount64(days & (1<<(n+1) - 2)) // the days 1 to n
+				lo, hi = min(lo, c), max(hi, c)
+			}
+		}
+	}
+	return lo, hi
 }
 
 // dayRange returns the fewest and most days a hashed day-of-month step runs

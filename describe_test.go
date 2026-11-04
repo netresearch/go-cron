@@ -559,6 +559,7 @@ var describeGoldens = []struct {
 	{spec: "0 0 H(28-30)/2 H * 2028", opts: []DescribeOption{withHash, withYear}, want: "at midnight on 1 or 2 days in every month between the 28th and 30th, 2 days apart, starting from a fixed day in a fixed month in year 2028; the hash key fixes the day and the month"},
 	{spec: "0 0 H(28-30)/2 H * 2027", opts: []DescribeOption{withHash, withYear}, want: "at midnight on 0 to 2 days in every month between the 28th and 30th, 2 days apart, starting from a fixed day in a fixed month in year 2027; the hash key fixes the day and the month"},
 	{spec: "0 0 H/10 H(4-6) *", opts: []DescribeOption{withHash}, want: "at midnight on 3 or 4 days in every month, 10 days apart, starting from a fixed day in a fixed month between April and June; the hash key fixes the day and the month"},
+	{spec: "0 0 H/10 H(2-3) * 2028", opts: []DescribeOption{withHash, withYear}, want: "at midnight on 3 days in every month, 10 days apart, starting from a fixed day in a fixed month between February and March in year 2028; the hash key fixes the day and the month"},
 	{spec: "0 0 H(29-31) 2 *", opts: []DescribeOption{withHash}, want: "at midnight on a fixed day of the month between the 29th and 31st in February; the hash key fixes the day"},
 	{spec: "0 0 H(30-31) 2,4 *", opts: []DescribeOption{withHash}, want: "at midnight on a fixed day of the month between the 30th and 31st in February and April; the hash key fixes the day"},
 
@@ -786,17 +787,27 @@ func parserOutcomes(t *testing.T, p Parser, spec string, field int, r bounds) ma
 // parser: the fewest and most days in a written month, over keys and years.
 func TestDayStepCountsWrittenMonths(t *testing.T) {
 	p := MustNewParser(Minute | Hour | Dom | Month | Dow | Hash | Year)
-	for _, spec := range []string{
+	specs := []string{
 		"0 0 H/10 4 * *", "0 0 H/10 2 * *", "0 0 H/15 1 * *", "0 0 H/30 2 * *", "0 0 H/30 4 * *", "0 0 H/2 2 * *",
 		"0 0 H/10 2,4 * *", "0 0 H(25-5)/7 2 * *", "0 0 H/28 2 * 2027", "0 0 H/10 * * *",
-		"0 0 H(28-30)/2 H * 2028", "0 0 H(28-30)/2 H * 2027", "0 0 H/10 H(4-6) * *",
-	} {
+		"0 0 H(28-30)/2 H * 2028", "0 0 H(28-30)/2 H * 2027", "0 0 H/10 H(4-6) * *", "0 0 H/10 H(2-3) * 2028",
+		"0 0 H/10 1,H(1-1)/70000 * *", // past maxHashWalk
+	}
+	// One hash picks the day and the month, so the count follows their pairs.
+	for _, d := range []string{"H/10", "H/7", "H/15", "H/28", "H/30", "H(28-30)/2", "H(25-5)/7"} {
+		for _, m := range []string{"H", "H(2-3)", "H(4-6)", "H(11-2)", "H/3", "H/5", "2,H(4-6)"} {
+			for _, y := range []string{"*", "2027", "2028"} {
+				specs = append(specs, fmt.Sprintf("0 0 %s %s * %s", d, m, y))
+			}
+		}
+	}
+	for _, spec := range specs {
 		sch, err := p.WithHashKey("key").Parse(spec)
 		if err != nil {
 			t.Fatal(err)
 		}
 		_, _, fields, _, _ := p.specFields(spec)
-		wantLo, wantHi := dayRange(splitHash(fields[3], dom).steps[0], monthDays(sch, hashReach(fields[4], months)))
+		wantLo, wantHi := p.dayRuns(sch, fields)(splitHash(fields[3], dom).steps[0])
 		lo, hi := 99, 0
 		for k := range 500 {
 			keyed, err := p.WithHashKey(fmt.Sprint("key", k)).Parse(spec)

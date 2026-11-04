@@ -140,7 +140,7 @@ func (p Parser) describe(spec string) (desc, note string, err error) {
 	}
 	hd, dates, ok := p.splitDates(fields)
 	units := hashUnits(append(h[:], hd[:]...), []string{unitSecond, unitMinute, unitHour, "day", "day", unitMonth})
-	d := describer{monthDays: monthDays(sch, hashReach(fields[4], p.fieldBounds(months)))}
+	d := describer{dayRuns: p.dayRuns(sch, fields)}
 	day, month, short, dok := p.describeDates(&d, hd, dates)
 	if !ok || !dok {
 		return p.describeLiteral(spec, fields, yearField), p.hashNote(&d, h, hd, dates), nil
@@ -241,11 +241,11 @@ func durationText(d time.Duration) string {
 // describer builds one description: whether it names a day, and the notes
 // of the fields it cuts short.
 type describer struct {
-	named     bool     // a day clause follows the time (J1)
-	dayName   bool     // the day clause names a day of the week (R2, D7)
-	notes     []string // the time fields' notes
-	dateNotes []string // the date fields' notes, after the time's (G7)
-	monthDays []uint   // the month lengths a hashed day step can run in (H19)
+	named     bool                    // a day clause follows the time (J1)
+	dayName   bool                    // the day clause names a day of the week (R2, D7)
+	notes     []string                // the time fields' notes
+	dateNotes []string                // the date fields' notes, after the time's (G7)
+	dayRuns   func(hashed) (int, int) // the count of a hashed day step's days (H19)
 }
 
 // dayMissing reports a schedule whose days the calendar never has (G11): a
@@ -347,7 +347,7 @@ func (p Parser) describeDays(d *describer, domField, dowField string, hd, hw has
 	var domText string
 	switch {
 	case hd.hashes():
-		domText, short, ok = hashDom(hd, md, d.monthDays, !dowSet)
+		domText, short, ok = hashDom(hd, md, d.dayRuns, !dowSet)
 	case domSet:
 		domText, short = d.describeDom(md, domSpecial, !or)
 	}
