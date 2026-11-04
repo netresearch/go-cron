@@ -2002,9 +2002,9 @@ type DescribeOption func(*describeConfig)
 func WithParseOptions(o ParseOption) DescribeOption
 ```
 
-DescribeOption configures the package-level `DescribeSpec`. `WithParseOptions`
-sets its parse options; several calls OR together. The `Parser` method uses the
-parser's own settings and ignores it.
+DescribeOption configures the package-level `DescribeSpec` and `DescribeSpecNote`. `WithParseOptions`
+sets their parse options; several calls OR together. The `Parser` methods use the
+parser's own settings and ignore it.
 
 ---
 
