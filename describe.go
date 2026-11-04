@@ -210,7 +210,7 @@ func (p Parser) describeInterval(descriptor string) string {
 	switch {
 	case every == written:
 		return text
-	case written < p.minEveryInterval:
+	case p.minEveryInterval > 0 && written < p.minEveryInterval:
 		how = "rounded up to the " + durationText(p.minEveryInterval) + " minimum"
 	case every > written:
 		how = "rounded up to whole seconds"

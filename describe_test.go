@@ -470,6 +470,7 @@ var describeGoldens = []struct {
 	{spec: "@every 1.7s", parser: minEvery(1500*time.Millisecond, false), want: "every 2s from when scheduling started (written as 1.7s, rounded up to whole seconds)"},
 	{spec: "@every 500ms", parser: minEvery(1500*time.Millisecond, true), want: "every 2s from when scheduling started (written as 500ms, rounded up to the 1.5s minimum)"},
 	{spec: "@every 0s", parser: minEvery(0, false), want: "every 1s from when scheduling started (written as 0s, rounded up to whole seconds)"},
+	{spec: "@every -1h", parser: minEvery(0, false), want: "every 1s from when scheduling started (written as -1h, rounded up to whole seconds)"},
 
 	// H21: several hashed items without a step
 	{spec: "H,H(0-29) 9 * * *", opts: []DescribeOption{withHash}, want: "1 or 2 runs in every hour during the 9 am hour, at a fixed minute and a fixed minute between minutes 0 and 29; the hash key fixes both minutes"},
