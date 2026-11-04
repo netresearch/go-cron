@@ -2999,7 +2999,7 @@ DescribeSpec returns an English description of a cron expression, or the parse
 error. The package function parses as `AnalyzeSpec` does (the standard parser
 unless `WithParseOptions` is given; several calls OR together); the `Parser`
 method uses the parser's own settings and ignores `WithParseOptions`. Times are on the 12-hour clock. Descriptions carry no time zone. A
-valid spec always gets a description; one that never runs is "never runs".
+valid spec always gets a description.
 Specs outside the fields covered so far, and specs with `H`, get
 each written field by name ("minute 0, hour 0, day of month L, month *, day of
 week *"); a descriptor is returned as written. `H` needs no hash key. The

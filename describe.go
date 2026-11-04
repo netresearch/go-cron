@@ -332,6 +332,8 @@ const (
 	thruSep          = " thru "
 	everyDaySuffix   = " every day"
 	inEveryDaySuffix = " in every day"
+	everyHourFrom    = " every hour from "
+	inEveryHourFrom  = " in every hour from "
 )
 
 // valueLimit is how many values are listed before a step is cut short,
@@ -778,11 +780,11 @@ func (d *describer) onTheHour(lead string, hour timeField, at func(h uint) strin
 	if p := it.parts(hours); len(p) == 2 {
 		switch {
 		case p[1][0] == p[1][1] && at != nil:
-			return lead + " every hour from " + d.partRange(p[0]) + " and at " + at(p[1][0]) + d.everyDay()
+			return lead + everyHourFrom + d.partRange(p[0]) + " and at " + at(p[1][0]) + d.everyDay()
 		case p[0][0] == p[0][1] && at != nil:
-			return "at " + at(p[0][0]) + " and " + lead + " every hour from " + d.partRange(p[1]) + d.everyDay()
+			return "at " + at(p[0][0]) + " and " + lead + everyHourFrom + d.partRange(p[1]) + d.everyDay()
 		case p[1][0] == p[1][1]:
-			return lead + " every hour from " + d.partRange(p[0]) + " and the " + d.onHour(p[1][0]) + " hour" + d.everyDay()
+			return lead + everyHourFrom + d.partRange(p[0]) + " and the " + d.onHour(p[1][0]) + " hour" + d.everyDay()
 		case p[0][0] == p[0][1]:
 			return lead + " the " + d.onHour(p[0][0]) + " hour and every hour from " + d.partRange(p[1]) + d.everyDay()
 		}
@@ -842,11 +844,11 @@ func (d *describer) wrappedPart(inner string, sec, minute timeField, it timeItem
 	m := minute.vals[0]
 	switch {
 	case p[1][0] == p[1][1] && sec.single():
-		return inner + " in every hour from " + d.partRange(p[0]) + " and at " + d.clock(p[1][0], m, sec.vals[0]) + d.everyDay(), true
+		return inner + inEveryHourFrom + d.partRange(p[0]) + " and at " + d.clock(p[1][0], m, sec.vals[0]) + d.everyDay(), true
 	case p[0][0] == p[0][1] && sec.single():
-		return "at " + d.clock(p[0][0], m, sec.vals[0]) + " and " + inner + " in every hour from " + d.partRange(p[1]) + d.everyDay(), true
+		return "at " + d.clock(p[0][0], m, sec.vals[0]) + " and " + inner + inEveryHourFrom + d.partRange(p[1]) + d.everyDay(), true
 	case p[1][0] == p[1][1]:
-		return inner + " in every hour from " + d.partRange(p[0]) + " and during the " + d.onHour(p[1][0]) + " hour" + d.everyDay(), true
+		return inner + inEveryHourFrom + d.partRange(p[0]) + " and during the " + d.onHour(p[1][0]) + " hour" + d.everyDay(), true
 	case p[0][0] == p[0][1]:
 		return inner + " during the " + d.onHour(p[0][0]) + " hour and in every hour from " + d.partRange(p[1]) + d.everyDay(), true
 	}
