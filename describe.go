@@ -124,18 +124,23 @@ func (p Parser) dayMissing(sch Schedule) bool {
 	}
 	for y := range s.Year {
 		for m := time.January; m <= time.December; m++ {
-			if s.Month&(1<<uint(m)) == 0 {
-				continue
-			}
-			last := time.Date(y, m+1, 0, 0, 0, 0, 0, time.UTC).Day()
-			for d := 1; d <= last; d++ {
-				if s.Dom&(1<<uint(d)) != 0 {
-					return false
-				}
+			if s.Month&(1<<uint(m)) != 0 && monthHasDay(s.Dom, y, m) {
+				return false
 			}
 		}
 	}
 	return true
+}
+
+// monthHasDay reports a day in the dom set that month m of year y has.
+func monthHasDay(dom uint64, y int, m time.Month) bool {
+	last := time.Date(y, m+1, 0, 0, 0, 0, 0, time.UTC).Day()
+	for d := 1; d <= last; d++ {
+		if dom&(1<<uint(d)) != 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // describeDays describes the day of month and day of week, "" when neither
