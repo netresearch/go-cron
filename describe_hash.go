@@ -246,7 +246,7 @@ func (d *describer) fixed(unit string, x hashed, r bounds) (string, bool) {
 	case x.lo > x.hi:
 		return "", false
 	}
-	return w + " between " + d.hourNames(timeField{vals: []uint{x.lo, x.hi}}), true
+	return w + betweenSep + d.hourNames(timeField{vals: []uint{x.lo, x.hi}}), true
 }
 
 // runRange returns the fewest and most values a hashed step selects in its
@@ -401,7 +401,7 @@ func (d *describer) hashMinuteHour(h [3]hashField, ms, hs hashShape) (string, bo
 		x := h[2].steps[0]
 		mw, ok := d.fixed(unitMinute, h[1].fixed[0], minutes)
 		lo, hi := runRange(x, hours, nil)
-		return "at " + mw + " during " + counted(lo, hi, unitHour) + " in every day" + stepTail(x, unitHour), ok // H22
+		return "at " + mw + duringSep + counted(lo, hi, unitHour) + inEveryDaySuffix + stepTail(x, unitHour), ok // H22
 	}
 	return "", false
 }
@@ -420,7 +420,7 @@ func (d *describer) stepPlace(unit string, x hashed, r bounds, hour timeField) (
 	case !x.whole:
 		return "", false
 	case k == namedHours || k == stepHours:
-		return " during " + d.hourNames(hour), true
+		return duringSep + d.hourNames(hour), true
 	case k == longRange && unit == unitMinute:
 		it := hour.items[0]
 		if p := it.parts(hours); len(p) == 2 { // T9, R11: a part of one hour
@@ -454,7 +454,7 @@ func (d *describer) hashSecond(x hashed, mh hashField, minute timeField, ms hash
 		return "", false
 	case ms == hashFixed && hour.kind() == namedHours:
 		mw, _ := d.fixed(unitMinute, mh.fixed[0], minutes)
-		return lead + " and " + mw + " during " + d.hourNames(hour) + d.everyDay(), true // H12
+		return lead + " and " + mw + duringSep + d.hourNames(hour) + d.everyDay(), true // H12
 	case ms == hashFixed:
 		mw, _ := d.fixed(unitMinute, mh.fixed[0], minutes)
 		return d.joinHours(lead+" within "+mw, "in every hour", timeField{}, minute, hour), true // H24
@@ -496,9 +496,9 @@ func (d *describer) hashMinute(mh hashField, minute timeField, ms hashShape, hou
 		case everyHour:
 			return lead + " past the hour", true
 		case namedHours:
-			return lead + " during " + d.hourNames(hour) + d.everyDay(), true // H7, H9
+			return lead + duringSep + d.hourNames(hour) + d.everyDay(), true // H7, H9
 		case stepHours:
-			return lead + " during " + d.hourNames(hour) + d.inEveryDay(), true // R10
+			return lead + duringSep + d.hourNames(hour) + d.inEveryDay(), true // R10
 		case longStep:
 			return lead + " " + d.stepClause(hour), true // R11
 		}
@@ -506,14 +506,14 @@ func (d *describer) hashMinute(mh hashField, minute timeField, ms hashShape, hou
 	case hashStep:
 		x := mh.steps[0]
 		if hour.kind() == longStep && x.whole {
-			return runCount(x, minutes, nil) + " in every hour" + stepTail(x, unitMinute) + ", " + d.stepClause(hour), true // H23
+			return runCount(x, minutes, nil) + inEveryHourSuffix + stepTail(x, unitMinute) + ", " + d.stepClause(hour), true // H23
 		}
 		place, ok := d.stepPlace(unitMinute, x, minutes, hour)
-		return runCount(x, minutes, nil) + " in every hour" + place + stepTail(x, unitMinute), ok
+		return runCount(x, minutes, nil) + inEveryHourSuffix + place + stepTail(x, unitMinute), ok
 	case hashTwoFixed:
 		place, ok := d.stepPlace(unitMinute, hashed{whole: true}, minutes, hour)
 		runs, words, okWords := d.fixedPair(mh, unitMinute, minutes)
-		return runs + " in every hour" + place + ", at " + words, ok && okWords // H6, H21
+		return runs + inEveryHourSuffix + place + ", at " + words, ok && okWords // H6, H21
 	}
 	if !hour.every() {
 		return "", false
@@ -563,9 +563,9 @@ func (d *describer) hashHour(hh hashField, hour timeField, hs hashShape, minute 
 // hashHourStep describes a hashed hour step under plain minutes (H2, H14, H22).
 // ok is false for a ranged step, which has no form (H17).
 func (d *describer) hashHourStep(x hashed, minute timeField) (string, bool) {
-	tail := runCount(x, hours, nil) + " in every day" + stepTail(x, unitHour)
+	tail := runCount(x, hours, nil) + inEveryDaySuffix + stepTail(x, unitHour)
 	lo, hi := runRange(x, hours, nil)
-	during := " during " + counted(lo, hi, unitHour) + " in every day" + stepTail(x, unitHour)
+	during := duringSep + counted(lo, hi, unitHour) + inEveryDaySuffix + stepTail(x, unitHour)
 	switch {
 	case !x.whole:
 		return "", false
@@ -679,9 +679,9 @@ func dateBetween(x hashed, f timeField, the string) (string, bool) {
 		return "", true
 	case x.lo > x.hi && f.container == unitMonth && x.step <= 1:
 		parts, ok := rangeParts(x, f.r, f.w, the, " and ")
-		return " between " + parts, ok
+		return betweenSep + parts, ok
 	}
-	return " between " + the + f.w(x.lo) + " and " + f.w(x.hi), true
+	return betweenSep + the + f.w(x.lo) + " and " + f.w(x.hi), true
 }
 
 // monthDays lists the lengths of the months a hashed day step can run in

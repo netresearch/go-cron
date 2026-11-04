@@ -491,7 +491,7 @@ type domPart struct {
 func (d *describer) describeDom(md timeField, special []string, whole bool) (text, short string) {
 	if len(special) == 0 {
 		text = d.dateNums(md)
-		of := " of the month"
+		of := ofTheMonth
 		if _, even := md.gap(); even && !slices.ContainsFunc(md.vals, func(v uint) bool { return v > 28 }) {
 			of = " of every month"
 		}
@@ -506,9 +506,9 @@ func (d *describer) describeDom(md timeField, special []string, whole bool) (tex
 	case len(parts) == 1 && strings.HasPrefix(parts[0].text, "the weekday nearest"):
 		text = "on " + parts[0].text
 	case parts[0].before:
-		text = andList(words) + " of the month"
+		text = andList(words) + ofTheMonth
 	default:
-		text = "on " + andList(words) + " of the month"
+		text = "on " + andList(words) + ofTheMonth
 	}
 	clauses := []string{lateClause(late)}
 	for _, p := range lacking {
@@ -740,15 +740,18 @@ func (p Parser) describeLiteral(spec string, fields []string, yearField string) 
 
 // Phrases the descriptions repeat.
 const (
-	unitSecond       = "second"
-	unitMinute       = "minute"
-	unitHour         = "hour"
-	unitMonth        = "month"
-	thruSep          = " thru "
-	everyDaySuffix   = " every day"
-	inEveryDaySuffix = " in every day"
-	everyHourFrom    = " every hour from "
-	inEveryHourFrom  = " in every hour from "
+	unitSecond        = "second"
+	unitMinute        = "minute"
+	unitHour          = "hour"
+	unitMonth         = "month"
+	thruSep           = " thru "
+	everyDaySuffix    = " every day"
+	inEveryDaySuffix  = " in every day"
+	inEveryHourSuffix = " in every hour"
+	duringSep         = " during "
+	betweenSep        = " between "
+	everyHourFrom     = " every hour from "
+	inEveryHourFrom   = " in every hour from "
 )
 
 // valueLimit is how many values are listed before a step is cut short,
@@ -1251,9 +1254,9 @@ func (d *describer) joinHours(inner, every string, sec, minute, hour timeField) 
 		}
 		return inner + " " + every
 	case namedHours:
-		return inner + " during " + d.hourNames(hour)
+		return inner + duringSep + d.hourNames(hour)
 	case stepHours:
-		return inner + " during " + d.hourNames(hour) + d.inEveryDay()
+		return inner + duringSep + d.hourNames(hour) + d.inEveryDay()
 	case longStep:
 		return inner + " " + d.stepClause(hour)
 	}

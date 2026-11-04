@@ -128,7 +128,7 @@ func (n *noter) secondPlace(minute, hour timeField, hashed bool) (string, bool) 
 		return fmt.Sprintf(" within minute %d in every hour", minute.vals[0]), true
 	default:
 		text, step := minute.nums()
-		return " within minutes " + text + " in every hour" + parenthesized(step), true
+		return " within minutes " + text + inEveryHourSuffix + parenthesized(step), true
 	}
 	return "", false
 }
@@ -145,7 +145,7 @@ func (n *noter) minutePlace(hour timeField, hh hashField) (string, bool) {
 	case everyHour:
 		return " past the hour", true
 	case namedHours, stepHours:
-		return " during " + n.d.hourNames(hour), true
+		return duringSep + n.d.hourNames(hour), true
 	case longRange:
 		return " past " + n.d.everyHourParts(hour.items[0]), true
 	case longStep:
