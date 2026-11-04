@@ -543,6 +543,11 @@ var describeGoldens = []struct {
 	{spec: "0 0 H(30-31)/2 2 *", opts: []DescribeOption{withHash}, want: "never runs"},
 	{spec: "0 0 31 H(4-4) *", opts: []DescribeOption{withHash}, want: "never runs"},
 	{spec: "0 0 H(29-31) 2 * 2027", opts: []DescribeOption{withHash, withYear}, want: "never runs"},
+	// G11: every H in a spec takes its value from one hash, so the fields move together
+	{spec: "0 0 H(29-31) 1 H(1-3) 2028", opts: []DescribeOption{WithParseOptions(Minute | Hour | Dom | Month | Dow | Hash | Year)}, want: "never runs"},
+	{spec: "0 0 L-3 H H(1-3) 2027", opts: []DescribeOption{WithParseOptions(Minute | Hour | Dom | Month | Dow | Extended | Hash | Year)}, want: "never runs"},
+	{spec: "0 0 H(29-30) H(2-3) * 2027", opts: []DescribeOption{WithParseOptions(Minute | Hour | Dom | Month | Dow | Hash | Year)}, want: "at midnight on a fixed day of the month between the 29th and 30th in a fixed month between February and March in year 2027; the hash key fixes the day and the month"},
+	{spec: "0 0 H(30-31) H(2-3) *", opts: []DescribeOption{withHash}, want: "at midnight on a fixed day of the month between the 30th and 31st in a fixed month between February and March; the hash key fixes the day and the month"},
 	{spec: "0 0 H/10 4 *", opts: []DescribeOption{withHash}, want: "at midnight on 3 days in every month, 10 days apart, starting from a fixed day in April; the hash key fixes the day"},
 	{spec: "0 0 H/10 2 *", opts: []DescribeOption{withHash}, want: "at midnight on 2 or 3 days in every month, 10 days apart, starting from a fixed day in February; the hash key fixes the day"},
 	{spec: "0 0 H/15 1 *", opts: []DescribeOption{withHash}, want: "at midnight on 2 or 3 days in every month, 15 days apart, starting from a fixed day in January; the hash key fixes the day"},
@@ -862,6 +867,163 @@ func TestNeverRunsMatchesParser(t *testing.T) {
 		}
 		if (got == "never runs") == runs {
 			t.Errorf("%s reads %q; a run within the years: %v", spec, got, runs)
+		}
+	}
+}
+
+// hashedDateSpecs returns specs with H in the date fields, whose picks move
+// together under the one hash.
+func hashedDateSpecs() []string {
+	var specs []string
+	for _, d := range []string{"H(29-31)", "H(30-31)", "H(30-31)/2", "H(30-31)/3", "31", "L-3", "*/2"} {
+		for _, m := range []string{"H(1-3)", "H(2-3)", "H(4-5)", "H(2-4)/2", "H", "2"} {
+			for _, w := range []string{"*", "H(1-3)", "H(1-2)", "MON#5", "*/2"} {
+				specs = append(specs, fmt.Sprintf("0 0 %s %s %s", d, m, w), fmt.Sprintf("0 0 %s %s %s 2027", d, m, w), fmt.Sprintf("0 0 %s %s %s 2028", d, m, w))
+			}
+		}
+	}
+	return specs
+}
+
+// hashedDateParsers are the options that change how the date fields combine.
+var hashedDateParsers = []ParseOption{
+	Minute | Hour | Dom | Month | Dow | Extended | Hash | YearOptional,
+	Minute | Hour | Dom | Month | Dow | Extended | Hash | YearOptional | DowOrDom,
+	Minute | Hour | Dom | Month | Dow | Extended | Hash | YearOptional | DowOrDom | StepWildcard,
+}
+
+// hashedDateKeys returns keys that reach every set of picks of
+// hashedDateSpecs, whose H items all repeat within 12 hash values.
+func hashedDateKeys(t *testing.T) []string {
+	t.Helper()
+	var keys []string
+	seen := map[uint64]bool{}
+	for k := 0; k < 60; k++ {
+		keys = append(keys, fmt.Sprintf("key-%d", k))
+		seen[computeHash(keys[k])%12] = true
+	}
+	if len(seen) != 12 {
+		t.Fatalf("the keys reach %d of the 12 hash values", len(seen))
+	}
+	return keys
+}
+
+// TestNeverRunsMatchesKeys binds "never runs" to Next for H in the date
+// fields: no key finds a run.
+func TestNeverRunsMatchesKeys(t *testing.T) {
+	keys := hashedDateKeys(t)
+	for _, opts := range hashedDateParsers {
+		p := MustNewParser(opts)
+		for _, spec := range hashedDateSpecs() {
+			runs := false
+			for _, key := range keys {
+				sch, err := p.ParseWithHashKey(spec, key)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for y := 2001; y <= 2029 && !runs; y += 4 { // Next looks 5 years ahead
+					runs = !sch.Next(time.Date(y, 1, 1, 0, 0, 0, 0, time.UTC)).IsZero()
+				}
+				if runs {
+					break
+				}
+			}
+			got, err := p.DescribeSpec(spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if (got == "never runs") == runs {
+				t.Errorf("options %d: %s reads %q; a key finds a run: %v", opts, spec, got, runs)
+			}
+		}
+	}
+}
+
+// TestStrictDaysMatchesKeys binds the parser's error to the keys: with no key,
+// DescribeSpec returns it only when StrictDays rejects every key.
+func TestStrictDaysMatchesKeys(t *testing.T) {
+	keys := hashedDateKeys(t)
+	for _, opts := range hashedDateParsers {
+		p := MustNewParser(opts | StrictDays)
+		for _, spec := range hashedDateSpecs() {
+			rejected := true
+			for _, key := range keys {
+				if _, err := p.ParseWithHashKey(spec, key); err == nil {
+					rejected = false
+					break
+				}
+			}
+			if _, err := p.DescribeSpec(spec); (err != nil) != rejected {
+				t.Errorf("options %d: %s: error %v; StrictDays rejects every key: %v", opts, spec, err, rejected)
+			}
+		}
+	}
+}
+
+// TestHashPeriod checks that an H item picks the same bits every period hash
+// values: the walk behind "never runs" sees all it can pick.
+func TestHashPeriod(t *testing.T) {
+	for _, tt := range []struct {
+		r     bounds
+		items []string
+	}{
+		{dom, []string{"H", "H(29-31)", "H(30-31)/2", "H(30-31)/3", "H/10", "H/40", "H(28-3)", "H(5-5)"}},
+		{months, []string{"H", "H(1-3)", "H(2-4)/2", "H/5", "H/1"}},
+		{dow, []string{"H", "H(0-7)", "H(1-3)", "H(5-7)", "H(5-1)", "H(7-7)", "H/2", "H/9", "H(0-7)/3", "H(6-1)/2"}},
+	} {
+		for _, it := range tt.items {
+			period := hashPeriod(it, tt.r)
+			for h := uint64(0); h < 2000; h++ {
+				a, err := hashExprBits(it, tt.r, h)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if b, _ := hashExprBits(it, tt.r, h+period); a != b {
+					t.Errorf("%s: hash %d picks %b, hash %d picks %b", it, h, a, h+period, b)
+					break
+				}
+			}
+		}
+	}
+}
+
+// TestHashPeriodStep checks that a step inside its range repeats with the
+// step: only a step past the range reads the rest of the hash.
+func TestHashPeriodStep(t *testing.T) {
+	for _, tt := range []struct {
+		item string
+		r    bounds
+		want uint64
+	}{
+		{"H(1-31)/30", dom, 30},
+		{"H/10", dom, 10},
+		{"H(30-31)/2", dom, 2},
+		{"H(30-31)/3", dom, 6},
+		{"H(6-1)/2", dow, 2},
+		{"H", dom, 31},
+		{"H", dow, 56},
+	} {
+		if got := hashPeriod(tt.item, tt.r); got != tt.want {
+			t.Errorf("hashPeriod(%q) = %d, want %d", tt.item, got, tt.want)
+		}
+	}
+}
+
+// TestNeverRunsPastTheWalk checks specs whose H items repeat only past
+// maxHashWalk: each H is tested on its own, so these read as running, the last
+// two only if a Sunday written as 7 counts: 2026-03-01 is a Sunday.
+func TestNeverRunsPastTheWalk(t *testing.T) {
+	for _, spec := range []string{
+		"0 0 H(29-31),H(29-31)/251,H(29-31)/257 1 H(1-3) 2028",
+		"0 0 1,H(1-1)/70000 3 H(5-7) 2026",
+		"0 0 1,H(1-1)/70000 3 H(5-7)/2 2026",
+	} {
+		got, err := DescribeSpec(spec, WithParseOptions(Minute|Hour|Dom|Month|Dow|Hash|Year))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got == "never runs" {
+			t.Errorf("%s reads %q", spec, got)
 		}
 	}
 }

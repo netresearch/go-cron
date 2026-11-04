@@ -251,30 +251,29 @@ type describer struct {
 // dayMissing reports a schedule whose days the calendar never has (G11): a
 // day none of the written months and years has ("0 0 30 2 *", "0 0 29 2 *
 // 2027", "0 0 31W 4 *"), or a day that cannot be the counted day of the week
-// ("0 0 1 * MON#2"). With H in a date field it counts every value a key can
-// pick: "0 0 H(30-31) 2 *" never runs for any key, while "0 0 H(29-31) 2 *"
-// runs for some. It reads the calendar, not Next, which looks only some years
-// ahead: "0 0 * 2 MON#5" next runs in 2044.
+// ("0 0 1 * MON#2"). With H in a date field it asks this of every set of values
+// a key can pick: "0 0 H(30-31) 2 *" never runs for any key, while "0 0 H(29-31)
+// 2 *" runs for some. It reads the calendar, not Next, which looks only some
+// years ahead: "0 0 * 2 MON#5" next runs in 2044.
 func (p Parser) dayMissing(sch Schedule, fields []string) bool {
-	if p.noKeyFindsDay(sch, fields) {
-		return true
-	}
 	s, ok := sch.(*SpecSchedule)
 	if !ok || len(s.Year)+len(s.DomConstraints)+len(s.DowConstraints) == 0 {
-		return false
+		return p.noKeyFindsDay(sch, fields)
 	}
-	reach := *s
-	reach.Dom |= hashReach(fields[3], dom)
-	reach.Month |= hashReach(fields[4], months)
-	reach.Dow |= hashReach(fields[5], p.dowBounds())
-	for _, y := range calendarYears(s.Year) {
+	years := calendarYears(s.Year)
+	return !p.anyPick(s, fields, func(pick *SpecSchedule) bool { return dayInYears(pick, years) })
+}
+
+// dayInYears reports whether s matches a day in any of years.
+func dayInYears(s *SpecSchedule, years []int) bool {
+	for _, y := range years {
 		for t := time.Date(y, time.January, 1, 0, 0, 0, 0, time.UTC); t.Year() == y; t = t.AddDate(0, 0, 1) {
-			if reach.Month&(1<<uint(t.Month())) != 0 && dayMatches(&reach, t) { // #nosec G115 -- a month, 1 to 12
-				return false
+			if s.Month&(1<<uint(t.Month())) != 0 && dayMatches(s, t) { // #nosec G115 -- a month, 1 to 12
+				return true
 			}
 		}
 	}
-	return true
+	return false
 }
 
 // calendarYears returns one year of each kind among the written years, or
@@ -312,15 +311,15 @@ func (p Parser) strictDaysError(spec string, strict bool, sch Schedule, fields [
 }
 
 // noKeyFindsDay reports a day of the month that none of the written months
-// has, whatever value a key picks; the parser's check, without the year.
+// has, whatever values a key picks; the parser's check, without the year.
 func (p Parser) noKeyFindsDay(sch Schedule, fields []string) bool {
 	s, ok := sch.(*SpecSchedule)
-	if !ok || len(s.DomConstraints) > 0 {
+	if !ok {
 		return false
 	}
-	days := s.Dom | hashReach(fields[3], dom)
-	inMonths := s.Month | hashReach(fields[4], months)
-	return dayNeverMatches(days, inMonths, s.Dow, nil, p.options&DowOrDom != 0)
+	return !p.anyPick(s, fields, func(pick *SpecSchedule) bool {
+		return !dayNeverMatches(pick.Dom, pick.Month, pick.Dow, pick.DomConstraints, p.options&DowOrDom != 0)
+	})
 }
 
 // describeDays describes the day of month and day of week, "" when neither

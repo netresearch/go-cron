@@ -122,6 +122,95 @@ func hashReach(field string, r bounds) (bits uint64) {
 	return bits
 }
 
+// maxHashWalk bounds the hash values anyPick walks, and with MaxSpecLength its
+// cost. H over the date fields' whole ranges repeats within 5,208; a step far
+// past its range, or many H items of different sizes, can pass the bound.
+const maxHashWalk = 1 << 13
+
+// hashPeriod returns how many hash values H item it takes to repeat, as the
+// parser reads the hash: a step takes hash%step and, when that falls past the
+// range, hash/step%size; a single value hash%size and, for a second Sunday in
+// the day of the week, hash/size%(size-1).
+func hashPeriod(it string, r bounds) uint64 {
+	x, _ := readHash(it, r)
+	if _, step, hasStep := strings.Cut(it, "/"); hasStep {
+		n, _ := mustParseInt(step) // The spec parsed, so the step is valid.
+		size := uint64(cyclicRangeSize(dowCycle(x.lo, x.hi, r)))
+		switch {
+		case uint64(n) <= size:
+			return uint64(n)
+		case uint64(n) > maxHashWalk:
+			return maxHashWalk + 1
+		}
+		return uint64(n) * size
+	}
+	size := uint64(cyclicRangeSize(x.lo, x.hi, r))
+	if isDowBounds(r) && size > 1 {
+		return size * (size - 1)
+	}
+	return size
+}
+
+// anyPick reports whether try holds for s with its date fields as some key
+// picks them. Every H in a spec takes its value from one hash, so the picks
+// move together (G11): this walks the hash values, not each H on its own. Past
+// maxHashWalk it tries once with every value each H can pick.
+func (p Parser) anyPick(s *SpecSchedule, fields []string, try func(*SpecSchedule) bool) bool {
+	pick := *s
+	domPlain, domItems := splitItems(fields[3], hashItemSyntax)
+	monthPlain, monthItems := splitItems(fields[4], hashItemSyntax)
+	dowPlain, dowItems := splitItems(fields[5], hashItemSyntax)
+	// The spec parsed, so the only error here is an empty list, which is no values.
+	domBits, _, _ := p.parseDomField(strings.Join(domPlain, ","), false)
+	monthBits, _ := getField(strings.Join(monthPlain, ","), p.fieldBounds(months))
+	dowBits, _, _ := p.parseDowField(strings.Join(dowPlain, ","), false)
+	date := []struct {
+		bits  *uint64
+		plain uint64
+		r     bounds
+		items []string
+		field string
+	}{
+		{&pick.Dom, domBits | s.Dom&starBit, p.fieldBounds(dom), domItems, fields[3]},
+		{&pick.Month, monthBits, p.fieldBounds(months), monthItems, fields[4]},
+		{&pick.Dow, dowBits | s.Dow&starBit, p.dowBounds(), dowItems, fields[5]},
+	}
+
+	period := uint64(1)
+	for _, f := range date {
+		for _, it := range f.items {
+			n := hashPeriod(it, f.r)
+			period = period / gcd(period, n) * n
+			if period > maxHashWalk {
+				for _, f := range date {
+					*f.bits = f.plain | hashReach(f.field, f.r)
+				}
+				pick.Dow = NormalizeDOW(pick.Dow) // a reach ending in 7 is Sunday
+				return try(&pick)
+			}
+		}
+	}
+
+	seen := make(map[[3]uint64]bool)
+	for h := range period {
+		for _, f := range date {
+			*f.bits = f.plain
+			for _, it := range f.items {
+				bits, _ := hashExprBits(it, f.r, h) // The spec parsed.
+				*f.bits |= bits
+			}
+		}
+		key := [3]uint64{pick.Dom, pick.Month, pick.Dow}
+		if !seen[key] {
+			seen[key] = true
+			if try(&pick) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // hashShape sorts a field by its H items.
 type hashShape int
 
