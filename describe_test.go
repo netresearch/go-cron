@@ -425,6 +425,7 @@ func FuzzDescribeSpec(f *testing.F) {
 	}
 	f.Add("1,,2 * * * *")
 	f.Add("0-59 0-23 * * *")
+	f.Add("0 13 * * *")
 
 	g := describeGrammar()
 	parsers := []Parser{
@@ -446,6 +447,12 @@ func FuzzDescribeSpec(f *testing.F) {
 			}
 			if !g.MatchString(got) && !literalForm.MatchString(got) {
 				t.Fatalf("DescribeSpec(%q) = %q, outside the grammar", spec, got)
+			}
+			_, descriptor, fields, yearField, _ := p.specFields(spec)
+			want := descriptor != "" || containsHashExpr(fields) || !isWildcard(fields[3]) ||
+				!isWildcard(fields[4]) || !isWildcard(fields[5]) || yearField != "" && !isWildcard(yearField)
+			if literalForm.MatchString(got) != want {
+				t.Fatalf("DescribeSpec(%q) = %q: literal form %v, want %v", spec, got, !want, want)
 			}
 		}
 	})
