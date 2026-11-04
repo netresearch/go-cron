@@ -16,6 +16,12 @@ var noteVars = []string{"h", "k", "j", "m", "n", "p"}
 // list short (T1).
 const dateLimit = 12
 
+// Where a note's days fall when it names no month (N5).
+const (
+	ofTheMonth   = " of the month"
+	ofEveryMonth = " of every month"
+)
+
 // noter builds a note: the description's state and the variables taken.
 type noter struct {
 	d    *describer
@@ -32,12 +38,12 @@ type noter struct {
 func monthPlace(f hashField, field string) (ofDay, ofDays string, shortest uint) {
 	shortest = 28 // February, outside a leap year
 	if f.hashes() {
-		return " of the month", " of the month", shortest
+		return ofTheMonth, ofTheMonth, shortest
 	}
 	var d describer
 	in := d.describeMonths(field)
 	if in == "" {
-		return " of every month", " of every month", shortest
+		return ofEveryMonth, ofEveryMonth, shortest
 	}
 	shortest = dom.max
 	for _, m := range newMonthField(field).vals {
@@ -47,7 +53,7 @@ func monthPlace(f hashField, field string) (ofDay, ofDays string, shortest uint)
 			shortest = min(shortest, maxDaysInMonth[m])
 		}
 	}
-	return " of the month " + in, " of every month " + in, shortest
+	return ofTheMonth + " " + in, ofEveryMonth + " " + in, shortest
 }
 
 // next takes the next variable.

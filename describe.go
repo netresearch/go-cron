@@ -125,10 +125,7 @@ func (p Parser) describe(spec string) (desc, note string, err error) {
 	if text != "" {
 		return text, "", nil
 	}
-	if strict && p.options&StrictDays == 0 && p.noKeyFindsDay(sch, fields) {
-		// Every key picks a missing day, so the parser rejects any of them.
-		p.options |= StrictDays
-		_, err = p.Parse(spec)
+	if err := p.strictDaysError(spec, strict, sch, fields); err != nil {
 		return "", "", err
 	}
 	if !allDescribable(fields) || !describable(yearField) {
@@ -279,6 +276,18 @@ func (p Parser) dayMissing(sch Schedule, fields []string) bool {
 		}
 	}
 	return true
+}
+
+// strictDaysError returns the parser's error when strict was dropped for the
+// placeholder key and no key finds the day: every key picks a missing day, so
+// the parser rejects any of them.
+func (p Parser) strictDaysError(spec string, strict bool, sch Schedule, fields []string) error {
+	if !strict || p.options&StrictDays != 0 || !p.noKeyFindsDay(sch, fields) {
+		return nil
+	}
+	p.options |= StrictDays
+	_, err := p.Parse(spec)
+	return err
 }
 
 // noKeyFindsDay reports a day of the month that none of the written months
