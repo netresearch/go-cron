@@ -525,7 +525,12 @@ var describeGoldens = []struct {
 	{spec: "H 30 0-11,12-23 * * *", opts: []DescribeOption{withSecHash}, want: "at a fixed second within minute 30 in every hour; the hash key fixes the second"},
 
 	// G11: the day the key picks decides, so H in a date field is not checked
-	{spec: "0 0 H(30-31) 2 *", opts: []DescribeOption{withHash}, want: "at midnight on a fixed day of the month between the 30th and 31st in February; the hash key fixes the day"},
+	{spec: "0 0 H(30-31) 2 *", opts: []DescribeOption{withHash}, want: "never runs"},
+	{spec: "0 0 H(30-31)/2 2 *", opts: []DescribeOption{withHash}, want: "never runs"},
+	{spec: "0 0 31 H(4-4) *", opts: []DescribeOption{withHash}, want: "never runs"},
+	{spec: "0 0 H(29-31) 2 * 2027", opts: []DescribeOption{withHash, withYear}, want: "never runs"},
+	{spec: "0 0 H(29-31) 2 *", opts: []DescribeOption{withHash}, want: "at midnight on a fixed day of the month between the 29th and 31st in February; the hash key fixes the day"},
+	{spec: "0 0 H(30-31) 2,4 *", opts: []DescribeOption{withHash}, want: "at midnight on a fixed day of the month between the 30th and 31st in February and April; the hash key fixes the day"},
 
 	// H6: two hashed values of one unit merge in the hash clause
 	{spec: "H 0 H * H", opts: []DescribeOption{withHash}, want: "at a fixed minute during the midnight hour on a fixed day of the month when it falls on a fixed day of the week; the hash key fixes the minute and both days"},

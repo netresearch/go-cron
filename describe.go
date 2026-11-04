@@ -243,28 +243,31 @@ type describer struct {
 }
 
 // dayMissing reports a day of the month that none of the written months and
-// years has (G11): "0 0 30 2 *", "0 0 29 2 * 2027". With H in a date field
-// the day the key picks decides, so it is not checked.
+// years has (G11): "0 0 30 2 *", "0 0 29 2 * 2027". With H in a date field it
+// counts every value a key can pick: "0 0 H(30-31) 2 *" never runs for any
+// key, while "0 0 H(29-31) 2 *" runs for some.
 func (p Parser) dayMissing(sch Schedule, fields []string) bool {
 	s, ok := sch.(*SpecSchedule)
-	if !ok || containsHashExpr(fields[3:5]) {
+	if !ok || len(s.DomConstraints) > 0 {
 		return false
 	}
+	days := s.Dom | hashReach(fields[3], dom)
+	inMonths := s.Month | hashReach(fields[4], months)
 	or := p.options&DowOrDom != 0
-	if dayNeverMatches(s.Dom, s.Month, s.Dow, s.DomConstraints, or) {
+	if dayNeverMatches(days, inMonths, s.Dow, nil, or) {
 		return true
 	}
-	if len(s.Year) == 0 || len(s.DomConstraints) > 0 || or && s.Dom&starBit == 0 && s.Dow&starBit == 0 {
+	if len(s.Year) == 0 || or && s.Dom&starBit == 0 && s.Dow&starBit == 0 {
 		return false
 	}
 	for y := range s.Year {
 		for m := time.January; m <= time.December; m++ {
-			if s.Month&(1<<uint(m)) == 0 {
+			if inMonths&(1<<uint(m)) == 0 {
 				continue
 			}
 			last := time.Date(y, m+1, 0, 0, 0, 0, 0, time.UTC).Day()
 			for d := 1; d <= last; d++ {
-				if s.Dom&(1<<uint(d)) != 0 {
+				if days&(1<<uint(d)) != 0 {
 					return false
 				}
 			}

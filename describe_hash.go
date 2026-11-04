@@ -101,6 +101,26 @@ func readHash(it string, r bounds) (x hashed, isHash bool) {
 	return x, true
 }
 
+// hashReach returns the bits of every value field's H items can pick under
+// any key.
+func hashReach(field string, r bounds) (bits uint64) {
+	for it := range strings.SplitSeq(field, ",") {
+		x, isHash := readHash(it, r)
+		if !isHash {
+			continue
+		}
+		v := x.lo
+		for range cyclicRangeSize(x.lo, x.hi, r) {
+			bits |= 1 << v
+			v++
+			if v > r.max {
+				v = r.min
+			}
+		}
+	}
+	return bits
+}
+
 // hashShape sorts a field by its H items.
 type hashShape int
 
