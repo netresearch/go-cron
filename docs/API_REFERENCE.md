@@ -19,6 +19,7 @@
   - [AlignedSchedule](#alignedschedule)
   - [Parser](#parser)
   - [ParseOption](#parseoption)
+  - [DescribeOption](#describeoption)
   - [Chain](#chain)
   - [JobWrapper](#jobwrapper)
   - [Job](#job)
@@ -1990,6 +1991,20 @@ const RobfigCompat = DowOrDom | LenientSteps | EveryRoundUp | DSTSkip | DowStepT
 ```
 
 ParseOption represents parser configuration flags. `AlignEvery` changes only what a plain `@every` means; `@every_aligned` and `@every_start` keep their meaning on every parser. See the `RobfigCompat` doc comment for the cases where it still differs from robfig/cron.
+
+---
+
+### DescribeOption
+
+```go
+type DescribeOption func(*describeConfig)
+
+func WithParseOptions(o ParseOption) DescribeOption
+```
+
+DescribeOption configures the package-level `DescribeSpec`. `WithParseOptions`
+sets its parse options; several calls OR together. The `Parser` method uses the
+parser's own settings and ignores it.
 
 ---
 
