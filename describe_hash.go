@@ -151,12 +151,18 @@ func hashPeriod(it string, r bounds) uint64 {
 	return size
 }
 
-// anyPick reports whether try holds for s with its date fields as some key
-// picks them. Every H in a spec takes its value from one hash, so the picks
-// move together (G11): this walks the hash values, not each H on its own. Past
-// maxHashWalk it tries once with every value each H can pick.
-func (p Parser) anyPick(s *SpecSchedule, fields []string, try func(*SpecSchedule) bool) bool {
-	pick := *s
+// hashDateField is one date field of a spec, split for the hash walk.
+type hashDateField struct {
+	bits  *uint64 // where the field's pick goes
+	plain uint64  // the bits of its plain items
+	r     bounds
+	items []string // its H items
+	field string
+}
+
+// hashDateFields splits the day of month, month and day of week in fields, with
+// pick to take what each H picks.
+func (p Parser) hashDateFields(pick, s *SpecSchedule, fields []string) []hashDateField {
 	domPlain, domItems := splitItems(fields[3], hashItemSyntax)
 	monthPlain, monthItems := splitItems(fields[4], hashItemSyntax)
 	dowPlain, dowItems := splitItems(fields[5], hashItemSyntax)
@@ -164,49 +170,64 @@ func (p Parser) anyPick(s *SpecSchedule, fields []string, try func(*SpecSchedule
 	domBits, _, _ := p.parseDomField(strings.Join(domPlain, ","), false)
 	monthBits, _ := getField(strings.Join(monthPlain, ","), p.fieldBounds(months))
 	dowBits, _, _ := p.parseDowField(strings.Join(dowPlain, ","), false)
-	date := []struct {
-		bits  *uint64
-		plain uint64
-		r     bounds
-		items []string
-		field string
-	}{
+	return []hashDateField{
 		{&pick.Dom, domBits | s.Dom&starBit, p.fieldBounds(dom), domItems, fields[3]},
 		{&pick.Month, monthBits, p.fieldBounds(months), monthItems, fields[4]},
 		{&pick.Dow, dowBits | s.Dow&starBit, p.dowBounds(), dowItems, fields[5]},
 	}
+}
 
+// hashWalkPeriod returns how many hash values date's H items take to repeat
+// together, or false past maxHashWalk.
+func hashWalkPeriod(date []hashDateField) (uint64, bool) {
 	period := uint64(1)
 	for _, f := range date {
 		for _, it := range f.items {
 			n := hashPeriod(it, f.r)
 			period = period / gcd(period, n) * n
 			if period > maxHashWalk {
-				for _, f := range date {
-					*f.bits = f.plain | hashReach(f.field, f.r)
-				}
-				pick.Dow = NormalizeDOW(pick.Dow) // a reach ending in 7 is Sunday
-				return try(&pick)
+				return 0, false
 			}
 		}
 	}
+	return period, true
+}
 
+// at returns the field's bits under hash value h.
+func (f hashDateField) at(h uint64) uint64 {
+	all := f.plain
+	for _, it := range f.items {
+		bits, _ := hashExprBits(it, f.r, h) // The spec parsed.
+		all |= bits
+	}
+	return all
+}
+
+// anyPick reports whether try holds for s with its date fields as some key
+// picks them. Every H in a spec takes its value from one hash, so the picks
+// move together (G11): this walks the hash values, not each H on its own. Past
+// maxHashWalk it tries once with every value each H can pick.
+func (p Parser) anyPick(s *SpecSchedule, fields []string, try func(*SpecSchedule) bool) bool {
+	pick := *s
+	date := p.hashDateFields(&pick, s, fields)
+	period, ok := hashWalkPeriod(date)
+	if !ok {
+		for _, f := range date {
+			*f.bits = f.plain | hashReach(f.field, f.r)
+		}
+		pick.Dow = NormalizeDOW(pick.Dow) // a reach ending in 7 is Sunday
+		return try(&pick)
+	}
 	seen := make(map[[3]uint64]bool)
 	for h := range period {
 		for _, f := range date {
-			*f.bits = f.plain
-			for _, it := range f.items {
-				bits, _ := hashExprBits(it, f.r, h) // The spec parsed.
-				*f.bits |= bits
-			}
+			*f.bits = f.at(h)
 		}
 		key := [3]uint64{pick.Dom, pick.Month, pick.Dow}
-		if !seen[key] {
-			seen[key] = true
-			if try(&pick) {
-				return true
-			}
+		if !seen[key] && try(&pick) {
+			return true
 		}
+		seen[key] = true
 	}
 	return false
 }

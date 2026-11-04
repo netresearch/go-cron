@@ -912,6 +912,23 @@ func hashedDateKeys(t *testing.T) []string {
 	return keys
 }
 
+// anyKeyRuns reports whether spec finds a run under any of keys.
+func anyKeyRuns(t *testing.T, p Parser, spec string, keys []string) bool {
+	t.Helper()
+	for _, key := range keys {
+		sch, err := p.ParseWithHashKey(spec, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for y := 2001; y <= 2029; y += 4 { // Next looks 5 years ahead
+			if !sch.Next(time.Date(y, 1, 1, 0, 0, 0, 0, time.UTC)).IsZero() {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // TestNeverRunsMatchesKeys binds "never runs" to Next for H in the date
 // fields: no key finds a run.
 func TestNeverRunsMatchesKeys(t *testing.T) {
@@ -919,19 +936,7 @@ func TestNeverRunsMatchesKeys(t *testing.T) {
 	for _, opts := range hashedDateParsers {
 		p := MustNewParser(opts)
 		for _, spec := range hashedDateSpecs() {
-			runs := false
-			for _, key := range keys {
-				sch, err := p.ParseWithHashKey(spec, key)
-				if err != nil {
-					t.Fatal(err)
-				}
-				for y := 2001; y <= 2029 && !runs; y += 4 { // Next looks 5 years ahead
-					runs = !sch.Next(time.Date(y, 1, 1, 0, 0, 0, 0, time.UTC)).IsZero()
-				}
-				if runs {
-					break
-				}
-			}
+			runs := anyKeyRuns(t, p, spec, keys)
 			got, err := p.DescribeSpec(spec)
 			if err != nil {
 				t.Fatal(err)
