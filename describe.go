@@ -140,7 +140,7 @@ func (p Parser) describe(spec string) (desc, note string, err error) {
 	}
 	hd, dates, ok := p.splitDates(fields)
 	units := hashUnits(append(h[:], hd[:]...), []string{unitSecond, unitMinute, unitHour, "day", "day", unitMonth})
-	d := describer{monthDays: monthDays(sch, hd[2].hashes())}
+	d := describer{monthDays: monthDays(sch, hashReach(fields[4], p.fieldBounds(months)))}
 	day, month, short, dok := p.describeDates(&d, hd, dates)
 	if !ok || !dok {
 		return p.describeLiteral(spec, fields, yearField), p.hashNote(&d, h, hd, dates), nil

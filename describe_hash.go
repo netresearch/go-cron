@@ -774,17 +774,18 @@ func dateBetween(x hashed, f timeField, the string) (string, bool) {
 }
 
 // monthDays lists the lengths of the months a hashed day step can run in
-// (H19): those of the written months and years, or every length when the key
-// picks the month. February is both 28 and 29 days unless the years decide.
-func monthDays(sch Schedule, hashedMonth bool) []uint {
+// (H19): those of the written months and years, with hashedMonths the months a
+// hashed month can pick. February is both 28 and 29 days unless the years
+// decide.
+func monthDays(sch Schedule, hashedMonths uint64) []uint {
 	s, ok := sch.(*SpecSchedule)
-	if !ok || hashedMonth {
+	if !ok {
 		return []uint{28, 29, 30, 31}
 	}
 	var days []uint
 	for m := uint(time.January); m <= uint(time.December); m++ {
 		switch {
-		case s.Month&(1<<m) == 0:
+		case (s.Month|hashedMonths)&(1<<m) == 0:
 		case m != uint(time.February):
 			days = append(days, maxDaysInMonth[m])
 		case len(s.Year) == 0:
