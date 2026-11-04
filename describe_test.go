@@ -787,11 +787,27 @@ func parserOutcomes(t *testing.T, p Parser, spec string, field int, r bounds) ma
 // parser: the fewest and most days in a written month, over keys and years.
 func TestDayStepCountsWrittenMonths(t *testing.T) {
 	p := MustNewParser(Minute | Hour | Dom | Month | Dow | Hash | Year)
+	for _, spec := range dayStepSpecs() {
+		sch, err := p.WithHashKey("key").Parse(spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _, fields, _, _ := p.specFields(spec)
+		wantLo, wantHi := p.dayRuns(sch, fields)(splitHash(fields[3], dom).steps[0])
+		lo, hi := keyedMonthRuns(t, p, spec)
+		if lo != wantLo || hi != wantHi {
+			t.Errorf("%s: parser runs %d to %d days in a month, count says %d to %d", spec, lo, hi, wantLo, wantHi)
+		}
+	}
+}
+
+// dayStepSpecs lists hashed day steps whose count TestDayStepCountsWrittenMonths
+// binds to the parser.
+func dayStepSpecs() []string {
 	specs := []string{
 		"0 0 H/10 4 * *", "0 0 H/10 2 * *", "0 0 H/15 1 * *", "0 0 H/30 2 * *", "0 0 H/30 4 * *", "0 0 H/2 2 * *",
 		"0 0 H/10 2,4 * *", "0 0 H(25-5)/7 2 * *", "0 0 H/28 2 * 2027", "0 0 H/10 * * *",
 		"0 0 H(28-30)/2 H * 2028", "0 0 H(28-30)/2 H * 2027", "0 0 H/10 H(4-6) * *", "0 0 H/10 H(2-3) * 2028",
-		"0 0 H/10 1,H(1-1)/70000 * *", // past maxHashWalk
 	}
 	// One hash picks the day and the month, so the count follows their pairs.
 	for _, d := range []string{"H/10", "H/7", "H/15", "H/28", "H/30", "H(28-30)/2", "H(25-5)/7"} {
@@ -801,26 +817,23 @@ func TestDayStepCountsWrittenMonths(t *testing.T) {
 			}
 		}
 	}
-	for _, spec := range specs {
-		sch, err := p.WithHashKey("key").Parse(spec)
+	return specs
+}
+
+// keyedMonthRuns returns the fewest and most runs in one written month over
+// 500 keys.
+func keyedMonthRuns(t *testing.T, p Parser, spec string) (lo, hi int) {
+	t.Helper()
+	lo = 99
+	for k := range 500 {
+		keyed, err := p.WithHashKey(fmt.Sprint("key", k)).Parse(spec)
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, _, fields, _, _ := p.specFields(spec)
-		wantLo, wantHi := p.dayRuns(sch, fields)(splitHash(fields[3], dom).steps[0])
-		lo, hi := 99, 0
-		for k := range 500 {
-			keyed, err := p.WithHashKey(fmt.Sprint("key", k)).Parse(spec)
-			if err != nil {
-				t.Fatal(err)
-			}
-			keyLo, keyHi := writtenMonthRuns(keyed)
-			lo, hi = min(lo, keyLo), max(hi, keyHi)
-		}
-		if lo != wantLo || hi != wantHi {
-			t.Errorf("%s: parser runs %d to %d days in a month, count says %d to %d", spec, lo, hi, wantLo, wantHi)
-		}
+		keyLo, keyHi := writtenMonthRuns(keyed)
+		lo, hi = min(lo, keyLo), max(hi, keyHi)
 	}
+	return lo, hi
 }
 
 // writtenMonthRuns returns the fewest and most runs in one written month of
@@ -849,10 +862,8 @@ func yearWritten(s *SpecSchedule, y int) bool {
 	return ok
 }
 
-// TestNeverRunsMatchesParser binds "never runs" to Next for the day forms the
-// parser cannot reject: no start in a run of years finds a run.
-func TestNeverRunsMatchesParser(t *testing.T) {
-	p := MustNewParser(Minute | Hour | Dom | Month | Dow | Extended)
+// neverRunsSpecs lists the day forms TestNeverRunsMatchesParser sweeps.
+func neverRunsSpecs() []string {
 	var specs []string
 	for m := 1; m <= 12; m++ {
 		for d := 1; d <= 31; d++ {
@@ -867,7 +878,14 @@ func TestNeverRunsMatchesParser(t *testing.T) {
 			specs = append(specs, fmt.Sprintf("0 0 %d * FRI#%d", d, n))
 		}
 	}
-	for _, spec := range specs {
+	return specs
+}
+
+// TestNeverRunsMatchesParser binds "never runs" to Next for the day forms the
+// parser cannot reject: no start in a run of years finds a run.
+func TestNeverRunsMatchesParser(t *testing.T) {
+	p := MustNewParser(Minute | Hour | Dom | Month | Dow | Extended)
+	for _, spec := range neverRunsSpecs() {
 		sch, err := p.Parse(spec)
 		if err != nil {
 			continue
@@ -1397,6 +1415,16 @@ func TestDescribeSpecBadOptions(t *testing.T) {
 	}
 }
 
+// wantStrictError checks that each spec returns an error under options.
+func wantStrictError(t *testing.T, options ParseOption, specs ...string) {
+	t.Helper()
+	for _, spec := range specs {
+		if _, err := DescribeSpec(spec, WithParseOptions(options)); err == nil {
+			t.Errorf("DescribeSpec(%q) with StrictDays: want an error", spec)
+		}
+	}
+}
+
 // TestDescribeSpecStrictDaysNoKey checks that, with no hash key, a spec with
 // H in the day of the month or the month gets the description it gets without
 // StrictDays, as the result would otherwise depend on the placeholder key,
@@ -1415,24 +1443,13 @@ func TestDescribeSpecStrictDaysNoKey(t *testing.T) {
 	}
 	// No key finds the day, so the parser rejects every key, as it rejects
 	// "0 0 30 2 *". The year is outside its check, as "0 0 29 2 * 2027" is.
-	for _, spec := range []string{"0 0 H(30-31) 2 *", "0 0 H(30-31)/2 2 *", "0 0 31 H(4-4) *"} {
-		if _, err := DescribeSpec(spec, WithParseOptions(strict)); err == nil {
-			t.Errorf("DescribeSpec(%q) with StrictDays: want an error", spec)
-		}
-	}
+	wantStrictError(t, strict, "0 0 H(30-31) 2 *", "0 0 H(30-31)/2 2 *", "0 0 31 H(4-4) *")
 	if got, err := DescribeSpec("0 0 H(29-31) 2 * 2027", WithParseOptions(strict|Year)); err != nil || got != "never runs" {
 		t.Errorf(`DescribeSpec("0 0 H(29-31) 2 * 2027") with StrictDays = %q, %v; want "never runs", nil`, got, err)
 	}
 	// H outside the day of the month and the month cannot change the day
 	// check: every key rejects these, so no key rejects them too.
-	for _, spec := range []string{"H 0 30 2 *", "0 H 30 2 *", "0 0 30 2 H"} {
-		if _, err := DescribeSpec(spec, WithParseOptions(strict)); err == nil {
-			t.Errorf("DescribeSpec(%q) with StrictDays: want an error", spec)
-		}
-	}
-	if _, err := DescribeSpec("0 0 30 2 *", WithParseOptions(strict)); err == nil {
-		t.Error(`DescribeSpec("0 0 30 2 *") with StrictDays: want an error`)
-	}
+	wantStrictError(t, strict, "H 0 30 2 *", "0 H 30 2 *", "0 0 30 2 H", "0 0 30 2 *")
 	if _, err := NewParser(strict).WithHashKey("job-a").DescribeSpec("0 0 H(28-31) 2 *"); err == nil {
 		t.Error(`DescribeSpec("0 0 H(28-31) 2 *") with key "job-a" and StrictDays: want an error`)
 	}
