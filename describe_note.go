@@ -127,8 +127,8 @@ func (n *noter) secondPlace(minute, hour timeField, hashed bool) (string, bool) 
 	case minute.single():
 		return fmt.Sprintf(" within minute %d in every hour", minute.vals[0]), true
 	default:
-		text, _ := minute.nums()
-		return " within minutes " + text + " in every hour", true
+		text, step := minute.nums()
+		return " within minutes " + text + " in every hour" + parenthesized(step), true
 	}
 	return "", false
 }
@@ -235,6 +235,10 @@ func (n *noter) hourNote(f hashField, sec, minute timeField, hs, hm hashField) (
 	if !x.whole || startsElsewhere(x, hours) {
 		text += " thru " + n.d.onHour(x.hi)
 	}
+	if !hm.hashes() && !minute.every() && !minute.single() {
+		_, step := minute.nums()
+		text += parenthesized(step) // T1
+	}
 	return text, true
 }
 
@@ -263,6 +267,14 @@ func hourLead(minute timeField, hm hashField) (string, bool) {
 	}
 	text, _ := minute.nums()
 	return "at minutes " + text + " during", true
+}
+
+// parenthesized is an interval note in its parentheses (T1), "" without one.
+func parenthesized(note string) string {
+	if note == "" {
+		return ""
+	}
+	return " (" + note + ")"
 }
 
 // stepValues writes the values of a hashed step with the variable v (N2,

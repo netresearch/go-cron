@@ -592,6 +592,9 @@ var describeNoteGoldens = []struct {
 	opts []DescribeOption
 	want string
 }{
+	{spec: "H/10 */7 * * * *", opts: []DescribeOption{WithParseOptions(Second | Minute | Hour | Dom | Month | Dow | Hash)}, want: "at seconds h, h+10, h+20, h+30, h+40, and h+50 within minutes 0, 7, 14, … 56 in every hour (every 7 minutes, starting over each hour), where h is a hashed second from 0 to 9"},
+	{spec: "H/10 */4 * * * *", opts: []DescribeOption{WithParseOptions(Second | Minute | Hour | Dom | Month | Dow | Hash)}, want: "at seconds h, h+10, h+20, h+30, h+40, and h+50 within minutes 0, 4, 8, … 56 in every hour (every 4 minutes), where h is a hashed second from 0 to 9"},
+	{spec: "*/7 H/6 * * *", opts: []DescribeOption{withHash}, want: "at minutes 0, 7, 14, … 56 during a fixed hour between midnight and 5 am and every 6 hours after it (every 7 minutes, starting over each hour)"},
 	{spec: "H/15 * * * *", opts: []DescribeOption{withHash}, want: "at minutes h, h+15, h+30, and h+45 past the hour, where h is a hashed minute from 0 to 14"},
 	{spec: "H/5 * * * *", opts: []DescribeOption{withHash}, want: "at minutes h, h+5, h+10, … h+55 past the hour, where h is a hashed minute from 0 to 4"},
 	{spec: "H/7 * * * *", opts: []DescribeOption{withHash}, want: "at minutes h, h+7, h+14, … h+56 past the hour, where h is a hashed minute from 0 to 6; h+56 runs only when h is below 4"},
@@ -1040,15 +1043,15 @@ func describeGrammars() (descRe, noteRe *regexp.Regexp) {
 	tplace := alt(" past the hour", " during "+hours, " past every hour "+hourrange,
 		" past every hour from "+clock+" thru "+clock+" and the "+clock+" hour", " past the "+clock+" hour and every hour from "+clock+" thru "+clock, // T9
 		" within a minute",
-		" within every minute "+alt("during "+hours, hourrange),                                         // C1, R12
-		" within "+alt("minute "+num, "minutes "+vlist)+" in every hour", " past the top of every hour", // C1
+		" within every minute "+alt("during "+hours, hourrange),                                                   // C1, R12
+		" within "+alt("minute "+num, "minutes "+vlist)+" in every hour"+opt(note), " past the top of every hour", // C1
 		" "+nhstep)
 	toutcomes := list(num) + "(?:; " + list(num) + ")*; or " + list(num) // N2, N4: a wrapped range lists
 	hlead := alt("at the top of", "at "+num+" minutes? past", "every minute during", "at minutes "+vlist+" during",
 		"at a fixed minute"+opt(" between minutes "+num+" and "+num)+" during") // N8
 	ntime := alt("at "+alt("seconds", "minutes")+" "+vals+tplace+where+opt(tail),
 		"at "+alt("seconds", "minutes")+" "+toutcomes+tplace+", depending on the hash",
-		hlead+" a fixed hour between "+clock+" and "+clock+" and every "+num+" hours after it"+opt(" thru "+clock)) // N7, N8
+		hlead+" a fixed hour between "+clock+" and "+clock+" and every "+num+" hours after it"+opt(" thru "+clock)+opt(note)) // N7, N8
 	outcome := alt(list(dayname), list(monthname), "the "+ord+opt(" and "+ord), "the "+ord+"(?:, "+ord+")+, and "+ord, "the "+ord+", "+ord+", "+ord+", … "+ord)
 	outcomes := outcome + "(?:; " + outcome + ")*; or " + outcome
 	inMonths := opt(" in " + list(monthname+opt(" thru "+monthname))) // N5: a written month
