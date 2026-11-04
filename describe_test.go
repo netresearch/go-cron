@@ -642,6 +642,13 @@ var describeNoteGoldens = []struct {
 	{spec: "0 0 H(25-5)/7 * *", opts: []DescribeOption{withHash}, want: "on the 25th and 1st; the 26th and 2nd; the 27th and 3rd; the 28th and 4th; the 29th and 5th; the 30th; or the 31st of every month, depending on the hash; a short month skips the days it lacks and changes the last step"},
 	{spec: "0 0 H * *", opts: []DescribeOption{withHash}, want: "on day h of every month, where h is a hashed day from 1 to 31; a month without day h is skipped"},
 	{spec: "0 0 1,H * *", opts: []DescribeOption{withHash}, want: "on the 1st and day h of every month, where h is a hashed day from 1 to 31; a month without day h runs on the 1st only"},
+	{spec: "0 0 28,H * *", opts: []DescribeOption{withHash}, want: "on the 28th and day h of every month, where h is a hashed day from 1 to 31; a month without day h runs on the 28th only"},
+	{spec: "0 0 29,H * *", opts: []DescribeOption{withHash}, want: "on the 29th and day h of every month, where h is a hashed day from 1 to 31; a month without day h runs on the 29th only in months that have one"},
+	{spec: "0 0 30,H * *", opts: []DescribeOption{withHash}, want: "on the 30th and day h of every month, where h is a hashed day from 1 to 31; a month without day h runs on the 30th only in months that have one"},
+	{spec: "0 0 31,H * *", opts: []DescribeOption{withHash}, want: "on the 31st and day h of every month, where h is a hashed day from 1 to 31; a month without day h is skipped"},
+	{spec: "0 0 30,H 4,6 *", opts: []DescribeOption{withHash}, want: "on the 30th and day h of the month in April and June, where h is a hashed day from 1 to 31; a month without day h runs on the 30th only"},
+	{spec: "0 0 30,H 2,4 *", opts: []DescribeOption{withHash}, want: "on the 30th and day h of the month in February and April, where h is a hashed day from 1 to 31; a month without day h runs on the 30th only in months that have one"},
+	{spec: "0 0 31,H 1,4 *", opts: []DescribeOption{withHash}, want: "on the 31st and day h of the month in January and April, where h is a hashed day from 1 to 31; a month without day h is skipped"},
 	{spec: "0 0 H(1-15) * *", opts: []DescribeOption{withHash}, want: "on day h of every month, where h is a hashed day from 1 to 15"},
 	{spec: "0 0 H(25-5) * *", opts: []DescribeOption{withHash}, want: "on day h of every month, where h is a hashed day from 1 to 5 or 25 to 31; a month without day h is skipped"},
 	{spec: "0 0 H(10-1) * *", opts: []DescribeOption{withHash}, want: "on day h of every month, where h is a hashed day from 1 or 10 to 31; a month without day h is skipped"},
@@ -1360,7 +1367,7 @@ func describeGrammars() (descRe, noteRe *regexp.Regexp) {
 	shortDays := alt("; a short month skips the days it lacks and changes the last step",
 		"; the "+ord+" runs only in months that have one", "; the "+alt(ord+" and "+ord, ord+"(?:, "+ord+")+, and "+ord)+" run only in months that have them") // N3, N4
 	nday := alt("on days "+vals+ofDays+where+opt(alt(tail, shortTail)),
-		"on "+opt("the "+ord+" and ")+"day "+v+alt(" of every month", " of the month"+inMonths)+where+opt("; a month without day "+v+alt(" is skipped", " runs on the "+ord+" only")),
+		"on "+opt("the "+ord+" and ")+"day "+v+alt(" of every month", " of the month"+inMonths)+where+opt("; a month without day "+v+alt(" is skipped", " runs on the "+ord+" only"+opt(" in months that have one"))),
 		"on "+outcomes+opt(ofDays)+", depending on the hash"+opt(shortDays),
 		"on "+outcome+ofDays) // N3: one outcome left
 	nmonth := alt("in months "+vals+where+opt(tail), "in "+outcomes+", depending on the hash")

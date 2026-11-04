@@ -348,11 +348,24 @@ func (n *noter) domNote(f hashField, plain timeField) (string, bool) {
 		v := n.next()
 		text := fmt.Sprintf("on the %s and day %s%s, where %s is a hashed day from 1 to 31", first, v, n.ofDay, v)
 		if n.shortest < dom.max {
-			text += fmt.Sprintf("; a month without day %s runs on the %s only", v, first)
+			text += fmt.Sprintf("; a month without day %s %s", v, n.plainDayTail(plain.vals[0]))
 		}
 		return text, true
 	}
 	return "", false
+}
+
+// plainDayTail says what a month without day h does when a plain day stands
+// beside h (N5). A month with the 31st has every h, so a month without h has
+// no 31st either.
+func (n *noter) plainDayTail(day uint) string {
+	switch {
+	case day == dom.max:
+		return "is skipped"
+	case day > n.shortest:
+		return fmt.Sprintf("runs on the %s only in months that have one", ordinal(day))
+	}
+	return fmt.Sprintf("runs on the %s only", ordinal(day))
 }
 
 // outcomeNote is the clause of a hashed step in a date field (N4): the
