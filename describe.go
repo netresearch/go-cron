@@ -140,7 +140,7 @@ func (p Parser) describe(spec string) (desc, note string, err error) {
 	}
 	hd, dates, ok := p.splitDates(fields)
 	units := hashUnits(append(h[:], hd[:]...), []string{unitSecond, unitMinute, unitHour, "day", "day", unitMonth})
-	var d describer
+	d := describer{monthDays: monthDays(sch, hd[2].hashes())}
 	day, month, short, dok := p.describeDates(&d, hd, dates)
 	if !ok || !dok {
 		return p.describeLiteral(spec, fields, yearField), p.hashNote(&d, h, hd, dates), nil
@@ -245,6 +245,7 @@ type describer struct {
 	dayName   bool     // the day clause names a day of the week (R2, D7)
 	notes     []string // the time fields' notes
 	dateNotes []string // the date fields' notes, after the time's (G7)
+	monthDays []uint   // the month lengths a hashed day step can run in (H19)
 }
 
 // dayMissing reports a day of the month that none of the written months and
@@ -327,7 +328,7 @@ func (p Parser) describeDays(d *describer, domField, dowField string, hd, hw has
 	var domText string
 	switch {
 	case hd.hashes():
-		domText, short, ok = hashDom(hd, md, !dowSet)
+		domText, short, ok = hashDom(hd, md, d.monthDays, !dowSet)
 	case domSet:
 		domText, short = d.describeDom(md, domSpecial, !or)
 	}
@@ -554,9 +555,15 @@ func (d *describer) domParts(md timeField, special []string) (parts, lacking []d
 // lateClause names the days above the 28th: "; the 31st runs only in months
 // that have one" (D3, X5).
 func lateClause(days []uint) string {
+	return lateClauseAfter(days, 28)
+}
+
+// lateClauseAfter names the days past shortest, the most days every month in
+// question has (D3, N5).
+func lateClauseAfter(days []uint, shortest uint) string {
 	var late []string
 	for _, v := range slices.Compact(slices.Sorted(slices.Values(days))) {
-		if v > 28 {
+		if v > shortest {
 			late = append(late, ordinal(v))
 		}
 	}

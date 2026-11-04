@@ -5,6 +5,7 @@ package cron
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 )
@@ -54,6 +55,11 @@ func monthPlace(f hashField, field string) (ofDay, ofDays string, shortest uint)
 		}
 	}
 	return ofTheMonth + " " + in, ofEveryMonth + " " + in, shortest
+}
+
+// monthWritten reports a note placed in written months (N5).
+func (n *noter) monthWritten() bool {
+	return n.ofDays != ofEveryMonth && n.ofDays != ofTheMonth
 }
 
 // next takes the next variable.
@@ -284,6 +290,26 @@ func stepValues(v string, x hashed, limit int) (vals string, top uint, tail stri
 	return vals, top, tail
 }
 
+// shortMonthTail names the values of a hashed day step that a written month
+// lacks for some h (N3): "; h+30 runs only in months that have one".
+func shortMonthTail(v string, x hashed, top, shortest uint) string {
+	var late []string
+	for k := uint(0); k*x.step <= x.hi-x.lo; k++ {
+		if min(top+k*x.step, x.hi) <= shortest {
+			continue
+		}
+		term := v
+		if k > 0 {
+			term = fmt.Sprintf("%s+%d", v, k*x.step)
+		}
+		late = append(late, term)
+	}
+	if len(late) == 1 {
+		return "; " + late[0] + " runs only in months that have one"
+	}
+	return "; " + andList(late) + " run only in months that have them"
+}
+
 // domNote is the clause of a hashed day of the month (N4, N5): its step as
 // the other date fields', or a fixed day: "on day h of every month, where h
 // is a hashed day from 1 to 31; a month without day h is skipped".
@@ -345,19 +371,34 @@ func (n *noter) outcomeNote(f hashField, r bounds, plain timeField) (string, boo
 		}
 		last := len(words) - 1
 		text := in + strings.Join(words[:last], "; ") + "; or " + words[last] + of + ", depending on the hash"
-		if x.lo > x.hi && plain.container == unitMonth && n.shortest < dom.max {
-			text += "; a short month skips the days it lacks and changes the last step"
+		if plain.container == unitMonth {
+			text += n.outcomeTail(x, outs)
 		}
 		return text, true
 	}
 	v := n.next()
 	vals, top, tail := stepValues(v, x, dateLimit)
+	if plain.container == unitMonth && n.monthWritten() && x.hi > n.shortest {
+		tail = shortMonthTail(v, x, top, n.shortest)
+	}
 	unit, bound := plain.unit, number
 	if unit == unitMonth {
 		bound = func(m uint) string { return fmt.Sprintf("%d (%s)", m, time.Month(m)) } // #nosec G115 -- a month, 1 to 12
 	}
 	return fmt.Sprintf("%s%ss %s%s, where %s is a hashed %s from %s to %s%s",
 		in, unit, vals, of, v, unit, bound(x.lo), bound(top), tail), true
+}
+
+// outcomeTail is what a short month changes in listed days of the month (N3,
+// N4): a wrapped range's last step, or the days a written month lacks.
+func (n *noter) outcomeTail(x hashed, outs [][]uint) string {
+	switch {
+	case x.lo > x.hi && n.shortest < dom.max:
+		return "; a short month skips the days it lacks and changes the last step"
+	case x.lo <= x.hi && n.monthWritten():
+		return lateClauseAfter(slices.Concat(outs...), n.shortest)
+	}
+	return ""
 }
 
 // timeOutcomes lists the values a wrapped hashed step in the second or

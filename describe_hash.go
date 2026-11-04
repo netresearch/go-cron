@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // hashItemSyntax is the H syntax: H or H(lo-hi), each with an optional step,
@@ -627,8 +628,9 @@ func hashDay(h hashField, f timeField, noun, the string, runs func(hashed) (int,
 
 // hashDom describes a hashed day of month as a day clause, with the
 // short-month clause of its plain days (H18, H19, D3).
-func hashDom(h hashField, md timeField, alone bool) (text, short string, ok bool) {
-	text, ok = hashDay(h, md, "a fixed day of the month", "the ", dayRange, alone)
+func hashDom(h hashField, md timeField, lengths []uint, alone bool) (text, short string, ok bool) {
+	runs := func(x hashed) (int, int) { return dayRange(x, lengths) }
+	text, ok = hashDay(h, md, "a fixed day of the month", "the ", runs, alone)
 	return "on " + text, lateClause(md.vals), ok
 }
 
@@ -682,14 +684,40 @@ func dateBetween(x hashed, f timeField, the string) (string, bool) {
 	return " between " + the + f.w(x.lo) + " and " + f.w(x.hi), true
 }
 
+// monthDays lists the lengths of the months a hashed day step can run in
+// (H19): those of the written months and years, or every length when the key
+// picks the month. February is both 28 and 29 days unless the years decide.
+func monthDays(sch Schedule, hashedMonth bool) []uint {
+	s, ok := sch.(*SpecSchedule)
+	if !ok || hashedMonth {
+		return []uint{28, 29, 30, 31}
+	}
+	var days []uint
+	for m := uint(time.January); m <= uint(time.December); m++ {
+		switch {
+		case s.Month&(1<<m) == 0:
+		case m != uint(time.February):
+			days = append(days, maxDaysInMonth[m])
+		case len(s.Year) == 0:
+			days = append(days, 28, 29)
+		default:
+			for y := range s.Year {
+				days = append(days, uint(time.Date(y, time.March, 0, 0, 0, 0, 0, time.UTC).Day())) // #nosec G115 -- a day of the month
+			}
+		}
+	}
+	slices.Sort(days)
+	return slices.Compact(days)
+}
+
 // dayRange returns the fewest and most days a hashed day-of-month step runs
-// on in a month, over each start the hash can pick and each month length
-// (H19): H/10 runs on 9, 19 and 29, or on 2 days in February.
-func dayRange(x hashed) (lo, hi int) {
+// on in a month, over each start the hash can pick and each of the month
+// lengths (H19): H/10 runs on 9, 19 and 29, or on 2 days in February.
+func dayRange(x hashed, lengths []uint) (lo, hi int) {
 	size, span := cyclicRangeSize(x.lo, x.hi, dom), dom.max-dom.min+1
 	lo = int(dom.max)
 	count := func(vals []uint) {
-		for days := dom.max - 3; days <= dom.max; days++ {
+		for _, days := range lengths {
 			n := 0
 			for _, v := range vals {
 				if v <= days {
