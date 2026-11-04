@@ -38,7 +38,8 @@ func WithParseOptions(o ParseOption) DescribeOption // package function only
   (`WithMinEveryInterval`); the package function uses the default, 1s.
 - `H` needs no hash key: the description does not depend on it. With no
   key, `StrictDays` does not check a spec with `H` in the day of the month
-  or the month, as the value the key picks decides that check.
+  or the month when the value the key picks decides that check. When no
+  key finds the day (`0 0 H(30-31) 2 *`), the parser's error returns.
 - The description is made from the spec text as the parser splits it, not
   from the parsed schedule, because the parsed bits have lost what was
   written (`*/15` and `0,15,30,45` parse the same, but only one has a step).

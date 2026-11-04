@@ -1086,6 +1086,16 @@ func TestDescribeSpecStrictDaysNoKey(t *testing.T) {
 			t.Errorf("DescribeSpec(%q) with StrictDays = %q, %v; want %q, nil", spec, got, err, want)
 		}
 	}
+	// No key finds the day, so the parser rejects every key, as it rejects
+	// "0 0 30 2 *". The year is outside its check, as "0 0 29 2 * 2027" is.
+	for _, spec := range []string{"0 0 H(30-31) 2 *", "0 0 H(30-31)/2 2 *", "0 0 31 H(4-4) *"} {
+		if _, err := DescribeSpec(spec, WithParseOptions(strict)); err == nil {
+			t.Errorf("DescribeSpec(%q) with StrictDays: want an error", spec)
+		}
+	}
+	if got, err := DescribeSpec("0 0 H(29-31) 2 * 2027", WithParseOptions(strict|Year)); err != nil || got != "never runs" {
+		t.Errorf(`DescribeSpec("0 0 H(29-31) 2 * 2027") with StrictDays = %q, %v; want "never runs", nil`, got, err)
+	}
 	// H outside the day of the month and the month cannot change the day
 	// check: every key rejects these, so no key rejects them too.
 	for _, spec := range []string{"H 0 30 2 *", "0 H 30 2 *", "0 0 30 2 H"} {

@@ -78,8 +78,8 @@ func DescribeSpecNote(spec string, opts ...DescribeOption) (string, error) {
 // with the parser's minimum: "every 1h30m from when scheduling started",
 // "every 15m from Unix epoch". H needs no hash key here: the description does
 // not depend on it. With no key, StrictDays does not check a spec with H in
-// the day of the month or the month, as the value the key picks decides that
-// check.
+// the day of the month or the month when the value the key picks decides that
+// check; when no key finds the day, the parser's error returns.
 func (p Parser) DescribeSpec(spec string, _ ...DescribeOption) (string, error) {
 	desc, _, err := p.describe(spec)
 	return desc, err
@@ -97,7 +97,8 @@ func (p Parser) DescribeSpecNote(spec string, _ ...DescribeOption) (string, erro
 
 // withPlaceholderKey gives a parser with no hash key one, as the description
 // does not depend on it. StrictDays is dropped when H is in the day of the
-// month or the month, where the result would depend on that key.
+// month or the month, where the result would depend on that key; describe
+// restores it when no key finds the day.
 func (p Parser) withPlaceholderKey(spec string) Parser {
 	if p.hashKey != "" {
 		return p
@@ -112,6 +113,7 @@ func (p Parser) withPlaceholderKey(spec string) Parser {
 
 // describe returns the description of spec and its note (N1–N8).
 func (p Parser) describe(spec string) (desc, note string, err error) {
+	strict := p.options&StrictDays != 0
 	p = p.withPlaceholderKey(spec)
 	sch, err := p.Parse(spec)
 	if err != nil {
@@ -122,6 +124,12 @@ func (p Parser) describe(spec string) (desc, note string, err error) {
 	fields, text := p.expandDescriptor(descriptor, fields)
 	if text != "" {
 		return text, "", nil
+	}
+	if strict && p.options&StrictDays == 0 && p.noKeyFindsDay(sch, fields) {
+		// Every key picks a missing day, so the parser rejects any of them.
+		p.options |= StrictDays
+		_, err = p.Parse(spec)
+		return "", "", err
 	}
 	if !allDescribable(fields) || !describable(yearField) {
 		return p.describeLiteral(spec, fields, yearField), "", nil
@@ -247,19 +255,16 @@ type describer struct {
 // counts every value a key can pick: "0 0 H(30-31) 2 *" never runs for any
 // key, while "0 0 H(29-31) 2 *" runs for some.
 func (p Parser) dayMissing(sch Schedule, fields []string) bool {
+	if p.noKeyFindsDay(sch, fields) {
+		return true
+	}
 	s, ok := sch.(*SpecSchedule)
-	if !ok || len(s.DomConstraints) > 0 {
+	if !ok || len(s.DomConstraints) > 0 || len(s.Year) == 0 ||
+		p.options&DowOrDom != 0 && s.Dom&starBit == 0 && s.Dow&starBit == 0 {
 		return false
 	}
 	days := s.Dom | hashReach(fields[3], dom)
 	inMonths := s.Month | hashReach(fields[4], months)
-	or := p.options&DowOrDom != 0
-	if dayNeverMatches(days, inMonths, s.Dow, nil, or) {
-		return true
-	}
-	if len(s.Year) == 0 || or && s.Dom&starBit == 0 && s.Dow&starBit == 0 {
-		return false
-	}
 	for y := range s.Year {
 		for m := time.January; m <= time.December; m++ {
 			if inMonths&(1<<uint(m)) == 0 {
@@ -274,6 +279,18 @@ func (p Parser) dayMissing(sch Schedule, fields []string) bool {
 		}
 	}
 	return true
+}
+
+// noKeyFindsDay reports a day of the month that none of the written months
+// has, whatever value a key picks; the parser's check, without the year.
+func (p Parser) noKeyFindsDay(sch Schedule, fields []string) bool {
+	s, ok := sch.(*SpecSchedule)
+	if !ok || len(s.DomConstraints) > 0 {
+		return false
+	}
+	days := s.Dom | hashReach(fields[3], dom)
+	inMonths := s.Month | hashReach(fields[4], months)
+	return dayNeverMatches(days, inMonths, s.Dow, nil, p.options&DowOrDom != 0)
 }
 
 // describeDays describes the day of month and day of week, "" when neither
