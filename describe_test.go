@@ -274,6 +274,19 @@ var describeGoldens = []struct {
 	{spec: "0 0 30,31 2 *", want: "never runs"},
 	{spec: "0 0 29 2 * 2027", opts: []DescribeOption{withYear}, want: "never runs"},
 	{spec: "0 0 30 2 1", want: "never runs"},
+	{spec: "0 0 31W 4 *", opts: []DescribeOption{withExt}, want: "never runs"},
+	{spec: "0 0 30W 2 *", opts: []DescribeOption{withExt}, want: "never runs"},
+	{spec: "0 0 L-30 2 *", opts: []DescribeOption{withExt}, want: "never runs"},
+	{spec: "0 0 L-29 2 *", opts: []DescribeOption{withExt}, want: "never runs"},
+	{spec: "0 0 L-30 4,6 *", opts: []DescribeOption{withExt}, want: "never runs"},
+	{spec: "0 0 1 * MON#2", opts: []DescribeOption{withExt}, want: "never runs"},
+	{spec: "0 0 13 * FRI#3", opts: []DescribeOption{withExt}, want: "never runs"},
+	{spec: "0 0 22 * MON#3", opts: []DescribeOption{withExt}, want: "never runs"},
+	{spec: "0 0 L * MON#1", opts: []DescribeOption{withExt}, want: "never runs"},
+	{spec: "0 0 * 2 MON#5 2027", opts: []DescribeOption{WithParseOptions(Minute | Hour | Dom | Month | Dow | Extended | Year)}, want: "never runs"},
+	{spec: "0 0 H(1-7) * MON#2", opts: []DescribeOption{WithParseOptions(Minute | Hour | Dom | Month | Dow | Extended | Hash)}, want: "never runs"},
+	{spec: "0 0 L * MON#4", opts: []DescribeOption{withExt}, want: "at 12 am on the last day of the month when it falls on the fourth Monday"},
+	{spec: "0 0 * 2 MON#5", opts: []DescribeOption{withExt}, want: "at 12 am on the fifth Monday in February"},
 	{spec: "0 0 29 2 * 2028", opts: []DescribeOption{withYear}, want: "at midnight on the 29th of the month in February in year 2028; the 29th runs only in months that have one"},
 	{spec: "0 0 29 2 * 2027,2028", opts: []DescribeOption{withYear}, want: "at midnight on the 29th of the month in February in years 2027 and 2028; the 29th runs only in months that have one"},
 	{spec: "0 0 30 2 1", opts: []DescribeOption{withDowOrDom}, want: "at 12 am on the 30th of the month or on any Monday in February; the 30th runs only in months that have one"},
@@ -795,6 +808,43 @@ func TestDayStepCountsWrittenMonths(t *testing.T) {
 func yearWritten(s *SpecSchedule, y int) bool {
 	_, ok := s.Year[y]
 	return ok
+}
+
+// TestNeverRunsMatchesParser binds "never runs" to Next for the day forms the
+// parser cannot reject: no start in a run of years finds a run.
+func TestNeverRunsMatchesParser(t *testing.T) {
+	p := MustNewParser(Minute | Hour | Dom | Month | Dow | Extended)
+	var specs []string
+	for m := 1; m <= 12; m++ {
+		for d := 1; d <= 31; d++ {
+			specs = append(specs, fmt.Sprintf("0 0 %dW %d *", d, m), fmt.Sprintf("0 0 L-%d %d *", d-1, m))
+		}
+		for n := 1; n <= 5; n++ {
+			specs = append(specs, fmt.Sprintf("0 0 * %d MON#%d", m, n))
+		}
+	}
+	for d := 1; d <= 31; d++ {
+		for n := 1; n <= 5; n++ {
+			specs = append(specs, fmt.Sprintf("0 0 %d * FRI#%d", d, n))
+		}
+	}
+	for _, spec := range specs {
+		sch, err := p.Parse(spec)
+		if err != nil {
+			continue
+		}
+		runs := false
+		for y := 2001; y <= 2029 && !runs; y += 4 { // Next looks 5 years ahead
+			runs = !sch.Next(time.Date(y, 1, 1, 0, 0, 0, 0, time.UTC)).IsZero()
+		}
+		got, err := p.DescribeSpec(spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if never := got == "never runs"; never == runs {
+			t.Errorf("%s reads %q; a run within the years: %v", spec, got, runs)
+		}
+	}
 }
 
 func TestDescribeSpec(t *testing.T) {

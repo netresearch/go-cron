@@ -248,35 +248,55 @@ type describer struct {
 	monthDays []uint   // the month lengths a hashed day step can run in (H19)
 }
 
-// dayMissing reports a day of the month that none of the written months and
-// years has (G11): "0 0 30 2 *", "0 0 29 2 * 2027". With H in a date field it
-// counts every value a key can pick: "0 0 H(30-31) 2 *" never runs for any
-// key, while "0 0 H(29-31) 2 *" runs for some.
+// dayMissing reports a schedule whose days the calendar never has (G11): a
+// day none of the written months and years has ("0 0 30 2 *", "0 0 29 2 *
+// 2027", "0 0 31W 4 *"), or a day that cannot be the counted day of the week
+// ("0 0 1 * MON#2"). With H in a date field it counts every value a key can
+// pick: "0 0 H(30-31) 2 *" never runs for any key, while "0 0 H(29-31) 2 *"
+// runs for some. It reads the calendar, not Next, which looks only some years
+// ahead: "0 0 * 2 MON#5" next runs in 2044.
 func (p Parser) dayMissing(sch Schedule, fields []string) bool {
 	if p.noKeyFindsDay(sch, fields) {
 		return true
 	}
 	s, ok := sch.(*SpecSchedule)
-	if !ok || len(s.DomConstraints) > 0 || len(s.Year) == 0 ||
-		p.options&DowOrDom != 0 && s.Dom&starBit == 0 && s.Dow&starBit == 0 {
+	if !ok || len(s.Year)+len(s.DomConstraints)+len(s.DowConstraints) == 0 {
 		return false
 	}
-	days := s.Dom | hashReach(fields[3], dom)
-	inMonths := s.Month | hashReach(fields[4], months)
-	for y := range s.Year {
-		for m := time.January; m <= time.December; m++ {
-			if inMonths&(1<<uint(m)) == 0 {
-				continue
-			}
-			last := time.Date(y, m+1, 0, 0, 0, 0, 0, time.UTC).Day()
-			for d := 1; d <= last; d++ {
-				if days&(1<<uint(d)) != 0 {
-					return false
-				}
+	reach := *s
+	reach.Dom |= hashReach(fields[3], dom)
+	reach.Month |= hashReach(fields[4], months)
+	reach.Dow |= hashReach(fields[5], p.dowBounds())
+	for _, y := range calendarYears(s.Year) {
+		for t := time.Date(y, time.January, 1, 0, 0, 0, 0, time.UTC); t.Year() == y; t = t.AddDate(0, 0, 1) {
+			if reach.Month&(1<<uint(t.Month())) != 0 && dayMatches(&reach, t) { // #nosec G115 -- a month, 1 to 12
+				return false
 			}
 		}
 	}
 	return true
+}
+
+// calendarYears returns one year of each kind among the written years, or
+// among 28 years when none is written, which hold all 14 kinds: a year's days
+// depend only on its first day of the week and whether it is a leap year.
+func calendarYears(written map[int]struct{}) []int {
+	if len(written) == 0 {
+		written = make(map[int]struct{}, 28)
+		for y := 2001; y <= 2028; y++ {
+			written[y] = struct{}{}
+		}
+	}
+	var years []int
+	seen := map[[2]int]bool{}
+	for y := range written {
+		kind := [2]int{int(time.Date(y, time.January, 1, 0, 0, 0, 0, time.UTC).Weekday()), time.Date(y, time.March, 0, 0, 0, 0, 0, time.UTC).Day()}
+		if !seen[kind] {
+			seen[kind] = true
+			years = append(years, y)
+		}
+	}
+	return years
 }
 
 // strictDaysError returns the parser's error when strict was dropped for the

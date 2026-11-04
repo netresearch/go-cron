@@ -72,7 +72,7 @@ which form a spec gets. Each has an ID, which the grammar cites.
 | G7 | Clause order: time, day, month, year, then the note, then the short-month clause |
 | G8 | No comma before a trailing clause such as "every day". A list of three or more takes the serial comma: "at minutes 0, 15, 30, and 45 past the hour" |
 | G10 | A combination of fields the grammar has no form for renders field by field |
-| G11 | A spec that never runs reads "never runs": a day that none of the written months and years has (`0 0 30 2 *`, `0 0 29 2 * 2027`), and an H day that no key can find in them (`0 0 H(30-31) 2 *`) |
+| G11 | A spec that never runs reads "never runs": a day that none of the written months and years has (`0 0 30 2 *`, `0 0 29 2 * 2027`, `0 0 31W 4 *`, `0 0 L-30 2 *`), a day that cannot be the counted day of the week (`0 0 1 * MON#2`), and an H day that no key can find in them (`0 0 H(30-31) 2 *`). It reads the calendar, not `Next`, which looks 5 years ahead: `0 0 * 2 MON#5` is described, as it runs in 2044 |
 
 ### Time fields
 
