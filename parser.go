@@ -1472,6 +1472,11 @@ func getRangeWithHash(expr string, r bounds, hashKey string, hashEnabled bool) (
 		return 0, errors.New("h expressions require hash option to be enabled")
 	}
 
+	return hashExprBits(expr, r, computeHash(hashKey))
+}
+
+// hashExprBits returns the bits an H expression selects under hashValue.
+func hashExprBits(expr string, r bounds, hashValue uint64) (uint64, error) {
 	// Parse H expression: H, H/N, H(min-max), H(min-max)/N
 	rangeAndStep := strings.Split(expr, "/")
 	hashPart := rangeAndStep[0]
@@ -1521,9 +1526,6 @@ func getRangeWithHash(expr string, r bounds, hashKey string, hashEnabled bool) (
 	} else if len(rangeAndStep) > 2 {
 		return 0, fmt.Errorf("too many slashes: %q", expr)
 	}
-
-	// Compute hash-based offset
-	hashValue := computeHash(hashKey)
 
 	// Any written step selects values, H/1 included: like */1 it means every
 	// value of the range.
