@@ -823,7 +823,7 @@ func monthLengths(s *SpecSchedule, m uint) []uint {
 	}
 	var days []uint
 	for y := range s.Year {
-		days = append(days, uint(time.Date(y, time.March, 0, 0, 0, 0, 0, time.UTC).Day())) // #nosec G115 -- a day of the month
+		days = append(days, uint(daysIn(y, time.February))) // #nosec G115 -- a day of the month
 	}
 	return days
 }
@@ -840,7 +840,7 @@ func (p Parser) dayRuns(sch Schedule, fields []string) func(hashed) (int, int) {
 	}
 	return func(x hashed) (int, int) {
 		pick := *s
-		date := p.hashDateFields(&pick, s, fields)
+		date := p.hashDateFields(&pick, s, fields)[:2] // the day of the week counts no days
 		period, ok := hashWalkPeriod(date)
 		if !ok {
 			return alone(x)

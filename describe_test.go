@@ -801,6 +801,42 @@ func TestDayStepCountsWrittenMonths(t *testing.T) {
 	}
 }
 
+// TestDayRunsPastTheWalk checks the count past maxHashWalk: the day and the
+// month count each on its own, so it covers every length the month can pick.
+func TestDayRunsPastTheWalk(t *testing.T) {
+	p := MustNewParser(Minute | Hour | Dom | Month | Dow | Hash | Year)
+	spec := "0 0 H/10 H/250,H/251 * 2027"
+	sch, err := p.WithHashKey("key").Parse(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, fields, _, _ := p.specFields(spec) //nolint:dogsled // only the fields matter
+	s := sch.(*SpecSchedule)
+	if _, ok := hashWalkPeriod(p.hashDateFields(s, s, fields)[:2]); ok {
+		t.Fatalf("%s repeats within maxHashWalk", spec)
+	}
+	x := splitHash(fields[3], dom).steps[0]
+	wantLo, wantHi := dayRange(x, []uint{28, 30, 31}) // the months of 2027
+	if lo, hi := p.dayRuns(sch, fields)(x); lo != wantLo || hi != wantHi {
+		t.Errorf("%s counts %d to %d days; want %d to %d", spec, lo, hi, wantLo, wantHi)
+	}
+}
+
+// TestDayRunsIgnoresDowPeriod checks that an H in the day of the week, which
+// counts no days, does not push the walk past maxHashWalk.
+func TestDayRunsIgnoresDowPeriod(t *testing.T) {
+	p := MustNewParser(Minute | Hour | Dom | Month | Dow | Hash | Year)
+	spec := "0 0 H/10 H(2-3) H/9999 2028"
+	sch, err := p.WithHashKey("key").Parse(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, fields, _, _ := p.specFields(spec) //nolint:dogsled // only the fields matter
+	if lo, hi := p.dayRuns(sch, fields)(splitHash(fields[3], dom).steps[0]); lo != 3 || hi != 3 {
+		t.Errorf("%s counts %d to %d days; want 3", spec, lo, hi)
+	}
+}
+
 // dayStepSpecs lists hashed day steps whose count TestDayStepCountsWrittenMonths
 // binds to the parser.
 func dayStepSpecs() []string {
