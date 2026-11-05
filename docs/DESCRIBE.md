@@ -74,6 +74,7 @@ These words mean one thing across the rules, the grammar and the notes.
 | thru | Joins the ends of a written range, both included: "Monday thru Friday" | T5, T9, R8, R9, R11, R12, D4, D6, D7, H24, N2, N4, N7 | One deliberate word for an inclusive range of written values |
 | between | The range a fixed value is picked from, when the spec writes it or it is clock times: "a fixed minute between minutes 0 and 29", "a fixed hour between midnight and 5 am" | H3, H6, H10, H18, H21, N4, N5, N7, N8 | The value is one point in the range, where "thru" would read as every value in it |
 | from…to | The range of a fixed value when it is plain numbers the spec does not write: "where h is a fixed minute from 0 to 14" | N2, N3, N5 | Counted numbers include the end of "from…to", as in counting from 1 to 10; a clock time after "to" does not, so clock ranges read "between" |
+| either | Joins the two parts of a fixed value's wrapped range when a part has one value or a unit: "either the 1st or between the 10th and 31st", "either minute 0 or between minutes 50 and 59" | H3, H18, N5 | The value is one of the two; a fixed value never has more than two parts |
 | the top of | Minute 0: "at the top of every hour" | T9, R4, R9, R10, C1, H4, H5, H13, H15, H16, H21, H24, P2, N4, N7 | The everyday phrase, used for minute 0 everywhere. It replaced "on the hour" |
 | the 9 am hour | A named hour: an hour given by its clock time | T9, R3, R6, R11, C1, H7, H8, H12, H21, H23 | It makes the unit clear |
 | past, within, during | How a value sits in a larger unit: minutes "past the hour", seconds "within a minute", minutes "during" a named hour | T9, R6, C1, D1, H7, N2 | Each join says which unit the value belongs to |
@@ -498,7 +499,14 @@ meaning is checked against `Next()`.
 misread it, so a part with one value now stands apart: "either the 1st or between the
 10th and 31st". Each alternative keeps its unit ("either minute 0 or between
 minutes 50 and 59"), since bare numbers lose what they count, and what follows
-the value comes before "either" so it covers both. "fixed" replaced "hashed" because it says what a reader can rely
+the value comes before "either" so it covers both.
+
+Adding "on" to "either between the 1st and 5th or the 31st" was considered, as one
+reader briefly took it for a range running to the 31st. It stays out: no reader
+answered wrongly, the note spells the days out, and the shorter form matches
+"either the 1st or between the 10th and 31st".
+
+"fixed" replaced "hashed" because it says what a reader can rely
 on.
 
 ## Extending the wording
