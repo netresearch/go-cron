@@ -372,7 +372,7 @@ func TestAnalyzeSpecDescription(t *testing.T) {
 		},
 		{
 			"with hash", AnalyzeSpecWithHash("0 9 * * H/2", hash, "job"), "at 9 am on 3 or 4 days in every week, 2 days apart, starting from a fixed day; the hash key fixes the day",
-			"on Sunday, Tuesday, Thursday, and Saturday; or Monday, Wednesday, and Friday, depending on the hash",
+			"on Sunday, Tuesday, Thursday, and Saturday; or Monday, Wednesday, and Friday, depending on the hash key",
 		},
 		{"invalid", AnalyzeSpec("61 * * * *"), "", ""},
 	} {

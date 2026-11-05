@@ -204,7 +204,7 @@ func (n *noter) stepNote(f hashField, unit string, r bounds, place string, place
 		return "", false // N4: no list that long, and no plain form is true
 	}
 	if x.lo > x.hi {
-		return "at " + unit + "s " + timeOutcomes(x, r) + place + ", depending on the hash", true
+		return "at " + unit + "s " + timeOutcomes(x, r) + place + ", depending on the hash key", true
 	}
 	v := n.next()
 	vals, top, tail := stepValues(v, x, valueLimit)
@@ -433,7 +433,7 @@ func (n *noter) outcomeList(x hashed, outs [][]uint, plain timeField, in, of str
 	if last == 0 {
 		return in + words[0] + of
 	}
-	text := in + strings.Join(words[:last], "; ") + "; or " + words[last] + of + ", depending on the hash"
+	text := in + strings.Join(words[:last], "; ") + "; or " + words[last] + of + ", depending on the hash key"
 	if plain.container == unitMonth {
 		text += n.outcomeTail(x, outs)
 	}
