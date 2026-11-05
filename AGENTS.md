@@ -130,7 +130,8 @@ import (
 - **Heap-based scheduling**: Min-heap for entry management (ADR-001)
 - **Schedule descriptions**: `DescribeSpec` wording is binding through tests,
   and its rules, grammar and method are in `docs/DESCRIBE.md`. When a change
-  alters what a spec means (a parse option, a field form), extend in
+  alters its wording or what a spec means (a parse option, a field form),
+  extend in
   `describe_test.go`: `describeGoldens` (the expected descriptions) and
   `describeGrammar` (the EBNF as a regexp; every description except the literal
   form must match), `describeNoteGoldens` and `describeNoteGrammar` for the
