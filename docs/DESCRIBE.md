@@ -57,6 +57,33 @@ func WithParseOptions(o ParseOption) DescribeOption // package function only
   `@hourly`, `@triggered`, `@manual` and `@none`, and the intervals
   `@every`, `@every_aligned` and `@every_start` (`Descriptor`).
 
+## Terminology
+
+These words mean one thing across the rules, the grammar and the notes.
+
+| Term | Definition | Rules | Why |
+|---|---|---|---|
+| fixed | One value the hash key picks: "a fixed minute", "a fixed day of the month". It differs between keys and stays the same for one key | T4, T9, R7, D7, X4, H1, H2, H3, H4, H5, H6, H7, H8, H10, H12, H13, H14, H15, H16, H17, H18, H19, H20, H21, H22, H23, H24, N1, N2, N3, N4, N5, N7, N8 | It says what a reader can rely on: the value does not change. "hashed" only says how it was picked |
+| hash key | The key every `H` in a spec takes its value from | H1, H6 | The key picks the value, so it is the subject of the closing clause: "the hash key fixes the minute" |
+| hashed | Written with `H` and not one value: a hashed step (`H/15`), a wrapped hashed range (`H(50-10)/5`). A term of these rules: no description or note uses it | T9, H2, H14, H17, H19, H20, H22, H23, H24, N1, N2, N3, N5, N7, N8 | The rules need a name for the syntax; the reader needs what it does, which is "fixed", a count, or a list |
+| h, k, j, m, n, p | The letters a note uses for fixed values, in turn: "at minutes h and h+30, where h is a fixed minute from 0 to 29" | N2, N3, N5, N6 | The note can state every value a step selects without knowing the key |
+| depending on the hash | Closes a note that lists each set of values a key can pick | N2, N3, N4 | A short list of outcomes is easier to read than a variable, and a wrapped range has no simple variable form |
+| runs | The number of times a hashed step runs in its period: "4 runs in every hour", "1 or 2 runs" | T9, X6, H2, H15, H21, H23, H24, N3 | With `H` the values change by key, so the count is the part that holds for every key |
+| named day | Sunday thru Saturday, and nothing else. A fixed day, a day of the month, `L` and `W` are not named days | T6, T9, R2, D7, H18, P2 | A named day takes "12 am": "midnight on Friday" could mean the end of Friday |
+| day of the week, weekday | "day of the week" is any of Sunday thru Saturday. "weekday" is Monday thru Friday, and appears only for `W` | G11, D7, X1, X3, X4, X5, H18, N1, N4 | They name different sets of days, so one word never stands in for the other |
+| thru | Joins the ends of a written range, both included: "Monday thru Friday" | T5, T9, R8, R9, R11, R12, D4, D6, D7, H24, N2, N4, N7 | One deliberate word for an inclusive range of written values |
+| between | The range a fixed value is picked from: "a fixed minute between minutes 0 and 29" | H3, H6, H10, H18, H21, N4, N7, N8 | The value is one point in the range, where "thru" would read as every value in it |
+| the top of | Minute 0: "at the top of every hour" | T9, R4, R9, R10, C1, H4, H5, H13, H15, H16, H21, H24, P2, N4, N7 | The everyday phrase, used for minute 0 everywhere. It replaced "on the hour" |
+| the 9 am hour | An hour named by its clock time | T9, R3, R11, C1, H7, H8, H12, H21, H23 | It makes the unit clear |
+| past, within, during | How a value sits in a larger unit: minutes "past the hour", seconds "within a minute", minutes "during" a named hour | T9, R6, C1, D1, H7, N2 | Each join says which unit the value belongs to |
+| every day | Closes clock times and hour ranges: "at 9 am every day" | G8, T5, T6, J1, T9, R8, R9, R10, R11, R12, D7, H7, H8, H9, H12, H14, H16, H20, H21, H22, H23, H24 | In reader trials, nothing said daily without it |
+| span form | Several minutes over an hour range, opening with the first and last run: "from 9 am thru 5:56 pm every day, at minutes 0, 7, 14, … 56 past each hour" | T5, J1, R12, D1, H17 | In reader trials, readers dropped the runs in the last hour of "hours 9 thru 17" |
+| short month | A month without a written day. Such a month does not run that day: "the 31st runs only in months that have one" | G7, D3, X5, N3, N4, N5 | A description says what runs (G1), and a plain "the 31st" suggests every month has one |
+| when it falls on, or on any | Join the two day fields: "when it falls on" when both must match, "or on any" when either does | D5, D7, X4, H18 | A reader can follow the logic without knowing how the parser combines the fields |
+| starting over each | Says that a step restarts at its boundary: "(every 7 minutes, starting over each hour)" | T1, N2 | In reader trials, "every 7 minutes" read as a steady rhythm, which a step does not keep across the boundary |
+| field by field | The form for a combination the grammar has none for: "minute 0, hour 0, day of month H/10, month *, day of week *" | G10, H17, H20, N1, N2 | A valid spec always gets a description, and this one is exact |
+| never runs | A spec no date can satisfy, read from the calendar | G11 | A description of a schedule that never fires would mislead |
+
 ## Rules
 
 The grammar below lists every form a description can take. These rules say
