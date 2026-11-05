@@ -311,10 +311,11 @@ func gcd(a, b uint64) uint64 {
 }
 
 // between names the range of a hashed value or step, with what joins it to the
-// value: " between minutes 0 and 29", " between minutes 0 and 10 or 50 and 59",
-// ": between minutes 0 and 5, or minute 59" (H3, T9). A wrapped step reads from
-// its start, where its walk starts: " between minutes 50 and 10". ok is false
-// for a wrapped range of one value per part.
+// value: " between minutes 0 and 29", ", either between minutes 0 and 10 or
+// between minutes 50 and 59", ", either between minutes 0 and 5 or minute 59"
+// (H3, T9). A wrapped step reads from its start, where its walk starts: "
+// between minutes 50 and 10". ok is false for a wrapped range of one value per
+// part.
 func between(unit string, x hashed, r bounds) (string, bool) {
 	if x.step > 1 && x.lo > x.hi {
 		return fmt.Sprintf("%s%ss %d and %d", betweenSep, unit, x.lo, x.hi), true
@@ -327,38 +328,76 @@ func number(v uint) string { return strconv.FormatUint(uint64(v), 10) }
 
 // rangeParts writes a hashed range as its parts, low to high (T9), with what
 // joins it to the value: " between 1 and 5 or 25 and 31", " between the 1st and
-// 5th or the 25th and 31st", " between minutes 0 and 10 or 50 and 59". A part of
-// one value stands apart: ": the 1st, or between the 10th and 31st", ": between
-// minutes 0 and 5, or minute 59". the goes before each part, unit before the
-// first. ok is false for a wrapped range whose parts are each one value (H17,
-// H20).
+// 5th or the 25th and 31st". Parts with a unit each name it, and a part of one
+// value stands apart: ", either minute 0 or between minutes 50 and 59", ",
+// either the 1st or between the 10th and 31st". the goes before each part of a
+// date, unit names what its parts count: a minute or second in every form, a
+// day only in the either form. ok is false for a wrapped range whose parts are
+// each one value (H17, H20). The alternatives end in altEnd for
+// placeAlternatives.
 func rangeParts(x hashed, r bounds, word func(uint) string, the, unit string) (string, bool) {
-	lead, lone := the, the
-	if unit != "" {
-		lead, lone = unit+"s ", unit+" "
+	plain, span, one := the, the, the
+	switch unit {
+	case "":
+	case unitDay:
+		span, one = "days ", "day "
+	default:
+		plain, span, one = unit+"s ", unit+"s ", unit+" "
 	}
 	parts := timeItem{lo: x.lo, hi: x.hi}.parts(r)
 	words := make([]string, len(parts))
+	alts := make([]string, len(parts))
 	ones := 0
 	for i, p := range parts {
 		words[i] = word(p[0])
 		if p[0] == p[1] {
+			alts[i] = one + words[i]
 			ones++
 			continue
 		}
 		words[i] += " and " + word(p[1])
+		alts[i] = "between " + span + words[i]
 	}
 	switch {
 	case len(parts) < 2:
-		return betweenSep + lead + words[0], true
+		return betweenSep + plain + words[0], true
 	case ones == 2:
 		return "", false
-	case ones == 0:
-		return betweenSep + lead + words[0] + " or " + the + words[1], true
-	case parts[0][0] == parts[0][1]:
-		return ": " + lone + words[0] + ", or between " + lead + words[1], true
+	case ones == 0 && (unit == "" || unit == unitDay):
+		return betweenSep + plain + words[0] + " or " + the + words[1], true
 	}
-	return ": between " + lead + words[0] + ", or " + lone + words[1], true
+	return ", either " + alts[0] + " or " + alts[1] + altEnd, true
+}
+
+// altEnd marks where a value's "either" alternatives end, for
+// placeAlternatives.
+const altEnd = "\x00"
+
+// placeAlternatives puts a value's alternatives after what follows it in the
+// clause, so that what follows covers both: "at a fixed minute past the hour,
+// either minute 0 or between minutes 50 and 59". Beside another fixed value
+// they stay with their own, closed by a comma.
+func placeAlternatives(s string) string {
+	for {
+		end := strings.Index(s, altEnd)
+		if end < 0 {
+			return s
+		}
+		start := strings.LastIndex(s[:end], ", either ")
+		rest := s[end+len(altEnd):]
+		clause, tail, semi := strings.Cut(rest, ";")
+		if semi {
+			tail = ";" + tail
+		}
+		switch {
+		case clause == "":
+			s = s[:end] + rest
+		case strings.Contains(clause, "fixed"):
+			s = s[:end] + "," + rest
+		default:
+			s = s[:start] + clause + s[start:end] + tail
+		}
+	}
 }
 
 // fixed names a hashed value: "a fixed minute", "a fixed minute between
@@ -478,7 +517,7 @@ func onesOnly(h [3]hashField) bool {
 func (d *describer) describeHashTime(h [3]hashField) (string, bool) {
 	sec := newTimeField(h[0].plain, unitSecond, unitMinute, seconds)
 	minute := newTimeField(h[1].plain, unitMinute, unitHour, minutes)
-	hour := newTimeField(h[2].plain, unitHour, "day", hours)
+	hour := newTimeField(h[2].plain, unitHour, unitDay, hours)
 	ss, ms, hs := h[0].shape(sec), h[1].shape(minute), h[2].shape(hour)
 	switch {
 	case onesOnly(h):
@@ -796,7 +835,7 @@ func hashDate(h hashField, f timeField, noun, the string, runs func(hashed) (int
 // dateBetween names the range of a hashed date value or step by its values:
 // " between Monday and Friday", " between the 1st and 15th" (H3, H18). A
 // wrapped fixed day of the month splits low to high: " between the 1st and
-// 5th or the 25th and 31st", ": the 1st, or between the 10th and 31st"; a
+// 5th or the 25th and 31st", ", either the 1st or between the 10th and 31st"; a
 // wrapped step of days, week or year reads in its
 // order: " between the 25th and 5th", " between Friday and Monday", " between
 // November and February". ok is false for a wrapped day of the month of one

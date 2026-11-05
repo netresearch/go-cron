@@ -166,7 +166,7 @@ which form a spec gets. Each has an ID, which the grammar cites.
 |---|---|
 | H1 | A value the hash key picks is "fixed", and the hash clause closes the description after a semicolon: "at a fixed minute past the hour; the hash key fixes the minute" |
 | H2 | A hashed step states its count: "4 runs in every hour, 15 minutes apart, starting from a fixed minute"; "1 or 2 runs" when the fixed start decides the count |
-| H3 | A range: "a fixed minute between minutes 0 and 29"; a wrapped range in two parts, sorted (T9): "between minutes 0 and 10 or 50 and 59", a part of one value stands apart: "a fixed minute: between minutes 0 and 5, or minute 59", "a fixed minute: minute 0, or between minutes 50 and 59"; a wrapped step from its start, where its walk starts: "between minutes 50 and 10"; hours by name: "a fixed hour between the 9 am and 5 pm hours" |
+| H3 | A range: "a fixed minute between minutes 0 and 29"; a wrapped range in two parts, sorted (T9), each part with its unit and "either" for the two: "at a fixed minute past the hour, either between minutes 0 and 10 or between minutes 50 and 59", "either minute 0 or between minutes 50 and 59", "either between minutes 0 and 5 or minute 59". What follows the value in the clause comes before "either", so it covers both; beside another fixed value the two stay with their own, closed by a comma: "at a fixed minute, either minute 0 or between minutes 50 and 59, past the hour on a fixed day of the month". A wrapped step from its start, where its walk starts: "between minutes 50 and 10"; hours by name: "a fixed hour between the 9 am and 5 pm hours" |
 | H4 | `0,H` follows R4: "at the top of the hour and a fixed minute past it" |
 | H5 | `0,H/15`: the plain value first: "at the top of the hour and every 15 minutes starting from a fixed minute" |
 | H6 | `H,H(0-29)`: "at a fixed minute and a fixed minute between minutes 0 and 29; the hash key fixes both minutes". Two fixed values of one unit merge in that clause wherever they stand: "the minute and both days", "both minutes and the day" |
@@ -180,7 +180,7 @@ which form a spec gets. Each has an ID, which the grammar cites.
 | H15 | A plain value beside a fixed one in a field states the count, as the two can coincide: "1 or 2 runs in every hour, at the top of the hour and a fixed minute past it" |
 | H16 | Minutes under a fixed hour join with "at": "at minutes 0 and 30 at a fixed hour every day", "at minute 30 at a fixed hour every day"; minute 0 keeps R4: "at the top of a fixed hour every day" |
 | H17 | Other combinations of H in the time fields render field by field (G10): H with a plain second other than 0, several hashed steps in a field, a hashed step beside a fixed value or with a fixed hour, a wrapped fixed hour range, a wrapped range whose parts are each one value (`H(59-0)`), a ranged hour step, a ranged step under a written minute or restricted hours, a fixed value beside a plain one other than H15's, two fixed values outside the H21 forms, a hashed second step beside several minutes or under an hour step past 6 values, a fixed second in the span form (T5), and a fixed second beside a fixed minute or hour other than H12's and H24's |
-| H18 | A fixed day or month: "on a fixed day of the month", "on a fixed day of the week", "in a fixed month"; a range by its values: "between the 1st and 15th", "between Monday and Friday", "between January and June". A wrapped day of the month splits low to high: "between the 1st and 5th or the 25th and 31st", and a part of one value stands apart: "a fixed day of the month: the 1st, or between the 10th and 31st", "a fixed day of the month: between the 1st and 5th, or the 31st"; a wrapped week or year reads in its order: "between Friday and Monday", "between November and February"; one plain value first: "on the 1st and a fixed day of the month". Beside a restricted other day field a fixed day joins as D5: "at 12 am on a fixed day of the month when it falls on Monday", "on the 1st of the month or on a fixed day of the week" |
+| H18 | A fixed day or month: "on a fixed day of the month", "on a fixed day of the week", "in a fixed month"; a range by its values: "between the 1st and 15th", "between Monday and Friday", "between January and June". A wrapped day of the month splits low to high: "between the 1st and 5th or the 25th and 31st", and a part of one value takes "either", placed as in H3: "a fixed day of the month, either the 1st or between the 10th and 31st", "either between the 1st and 5th or the 31st"; a wrapped week or year reads in its order: "between Friday and Monday", "between November and February"; one plain value first: "on the 1st and a fixed day of the month". Beside a restricted other day field a fixed day joins as D5: "at 12 am on a fixed day of the month when it falls on Monday", "on the 1st of the month or on a fixed day of the week" |
 | H19 | A hashed date step counts its days or months, as H14: "on 3 or 4 days in every week, 2 days apart, starting from a fixed day", "in 4 months in every year, 3 months apart, starting from a fixed month". In the day of the month the count covers the lengths of the written months and years, a hashed month counting every month it can pick, or every month length when none is written: "on 2 to 4 days in every month, 10 days apart, starting from a fixed day". One hash picks a hashed day and month, so the count covers the pairs they can make; past 8,192 hash values, each is counted on its own |
 | H20 | Other combinations in the date fields render field by field (G10): a hashed day step beside a restricted other day field, `H` beside `L`, `W` or `#`, a fixed day ORed with a day field that is every day, a wrapped day of the month of one value per part (`H(31-1)`), several hashed items, a hashed step beside a value, or more than one value beside `H` |
 | H21 | Two fixed values in one field, and nothing else, read as H6, each in its own words, the whole range first, then low to high. The count (H2) is "1 or 2 runs" when they can fall on one value, "2 runs" when they cannot: "2 runs in every hour, at a fixed minute between minutes 0 and 9 and a fixed minute between minutes 20 and 29". Minutes take the hours as H2 does: "1 or 2 runs in every hour during the 9 am hour, at a fixed minute and a fixed minute between minutes 0 and 29". Hours take minute 0: "1 or 2 runs in every day, at the top of a fixed hour and a fixed hour between midnight and 5 am hours". Seconds take every minute of every hour |
@@ -203,7 +203,7 @@ which form a spec gets. Each has an ID, which the grammar cites.
 | N2 | A hashed step in the second or minute field reads as its values with a variable, unit first (R5), in the hours of the description (R6, R9, R11, R12, C1), or of the written fields when the description is field by field: "at minutes h, h+15, h+30, and h+45 past the hour, where h is a fixed minute from 0 to 14"; "at seconds h, h+15, h+30, and h+45 within minutes 0 thru 10 and 50 thru 59 in every hour, …". Minutes cut short carry their note (T1): "within minutes 0, 7, 14, … 56 in every hour (every 7 minutes, starting over each hour), where h is …". A wrapped hashed range lists its outcomes as N4 does: "at minutes 50, 55, 0, 5, and 10; 51, 56, 1, and 6; 52, 57, 2, and 7; 53, 58, 3, and 8; or 54, 59, 4, and 9 past the hour, depending on the hash key" |
 | N3 | The values run to the last one any h has; past the T1 limit, the first 3, "…", the last ("h, h+5, h+10, … h+55"). When only some h have the last value, a clause says which: "at minutes h and h+40 past the hour, where h is a fixed minute from 0 to 39; h+40 runs only when h is below 20". A hashed day step past the shortest written month keeps its values, and a clause in the form of D3 names the ones some month lacks: "on days h, h+10, h+20, and h+30 of every month in April, …; h+30 runs only in months that have one"; "…, depending on the hash key; the 31st runs only in months that have one" A hashed day step beside a hashed month stops at the last day the months its hash picks with it have, as one hash picks both; past 8,192 hash values it keeps its values: "on days h, h+10, and h+20 of the month, where h is a fixed day from 1 to 10" for `0 0 H/10 H(2-3) * 2028`. An outcome no pair leaves a day in drops out, and a lone outcome names no hash: "on the 30th of the month" |
 | N4 | The day of the week always lists its outcomes; the day of the month and the month list up to 3, and a wrapped range, otherwise the variable form. Outcomes are ordered by h: "on Sunday, Tuesday, Thursday, and Saturday; or Monday, Wednesday, and Friday, depending on the hash key". Each outcome reads in the order it runs ("on Friday and Sunday; or Saturday and Monday"). A wrapped day of the month ends "; a short month skips the days it lacks and changes the last step", as the last step across a short month's end can be cut. A whole range written from another start (`H(1-7)/2`, `H(5-4)/7`) walks from that start, as the parser does: when the step does not divide the range, a day of the week or month lists, an hour reads "at the top of a fixed hour between 5 am and 11 am and every 7 hours after it thru 4 am", and a second or minute has no note; when it divides, the plain form stays |
-| N5 | A fixed day of the month: "on day h of every month, where h is a fixed day from 1 to 31; a month without day h is skipped"; a range the spec writes keeps "between" (H3, H18): "where h is a fixed day between 1 and 15", "where h is a fixed day: 1, or between 10 and 31"; beside a plain value "on the 1st and day h of every month, …; a month without day h runs on the 1st only"; a plain day some written month lacks, "…; a month without day h runs only on the 30th, if it has one"; the 31st, "…; a month without day h is skipped", as a month with the 31st has every h. The clause only when h can pass the 28th, or the shortest written month. A written month is named as in the description (D2): "on day h of the month in January, …", "on days h, h+5, and h+10 of every month in March, …". A hashed month is not named: "on day h of the month, …" |
+| N5 | A fixed day of the month: "on day h of every month, where h is a fixed day from 1 to 31; a month without day h is skipped"; a range the spec writes keeps "between" (H3, H18): "where h is a fixed day between 1 and 15", "where h is a fixed day, either day 1 or between days 10 and 31"; beside a plain value "on the 1st and day h of every month, …; a month without day h runs on the 1st only"; a plain day some written month lacks, "…; a month without day h runs only on the 30th, if it has one"; the 31st, "…; a month without day h is skipped", as a month with the 31st has every h. The clause only when h can pass the 28th, or the shortest written month. A written month is named as in the description (D2): "on day h of the month in January, …", "on days h, h+5, and h+10 of every month in March, …". A hashed month is not named: "on day h of the month, …" |
 | N6 | Each clause carries its own explanation; clauses in field order, joined with ", "; the variables h, k, j, m, n, p in turn. Midnight reads as in the description (R2, D7) |
 | N7 | A hashed hour step names the fixed hour's range and the step: "at the top of a fixed hour between midnight and 5 am and every 6 hours after it"; "thru" the range's last hour when the range is not the whole day; over a wrapped range, in clock order from its start: "at the top of a fixed hour between 10 pm and 11 pm and every 2 hours after it thru 4 am" |
 | N8 | A hashed hour step's note opens with the minutes as its description names them (R4, R5, H14, H22), then N7's hours: "at minutes 0 and 30 during a fixed hour between midnight and 5 am and every 6 hours after it", "at 30 minutes past a fixed hour …", "every minute during a fixed hour …", "at a fixed minute during a fixed hour …" |
@@ -229,7 +229,7 @@ start: schedule
      | "only" "when" "triggered"                                          // P2
      | interval                                                           // P3
 
-schedule: time [day] [month] [year] [note] short* [hashkey]               // G7, H1
+schedule: time [day] [month] [year] [note] [alts | domalts] short* [hashkey]               // G7, H1
 
 time: clocktime | span | hourstep | parts | hashed | counted
 
@@ -310,9 +310,9 @@ overlap: "the" "top" "of" "the" "hour" "and" fixed "past" "it"             // H4
        | "the" "top" "of" "the" "hour" "and" "every" INT units "starting" "from" fixed   // H5
        | clock "and" "the" "top" "of" fixed                               // H13
        | "the" "top" "of" fixed "and" fixed                               // H21
-fixed: "a" "fixed" unit [between | "between" hours | lone]                // H1, H3
-between: "between" units INT "and" INT ["or" INT "and" INT]                // H3, T9
-lone: ":" unit INT "," "or" "between" units INT "and" INT | ":" "between" units INT "and" INT "," "or" unit INT   // H3
+fixed: "a" "fixed" unit [between | "between" hours | alts [","]]         // H1, H3
+between: "between" units INT "and" INT                                     // H3, T9
+alts: "," "either" (unit INT "or" "between" units INT "and" INT | "between" units INT "and" INT "or" unit INT | "between" units INT "and" INT "or" "between" units INT "and" INT)   // H3
 hashkey: ";" "the" "hash" "key" "fixes" list{keyunit}                      // H1, H6
 keyunit: "the" unit | "both" units
 
@@ -351,11 +351,11 @@ hday: hdomfix | hdowfix                                                   // H18
 hmonth: "a" "fixed" "month" [hmonthrange]
       | MONTHNAME "and" "a" "fixed" "month"
       | hcnt ("month" | "months") "in" "every" "year" [hmonthrange] "," INT "months" "apart" "," "starting" "from" "a" "fixed" "month"
-hdomfix: "a" "fixed" "day" "of" "the" "month" [hdomrange | hdomlone] | "the" ORD "and" "a" "fixed" "day" "of" "the" "month"   // H18, D5
+hdomfix: "a" "fixed" "day" "of" "the" "month" [hdomrange | domalts [","]] | "the" ORD "and" "a" "fixed" "day" "of" "the" "month"   // H18, D5
 hdowfix: "a" "fixed" "day" "of" "the" "week" [hdowrange] | DAYNAME "and" "a" "fixed" "day" "of" "the" "week"        // H18, D5
 hdowany: "a" "fixed" "day" "of" "the" "week" [hdowrange] | "any" DAYNAME "and" "a" "fixed" "day" "of" "the" "week"   // H18, X4
 hdomrange: "between" "the" ORD "and" ORD ["or" "the" ORD "and" ORD]       // H18, D2, T9
-hdomlone: ":" "the" ORD "," "or" "between" "the" ORD "and" ORD | ":" "between" "the" ORD "and" ORD "," "or" "the" ORD   // H18
+domalts: "," "either" ("the" ORD "or" "between" "the" ORD "and" ORD | "between" "the" ORD "and" ORD "or" "the" ORD)   // H18
 hdowrange: "between" DAYNAME "and" DAYNAME
 hmonthrange: "between" MONTHNAME "and" MONTHNAME
 hcnt: INT | INT "or" INT | INT "to" INT                                   // H19
@@ -436,7 +436,7 @@ vals: vterm "and" vterm | vterm ("," vterm)+ "," "and" vterm
 vterm: VAR ["+" INT]
 where: "," "where" VAR "is" "a" "fixed" ("second" | "minute" | "day" | "month") whererange
 whererange: "from" bound "to" bound | "between" bound "and" bound ["or" bound "and" bound]   // N2, N3, N5
-    | ":" bound "," "or" "between" bound "and" bound | ":" "between" bound "and" bound "," "or" bound
+    | "," "either" "day" bound "or" "between" "days" bound "and" bound | "," "either" "between" "days" bound "and" bound "or" "day" bound
 bound: INT ["(" MONTHNAME ")"]
 tail: ";" vterm "runs" "only" "when" VAR "is" "below" INT                   // N3
 daytail: ";" "a" "month" "without" "day" VAR ("is" "skipped" | "runs" "on" "the" ORD "only" | "runs" "only" "on" "the" ORD "," "if" "it" "has" "one")   // N5
@@ -495,8 +495,10 @@ the 10th" to "the 1st and the 10th", which is a different schedule. A wording's
 meaning is checked against `Next()`.
 
 "between the 1st or the 10th and 31st" was rejected by every reader, and one
-misread it, so a part with one value now stands apart: "the 1st, or between the
-10th and 31st". "fixed" replaced "hashed" because it says what a reader can rely
+misread it, so a part with one value now stands apart: "either the 1st or between the
+10th and 31st". Each alternative keeps its unit ("either minute 0 or between
+minutes 50 and 59"), since bare numbers lose what they count, and what follows
+the value comes before "either" so it covers both. "fixed" replaced "hashed" because it says what a reader can rely
 on.
 
 ## Extending the wording

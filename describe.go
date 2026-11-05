@@ -143,7 +143,7 @@ func (p Parser) describe(spec string) (desc, note string, err error) {
 		h[i] = splitHash(fields[i], r)
 	}
 	hd, dates, ok := p.splitDates(fields)
-	units := hashUnits(append(h[:], hd[:]...), []string{unitSecond, unitMinute, unitHour, "day", "day", unitMonth})
+	units := hashUnits(append(h[:], hd[:]...), []string{unitSecond, unitMinute, unitHour, unitDay, unitDay, unitMonth})
 	d := p.dayDescriber(sch, fields)
 	day, month, short, dok := p.describeDates(&d, hd, dates)
 	if !ok || !dok {
@@ -164,7 +164,7 @@ func (p Parser) describe(spec string) (desc, note string, err error) {
 			parts = append(parts, clause)
 		}
 	}
-	desc = strings.Join(parts, " ") + d.noteText() + short + hashKeyClause(units)
+	desc = placeAlternatives(strings.Join(parts, " ")+d.noteText()+short) + hashKeyClause(units)
 	return desc, p.hashNote(&d, h, hd, dates), nil
 }
 
@@ -371,14 +371,14 @@ func (p Parser) describeDays(d *describer, domField, dowField string, hd, hw has
 
 // newDomField is the day of month: ordinals, up to 12 listed (D2).
 func newDomField(text string) timeField {
-	md := newTimeField(text, "day", unitMonth, dom)
+	md := newTimeField(text, unitDay, unitMonth, dom)
 	md.word, md.limit = ordinal, 12
 	return md
 }
 
 // newDowField is the day of week: names, 7 read as Sunday (D4).
 func (p Parser) newDowField(text string) timeField {
-	wd := newTimeField(text, "day", "week", p.dowBounds())
+	wd := newTimeField(text, unitDay, "week", p.dowBounds())
 	wd.word = func(v uint) string { return time.Weekday(v % 7).String() }
 	return wd
 }
@@ -542,7 +542,7 @@ func (d *describer) domParts(md timeField, special []string) (parts, lacking []d
 			parts = append(parts, domPart{key: 32, text: "the last weekday"})
 		case strings.HasPrefix(u, "L-"):
 			n, _ := mustParseInt(u[2:])
-			text := count(n, "day") + " before the last day"
+			text := count(n, unitDay) + " before the last day"
 			parts = append(parts, domPart{key: 33 + n, text: text, before: true})
 			if n >= 28 {
 				lacking = append(lacking, domPart{key: n + 1, text: text})
@@ -746,6 +746,7 @@ func (p Parser) describeLiteral(spec string, fields []string, yearField string) 
 const (
 	unitSecond        = "second"
 	unitMinute        = "minute"
+	unitDay           = "day"
 	unitHour          = "hour"
 	unitMonth         = "month"
 	thruSep           = " thru "
@@ -1125,7 +1126,7 @@ func (d *describer) clock(h, m, s uint) string {
 func (d *describer) describeTime(fields []string) string {
 	sec := newTimeField(fields[0], unitSecond, unitMinute, seconds)
 	minute := newTimeField(fields[1], unitMinute, unitHour, minutes)
-	hour := newTimeField(fields[2], unitHour, "day", hours)
+	hour := newTimeField(fields[2], unitHour, unitDay, hours)
 	if sec.single() {
 		if out, ok := d.clockTimes(sec.vals[0], minute, hour); ok {
 			return out

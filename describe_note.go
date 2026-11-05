@@ -78,7 +78,7 @@ func (p Parser) hashNote(d *describer, h, hd [3]hashField, dates [3]string) stri
 	n.ofDay, n.ofDays, n.shortest = monthPlace(hd[2], dates[2])
 	sec := newTimeField(h[0].plain, unitSecond, unitMinute, seconds)
 	minute := newTimeField(h[1].plain, unitMinute, unitHour, minutes)
-	hour := newTimeField(h[2].plain, unitHour, "day", hours)
+	hour := newTimeField(h[2].plain, unitHour, unitDay, hours)
 	secPlace, secOK := n.secondPlace(minute, hour, h[1].hashes() || h[2].hashes())
 	minPlace, minOK := n.minutePlace(hour, h[2])
 	minOK = minOK && sec.single() && sec.vals[0] == 0 && !h[0].hashes()
@@ -337,12 +337,12 @@ func (n *noter) domNote(f hashField, plain timeField) (string, bool) {
 		v := n.next()
 		from, ok := " from 1 to 31", true
 		if !x.whole {
-			from, ok = rangeParts(x, dom, number, "", "")
+			from, ok = rangeParts(x, dom, number, "", unitDay)
 		}
 		if !ok {
 			return "", false
 		}
-		text := fmt.Sprintf("on day %s%s, where %s is a fixed day%s", v, n.ofDay, v, from)
+		text := fmt.Sprintf("on day %s%s, where %s is a fixed day%s", v, n.ofDay, v, placeAlternatives(from))
 		if (x.lo > x.hi && n.shortest < dom.max) || x.hi > n.shortest {
 			text += fmt.Sprintf("; a month without day %s is skipped", v)
 		}
