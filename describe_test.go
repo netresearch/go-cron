@@ -546,6 +546,7 @@ var describeGoldens = []struct {
 	{spec: "0 0 H(29-31) 2 * 2027", opts: []DescribeOption{withHash, withYear}, want: "never runs"},
 	// G11: every H in a spec takes its value from one hash, so the fields move together
 	{spec: "0 0 H(29-31) 1 H(1-3) 2028", opts: []DescribeOption{WithParseOptions(Minute | Hour | Dom | Month | Dow | Hash | Year)}, want: "never runs"},
+	{spec: "0 0 H(30-31) H(2-3),H(2-2)/8191 H(5-6) 2028", opts: []DescribeOption{WithParseOptions(Minute | Hour | Dom | Month | Dow | Hash | Year)}, want: "never runs"},
 	{spec: "0 0 L-3 H H(1-3) 2027", opts: []DescribeOption{WithParseOptions(Minute | Hour | Dom | Month | Dow | Extended | Hash | Year)}, want: "never runs"},
 	{spec: "0 0 H(29-30) H(2-3) * 2027", opts: []DescribeOption{WithParseOptions(Minute | Hour | Dom | Month | Dow | Hash | Year)}, want: "at midnight on a fixed day of the month between the 29th and 30th in a fixed month between February and March in year 2027; the hash key fixes the day and the month"},
 	{spec: "0 0 H(30-31) H(2-3) *", opts: []DescribeOption{withHash}, want: "at midnight on a fixed day of the month between the 30th and 31st in a fixed month between February and March; the hash key fixes the day and the month"},
@@ -1144,8 +1145,8 @@ func TestHashPeriodStep(t *testing.T) {
 func TestNeverRunsPastTheWalk(t *testing.T) {
 	for _, spec := range []string{
 		"0 0 H(29-31),H(29-31)/251,H(29-31)/257 1 H(1-3) 2028",
-		"0 0 1,H(1-1)/70000 3 H(5-7) 2026",
-		"0 0 1,H(1-1)/70000 3 H(5-7)/2 2026",
+		"0 0 1,H(1-2)/70000 3 H(5-7) 2026",
+		"0 0 1,H(1-2)/70000 3 H(5-7)/2 2026",
 	} {
 		got, err := DescribeSpec(spec, WithParseOptions(Minute|Hour|Dom|Month|Dow|Hash|Year))
 		if err != nil {

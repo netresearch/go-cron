@@ -139,6 +139,8 @@ func hashPeriod(it string, r bounds) uint64 {
 		n, _ := mustParseInt(step) // The spec parsed, so the step is valid.
 		size := uint64(cyclicRangeSize(dowCycle(x.lo, x.hi, r)))
 		switch {
+		case size == 1:
+			return 1 // one value, whatever the hash
 		case uint64(n) <= size:
 			return uint64(n)
 		case uint64(n) > maxHashWalk:
