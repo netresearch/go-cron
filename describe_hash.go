@@ -366,6 +366,9 @@ func rangeParts(x hashed, r bounds, word func(uint) string, the, unit string) (s
 	case ones == 0 && (unit == "" || unit == unitDay):
 		return betweenSep + plain + words[0] + " or " + the + words[1], true
 	}
+	if the != "" && parts[1][0] == parts[1][1] {
+		alts[1] = "on " + alts[1] // the range before it has its own "between"
+	}
 	return ", either " + alts[0] + " or " + alts[1] + altEnd, true
 }
 

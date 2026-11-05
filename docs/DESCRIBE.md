@@ -181,7 +181,7 @@ which form a spec gets. Each has an ID, which the grammar cites.
 | H15 | A plain value beside a fixed one in a field states the count, as the two can coincide: "1 or 2 runs in every hour, at the top of the hour and a fixed minute past it" |
 | H16 | Minutes under a fixed hour join with "at": "at minutes 0 and 30 at a fixed hour every day", "at minute 30 at a fixed hour every day"; minute 0 keeps R4: "at the top of a fixed hour every day" |
 | H17 | Other combinations of H in the time fields render field by field (G10): H with a plain second other than 0, several hashed steps in a field, a hashed step beside a fixed value or with a fixed hour, a wrapped fixed hour range, a wrapped range whose parts are each one value (`H(59-0)`), a ranged hour step, a ranged step under a written minute or restricted hours, a fixed value beside a plain one other than H15's, two fixed values outside the H21 forms, a hashed second step beside several minutes or under an hour step past 6 values, a fixed second in the span form (T5), and a fixed second beside a fixed minute or hour other than H12's and H24's |
-| H18 | A fixed day or month: "on a fixed day of the month", "on a fixed day of the week", "in a fixed month"; a range by its values: "between the 1st and 15th", "between Monday and Friday", "between January and June". A wrapped day of the month splits low to high: "between the 1st and 5th or the 25th and 31st", and a part of one value takes "either", placed as in H3: "a fixed day of the month, either the 1st or between the 10th and 31st", "either between the 1st and 5th or the 31st"; a wrapped week or year reads in its order: "between Friday and Monday", "between November and February"; one plain value first: "on the 1st and a fixed day of the month". Beside a restricted other day field a fixed day joins as D5: "at 12 am on a fixed day of the month when it falls on Monday", "on the 1st of the month or on a fixed day of the week" |
+| H18 | A fixed day or month: "on a fixed day of the month", "on a fixed day of the week", "in a fixed month"; a range by its values: "between the 1st and 15th", "between Monday and Friday", "between January and June". A wrapped day of the month splits low to high: "between the 1st and 5th or the 25th and 31st", and a part of one value takes "either", placed as in H3: "a fixed day of the month, either the 1st or between the 10th and 31st", "either between the 1st and 5th or on the 31st"; a wrapped week or year reads in its order: "between Friday and Monday", "between November and February"; one plain value first: "on the 1st and a fixed day of the month". Beside a restricted other day field a fixed day joins as D5: "at 12 am on a fixed day of the month when it falls on Monday", "on the 1st of the month or on a fixed day of the week" |
 | H19 | A hashed date step counts its days or months, as H14: "on 3 or 4 days in every week, 2 days apart, starting from a fixed day", "in 4 months in every year, 3 months apart, starting from a fixed month". In the day of the month the count covers the lengths of the written months and years, a hashed month counting every month it can pick, or every month length when none is written: "on 2 to 4 days in every month, 10 days apart, starting from a fixed day". One hash picks a hashed day and month, so the count covers the pairs they can make; past 8,192 hash values, each is counted on its own |
 | H20 | Other combinations in the date fields render field by field (G10): a hashed day step beside a restricted other day field, `H` beside `L`, `W` or `#`, a fixed day ORed with a day field that is every day, a wrapped day of the month of one value per part (`H(31-1)`), several hashed items, a hashed step beside a value, or more than one value beside `H` |
 | H21 | Two fixed values in one field, and nothing else, read as H6, each in its own words, the whole range first, then low to high. The count (H2) is "1 or 2 runs" when they can fall on one value, "2 runs" when they cannot: "2 runs in every hour, at a fixed minute between minutes 0 and 9 and a fixed minute between minutes 20 and 29". Minutes take the hours as H2 does: "1 or 2 runs in every hour during the 9 am hour, at a fixed minute and a fixed minute between minutes 0 and 29". Hours take minute 0: "1 or 2 runs in every day, at the top of a fixed hour and a fixed hour between midnight and 5 am hours". Seconds take every minute of every hour |
@@ -356,7 +356,7 @@ hdomfix: "a" "fixed" "day" "of" "the" "month" [hdomrange | domalts [","]] | "the
 hdowfix: "a" "fixed" "day" "of" "the" "week" [hdowrange] | DAYNAME "and" "a" "fixed" "day" "of" "the" "week"        // H18, D5
 hdowany: "a" "fixed" "day" "of" "the" "week" [hdowrange] | "any" DAYNAME "and" "a" "fixed" "day" "of" "the" "week"   // H18, X4
 hdomrange: "between" "the" ORD "and" ORD ["or" "the" ORD "and" ORD]       // H18, D2, T9
-domalts: "," "either" ("the" ORD "or" "between" "the" ORD "and" ORD | "between" "the" ORD "and" ORD "or" "the" ORD)   // H18
+domalts: "," "either" ("the" ORD "or" "between" "the" ORD "and" ORD | "between" "the" ORD "and" ORD "or" "on" "the" ORD)   // H18
 hdowrange: "between" DAYNAME "and" DAYNAME
 hmonthrange: "between" MONTHNAME "and" MONTHNAME
 hcnt: INT | INT "or" INT | INT "to" INT                                   // H19
@@ -501,10 +501,9 @@ misread it, so a part with one value now stands apart: "either the 1st or betwee
 minutes 50 and 59"), since bare numbers lose what they count, and what follows
 the value comes before "either" so it covers both.
 
-Adding "on" to "either between the 1st and 5th or the 31st" was considered, as one
-reader briefly took it for a range running to the 31st. It stays out: no reader
-answered wrongly, the note spells the days out, and the shorter form matches
-"either the 1st or between the 10th and 31st".
+The "on" in "either between the 1st and 5th or on the 31st" was added after the
+trials: two readers independently said the form without it could briefly read as
+a range running to the 31st, though none answered wrongly.
 
 "fixed" replaced "hashed" because it says what a reader can rely
 on.

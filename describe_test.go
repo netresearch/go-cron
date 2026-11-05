@@ -452,7 +452,7 @@ var describeGoldens = []struct {
 	{spec: "H(50-0) 9 * * *", opts: []DescribeOption{withHash}, want: "at a fixed minute during the 9 am hour every day, either minute 0 or between minutes 50 and 59; the hash key fixes the minute"},
 	{spec: "H(50-0) * H * *", opts: []DescribeOption{withHash}, want: "at a fixed minute, either minute 0 or between minutes 50 and 59, past the hour on a fixed day of the month; the hash key fixes the minute and the day"},
 	{spec: "0 0 H(10-1) 2,4 *", opts: []DescribeOption{withHash}, want: "at midnight on a fixed day of the month in February and April, either the 1st or between the 10th and 31st; the hash key fixes the day"},
-	{spec: "0 0 H(31-5) * *", opts: []DescribeOption{withHash}, want: "at midnight on a fixed day of the month, either between the 1st and 5th or the 31st; the hash key fixes the day"},
+	{spec: "0 0 H(31-5) * *", opts: []DescribeOption{withHash}, want: "at midnight on a fixed day of the month, either between the 1st and 5th or on the 31st; the hash key fixes the day"},
 	{spec: "0 0 H(10-1) * *", opts: []DescribeOption{withHash}, want: "at midnight on a fixed day of the month, either the 1st or between the 10th and 31st; the hash key fixes the day"},
 	{spec: "0 9 * * H(6-1)", opts: []DescribeOption{withHash}, want: "at 9 am on a fixed day of the week between Saturday and Monday; the hash key fixes the day"},
 	{spec: "0 9 * * H(6-0)", opts: []DescribeOption{withHash}, want: "at 9 am on a fixed day of the week between Saturday and Sunday; the hash key fixes the day"},
@@ -1335,7 +1335,7 @@ func describeGrammars() (descRe, noteRe *regexp.Regexp) {
 	domlo := "the " + ord
 	// H3: a part of one value stands apart
 	domspan := "between the " + ord + " and " + ord
-	domalts := ", either " + alt("the "+ord+" or "+domspan, domspan+" or the "+ord)
+	domalts := ", either " + alt("the "+ord+" or "+domspan, domspan+" or on the "+ord)
 	domone := "a fixed day of the month" + domalts + opt(",")
 	hday := alt(domone, hform("a fixed day of the month", "the "+ord, "day", "month", domlo, domhi),
 		hform("a fixed day of the week", dayname, "day", "week", dayname, dayname))
