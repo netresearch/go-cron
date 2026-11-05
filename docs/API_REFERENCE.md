@@ -3042,7 +3042,7 @@ field has a hashed step or a fixed day of the month, and parses as
 **Example:**
 ```go
 note, err := cron.DescribeSpecNote("H/15 * * * *", cron.WithParseOptions(cron.Minute|cron.Hour|cron.Dom|cron.Month|cron.Dow|cron.Hash))
-// "at minutes h, h+15, h+30, and h+45 past the hour, where h is a fixed minute between 0 and 14"
+// "at minutes h, h+15, h+30, and h+45 past the hour, where h is a fixed minute from 0 to 14"
 note, err = cron.DescribeSpecNote("0 9 * * H/2", cron.WithParseOptions(cron.Minute|cron.Hour|cron.Dom|cron.Month|cron.Dow|cron.Hash))
 // "on Sunday, Tuesday, Thursday, and Saturday; or Monday, Wednesday, and Friday, depending on the hash key"
 ```

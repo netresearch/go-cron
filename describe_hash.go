@@ -310,40 +310,55 @@ func gcd(a, b uint64) uint64 {
 	return a
 }
 
-// between names the range of a hashed value or step: "between minutes 0 and
-// 29", "between minutes 0 and 10 or 50 and 59", "between minutes 0 and 5 or
-// 59" (H3, T9). A wrapped step reads from its start, where its walk starts:
-// "between minutes 50 and 10". ok is false for a wrapped range of one value
-// per part.
+// between names the range of a hashed value or step, with what joins it to the
+// value: " between minutes 0 and 29", " between minutes 0 and 10 or 50 and 59",
+// ": between minutes 0 and 5, or minute 59" (H3, T9). A wrapped step reads from
+// its start, where its walk starts: " between minutes 50 and 10". ok is false
+// for a wrapped range of one value per part.
 func between(unit string, x hashed, r bounds) (string, bool) {
 	if x.step > 1 && x.lo > x.hi {
-		return fmt.Sprintf("between %ss %d and %d", unit, x.lo, x.hi), true
+		return fmt.Sprintf("%s%ss %d and %d", betweenSep, unit, x.lo, x.hi), true
 	}
-	parts, ok := rangeParts(x, r, number, "", " and ")
-	return "between " + unit + "s " + parts, ok
+	return rangeParts(x, r, number, "", unit)
 }
 
 // number writes v as a number.
 func number(v uint) string { return strconv.FormatUint(uint64(v), 10) }
 
-// rangeParts writes a hashed range as its parts, low to high (T9), with the
-// prefix before each part and the joiner between its ends: "0 and 10 or 50
-// and 59", "the 1st and 5th or the 31st", "1 to 5 or 31"; a part of one value
-// reads as that value. ok is false for a wrapped range whose parts are each
-// one value (H17, H20).
-func rangeParts(x hashed, r bounds, word func(uint) string, the, and string) (string, bool) {
+// rangeParts writes a hashed range as its parts, low to high (T9), with what
+// joins it to the value: " between 1 and 5 or 25 and 31", " between the 1st and
+// 5th or the 25th and 31st", " between minutes 0 and 10 or 50 and 59". A part of
+// one value stands apart: ": the 1st, or between the 10th and 31st", ": between
+// minutes 0 and 5, or minute 59". the goes before each part, unit before the
+// first. ok is false for a wrapped range whose parts are each one value (H17,
+// H20).
+func rangeParts(x hashed, r bounds, word func(uint) string, the, unit string) (string, bool) {
+	lead, lone := the, the
+	if unit != "" {
+		lead, lone = unit+"s ", unit+" "
+	}
 	parts := timeItem{lo: x.lo, hi: x.hi}.parts(r)
 	words := make([]string, len(parts))
 	ones := 0
 	for i, p := range parts {
-		words[i] = the + word(p[0])
+		words[i] = word(p[0])
 		if p[0] == p[1] {
 			ones++
 			continue
 		}
-		words[i] += and + word(p[1])
+		words[i] += " and " + word(p[1])
 	}
-	return strings.Join(words, " or "), ones < 2
+	switch {
+	case len(parts) < 2:
+		return betweenSep + lead + words[0], true
+	case ones == 2:
+		return "", false
+	case ones == 0:
+		return betweenSep + lead + words[0] + " or " + the + words[1], true
+	case parts[0][0] == parts[0][1]:
+		return ": " + lone + words[0] + ", or between " + lead + words[1], true
+	}
+	return ": between " + lead + words[0] + ", or " + lone + words[1], true
 }
 
 // fixed names a hashed value: "a fixed minute", "a fixed minute between
@@ -356,7 +371,7 @@ func (d *describer) fixed(unit string, x hashed, r bounds) (string, bool) {
 		return w, true
 	case unit != unitHour:
 		b, ok := between(unit, x, r)
-		return w + " " + b, ok
+		return w + b, ok
 	case x.lo > x.hi:
 		return "", false
 	}
@@ -529,8 +544,7 @@ func (d *describer) stepPlace(unit string, x hashed, r bounds, hour timeField) (
 	case k == everyHour && x.whole:
 		return "", true
 	case k == everyHour:
-		b, ok := between(unit, x, r)
-		return " " + b, ok
+		return between(unit, x, r)
 	case !x.whole:
 		return "", false
 	case k == namedHours || k == stepHours:
@@ -782,7 +796,8 @@ func hashDate(h hashField, f timeField, noun, the string, runs func(hashed) (int
 // dateBetween names the range of a hashed date value or step by its values:
 // " between Monday and Friday", " between the 1st and 15th" (H3, H18). A
 // wrapped fixed day of the month splits low to high: " between the 1st and
-// 5th or the 25th and 31st"; a wrapped step of days, week or year reads in its
+// 5th or the 25th and 31st", ": the 1st, or between the 10th and 31st"; a
+// wrapped step of days, week or year reads in its
 // order: " between the 25th and 5th", " between Friday and Monday", " between
 // November and February". ok is false for a wrapped day of the month of one
 // value per part (H20).
@@ -791,8 +806,7 @@ func dateBetween(x hashed, f timeField, the string) (string, bool) {
 	case x.whole:
 		return "", true
 	case x.lo > x.hi && f.container == unitMonth && x.step <= 1:
-		parts, ok := rangeParts(x, f.r, f.w, the, " and ")
-		return betweenSep + parts, ok
+		return rangeParts(x, f.r, f.w, the, "")
 	}
 	return betweenSep + the + f.w(x.lo) + " and " + f.w(x.hi), true
 }
