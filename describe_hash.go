@@ -387,7 +387,7 @@ func runRange(x hashed, r bounds, plain []uint) (lo, hi int) {
 	return lo, hi
 }
 
-// counted writes a count with its unit, or the counts the hashed start
+// counted writes a count with its unit, or the counts the fixed start
 // decides between: "4 runs", "1 or 2 runs", "4 or 5 hours" (H2); "2 to 4
 // days" when the month's length decides too (H19).
 func counted(lo, hi int, unit string) string {
@@ -738,14 +738,14 @@ func hashDay(h hashField, f timeField, noun, the string, runs func(hashed) (int,
 	return hashDate(h, f, noun, the, runs)
 }
 
-// hashDom describes a hashed day of month as a day clause, with the
+// hashDom describes a fixed day of month as a day clause, with the
 // short-month clause of its plain days (H18, H19, D3).
 func hashDom(h hashField, md timeField, runs func(hashed) (int, int), alone bool) (text, short string, ok bool) {
 	text, ok = hashDay(h, md, "a fixed day of the month", "the ", runs, alone)
 	return "on " + text, lateClause(md.vals), ok
 }
 
-// hashDow describes a hashed day of week, counted on the parser's seven-day
+// hashDow describes a fixed day of week, counted on the parser's seven-day
 // cycle (H18, H19).
 func (p Parser) hashDow(h hashField, wd timeField, alone, or bool) (string, bool) {
 	if or && len(wd.vals) > 0 { // X4: a plain day beside the hashed one takes "any"

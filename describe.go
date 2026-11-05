@@ -55,9 +55,9 @@ func DescribeSpec(spec string, opts ...DescribeOption) (string, error) {
 	return p.DescribeSpec(spec, opts...)
 }
 
-// DescribeSpecNote returns the note that spells out the hashed values in
-// spec's description, or "" when it has none, or the parse error. It parses
-// as DescribeSpec does. See Parser.DescribeSpecNote.
+// DescribeSpecNote returns the note that spells out the values the hash key
+// picks in spec's description, or "" when it has none, or the parse error. It
+// parses as DescribeSpec does. See Parser.DescribeSpecNote.
 func DescribeSpecNote(spec string, opts ...DescribeOption) (string, error) {
 	p, err := tryParserForOptions(newDescribeConfig(opts).parse)
 	if err != nil {
@@ -88,8 +88,8 @@ func (p Parser) DescribeSpec(spec string, _ ...DescribeOption) (string, error) {
 
 // DescribeSpecNote returns the note that spells out the values the hash
 // key picks in spec's description, as p parses it: "at minutes h, h+15,
-// h+30, and h+45 past the hour, where h is a hashed minute from 0 to 14".
-// It is "" unless a field has a hashed step or a hashed day of the month. A
+// h+30, and h+45 past the hour, where h is a fixed minute from 0 to 14".
+// It is "" unless a field has a hashed step or a fixed day of the month. A
 // description given field by field still gets its note. See docs/DESCRIBE.md.
 func (p Parser) DescribeSpecNote(spec string, _ ...DescribeOption) (string, error) {
 	_, note, err := p.describe(spec)
