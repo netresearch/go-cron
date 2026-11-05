@@ -42,6 +42,7 @@ Welcome to the go-cron documentation. This guide helps you find the right docume
 | Document | Description |
 |----------|-------------|
 | [API_REFERENCE.md](API_REFERENCE.md) | Complete public API documentation |
+| [DESCRIBE.md](DESCRIBE.md) | `DescribeSpec` wording, grammar and reader-trial method |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Internal design, data structures, algorithms |
 | [PERFORMANCE.md](PERFORMANCE.md) | Benchmarks and performance characteristics |
 | [PROJECT_INDEX.md](PROJECT_INDEX.md) | Complete file listing with descriptions |
