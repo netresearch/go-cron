@@ -368,7 +368,7 @@ func TestAnalyzeSpecDescription(t *testing.T) {
 		{"descriptor", AnalyzeSpec("@weekly"), "at 12 am on Sunday", ""},
 		{
 			"hashed", AnalyzeSpecWithHash("H/15 * * * *", hash, "job"), "4 runs in every hour, 15 minutes apart, starting from a fixed minute; the hash key fixes the minute",
-			"at minutes h, h+15, h+30, and h+45 past the hour, where h is a fixed minute from 0 to 14",
+			"at minutes h, h+15, h+30, and h+45 past the hour, where h is a fixed minute between 0 and 14",
 		},
 		{
 			"with hash", AnalyzeSpecWithHash("0 9 * * H/2", hash, "job"), "at 9 am on 3 or 4 days in every week, 2 days apart, starting from a fixed day; the hash key fixes the day",

@@ -88,7 +88,7 @@ func (p Parser) DescribeSpec(spec string, _ ...DescribeOption) (string, error) {
 
 // DescribeSpecNote returns the note that spells out the values the hash
 // key picks in spec's description, as p parses it: "at minutes h, h+15,
-// h+30, and h+45 past the hour, where h is a fixed minute from 0 to 14".
+// h+30, and h+45 past the hour, where h is a fixed minute between 0 and 14".
 // It is "" unless a field has a hashed step or a fixed day of the month. A
 // description given field by field still gets its note. See docs/DESCRIBE.md.
 func (p Parser) DescribeSpecNote(spec string, _ ...DescribeOption) (string, error) {

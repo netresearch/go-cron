@@ -192,7 +192,7 @@ func oneStep(f hashField) (x hashed, ok bool) {
 
 // stepNote is the clause of a hashed step in the second or minute field
 // (N2, N3): "at minutes h, h+15, h+30, and h+45 past the hour, where h is a
-// fixed minute from 0 to 14". place is where the values fall, and placeOK
+// fixed minute between 0 and 14". place is where the values fall, and placeOK
 // whether there is a form for it.
 func (n *noter) stepNote(f hashField, unit string, r bounds, place string, placeOK bool) (string, bool) {
 	if len(f.steps) == 0 {
@@ -208,7 +208,7 @@ func (n *noter) stepNote(f hashField, unit string, r bounds, place string, place
 	}
 	v := n.next()
 	vals, top, tail := stepValues(v, x, valueLimit)
-	where := fmt.Sprintf(", where %s is a fixed %s from %d to %d", v, unit, x.lo, top)
+	where := fmt.Sprintf(", where %s is a fixed %s between %d and %d", v, unit, x.lo, top)
 	return "at " + unit + "s " + vals + place + where + tail, true
 }
 
@@ -324,7 +324,7 @@ func shortMonthTail(v string, x hashed, top, shortest uint) string {
 
 // domNote is the clause of a fixed day of the month (N4, N5): its step as
 // the other date fields', or a fixed day: "on day h of every month, where h
-// is a fixed day from 1 to 31; a month without day h is skipped".
+// is a fixed day between 1 and 31; a month without day h is skipped".
 func (n *noter) domNote(f hashField, plain timeField) (string, bool) {
 	switch f.shape(plain) {
 	case hashNone:
@@ -334,11 +334,11 @@ func (n *noter) domNote(f hashField, plain timeField) (string, bool) {
 	case hashFixed:
 		x := f.fixed[0]
 		v := n.next()
-		from, ok := rangeParts(whole(x, dom), dom, number, "", " to ")
+		from, ok := rangeParts(whole(x, dom), dom, number, "", " and ")
 		if !ok {
 			return "", false
 		}
-		text := fmt.Sprintf("on day %s%s, where %s is a fixed day from %s", v, n.ofDay, v, from)
+		text := fmt.Sprintf("on day %s%s, where %s is a fixed day between %s", v, n.ofDay, v, from)
 		if (x.lo > x.hi && n.shortest < dom.max) || x.hi > n.shortest {
 			text += fmt.Sprintf("; a month without day %s is skipped", v)
 		}
@@ -346,7 +346,7 @@ func (n *noter) domNote(f hashField, plain timeField) (string, bool) {
 	case hashFixedPlus:
 		first := ordinal(plain.vals[0])
 		v := n.next()
-		text := fmt.Sprintf("on the %s and day %s%s, where %s is a fixed day from 1 to 31", first, v, n.ofDay, v)
+		text := fmt.Sprintf("on the %s and day %s%s, where %s is a fixed day between 1 and 31", first, v, n.ofDay, v)
 		if n.shortest < dom.max {
 			text += fmt.Sprintf("; a month without day %s %s", v, n.plainDayTail(plain.vals[0]))
 		}
@@ -418,7 +418,7 @@ func (n *noter) outcomeVars(x hashed, plain timeField, in, of string, paired boo
 			plural = ""
 		}
 	}
-	return fmt.Sprintf("%s%s%s %s%s, where %s is a fixed %s from %s to %s%s",
+	return fmt.Sprintf("%s%s%s %s%s, where %s is a fixed %s between %s and %s%s",
 		in, unit, plural, vals, of, v, unit, bound(x.lo), bound(top), tail)
 }
 
