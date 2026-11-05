@@ -367,7 +367,7 @@ func (n *noter) plainDayTail(day uint) string {
 	case day == dom.max:
 		return "is skipped"
 	case day > n.shortest:
-		return fmt.Sprintf("runs on the %s only in months that have one", ordinal(day))
+		return fmt.Sprintf("runs only on the %s, if it has one", ordinal(day))
 	}
 	return fmt.Sprintf("runs on the %s only", ordinal(day))
 }
