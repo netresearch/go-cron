@@ -1142,6 +1142,18 @@ func TestHashPeriodStep(t *testing.T) {
 // TestNeverRunsPastTheWalk checks specs whose H items repeat only past
 // maxHashWalk: each H is tested on its own, so these read as running, the last
 // two only if a Sunday written as 7 counts: 2026-03-01 is a Sunday.
+// TestDescribeSpecTooLongStaysCheap checks that a spec over MaxSpecLength is
+// rejected before it is split: its allocations must not follow its length.
+func TestDescribeSpecTooLongStaysCheap(t *testing.T) {
+	spec := strings.Repeat("* ", MaxSpecLength)
+	if _, err := DescribeSpec(spec); err == nil {
+		t.Fatalf("DescribeSpec of %d bytes: want an error", len(spec))
+	}
+	if allocs := testing.AllocsPerRun(5, func() { _, _ = DescribeSpec(spec) }); allocs > 100 {
+		t.Errorf("DescribeSpec of %d bytes: %.0f allocations", len(spec), allocs)
+	}
+}
+
 func TestNeverRunsPastTheWalk(t *testing.T) {
 	for _, spec := range []string{
 		"0 0 H(29-31),H(29-31)/251,H(29-31)/257 1 H(1-3) 2028",

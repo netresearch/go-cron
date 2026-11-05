@@ -105,6 +105,9 @@ func (p Parser) withPlaceholderKey(spec string) Parser {
 		return p
 	}
 	p.hashKey = "describe"
+	if len(spec) > MaxSpecLength { // Parse rejects it, so it need not be split.
+		return p
+	}
 	// A spec that fails to split fails again in Parse.
 	if _, _, fields, _, err := p.specFields(spec); err == nil && len(fields) > 4 && containsHashExpr(fields[3:5]) {
 		p.options &^= StrictDays
