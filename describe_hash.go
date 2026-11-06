@@ -980,7 +980,7 @@ func (d *describer) pairedOutcomes(outs [][]uint) [][]uint {
 // on in a month, over each start the hash can pick and each of the month
 // lengths (H19): H/10 runs on 9, 19 and 29, or on 2 days in February.
 func dayRange(x hashed, lengths []uint) (lo, hi int) {
-	size, span := cyclicRangeSize(x.lo, x.hi, dom), dom.max-dom.min+1
+	span := dom.max - dom.min + 1
 	lo = int(dom.max)
 	count := func(vals []uint) {
 		for _, days := range lengths {
@@ -996,14 +996,18 @@ func dayRange(x hashed, lengths []uint) (lo, hi int) {
 	// Each start the hash can pick, as runRange; a wrapped range steps on
 	// past the 31st into the 1st, whatever the month's length.
 	for o := range x.step {
-		if o < size {
-			start := (x.lo+o-dom.min)%span + dom.min
-			count(timeItem{lo: start, hi: x.hi, step: x.step}.runs(dom))
-			continue
-		}
-		for v := range size {
-			count([]uint{(x.lo+v-dom.min)%span + dom.min})
-		}
+		// readHash sets a step at or past its range's size to 1, so o stays
+		// below that size and every start has runs. The branch for a larger
+		// step is commented out until its cleanup:
+		//
+		//	if o >= cyclicRangeSize(x.lo, x.hi, dom) {
+		//		for v := range cyclicRangeSize(x.lo, x.hi, dom) {
+		//			count([]uint{(x.lo+v-dom.min)%span + dom.min})
+		//		}
+		//		continue
+		//	}
+		start := (x.lo+o-dom.min)%span + dom.min
+		count(timeItem{lo: start, hi: x.hi, step: x.step}.runs(dom))
 	}
 	return lo, hi
 }
