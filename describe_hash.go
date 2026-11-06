@@ -417,7 +417,7 @@ func (d *describer) fixed(unit string, x hashed, r bounds) (string, bool) {
 	case x.lo > x.hi:
 		return "", false
 	}
-	return w + betweenSep + d.hourNames(timeField{vals: []uint{x.lo, x.hi}}), true
+	return w + betweenSep + "the hours of " + d.onHour(x.lo) + " and " + d.onHour(x.hi), true
 }
 
 // runRange returns the fewest and most values a hashed step selects in its

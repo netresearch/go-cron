@@ -106,7 +106,7 @@ var describeGoldens = []struct {
 	// Hour lists and steps
 	{spec: "30 */2 * * *", want: "every 2 hours starting at 12:30 am in every day"},
 	{spec: "15 9-23/2 * * *", want: "every 2 hours from 9:15 am thru 11:15 pm in every day"},
-	{spec: "0,30 9,17 * * *", want: "at minutes 0 and 30 during the hours of 9 am and 5 pm"},
+	{spec: "0,30 9,17 * * *", want: "at minutes 0 and 30 during the 9 am hour and the 5 pm hour"},
 	{spec: "0 */6 * * *", want: "at the top of the hours of midnight, 6 am, noon, and 6 pm in every day"},
 
 	// Seconds
@@ -144,7 +144,7 @@ var describeGoldens = []struct {
 	{spec: "5 0 9-17 * * *", opts: []DescribeOption{withSeconds}, want: "at 5 seconds past the top of every hour from 9 am thru 5 pm every day"},
 	{spec: "5 30 * * * *", opts: []DescribeOption{withSeconds}, want: "at 5 seconds within minute 30 in every hour"},
 	{spec: "5 30 9-17 * * *", opts: []DescribeOption{withSeconds}, want: "at 5 seconds within minute 30 in every hour from 9 am thru 5 pm every day"},
-	{spec: "5 0,30 9,17 * * *", opts: []DescribeOption{withSeconds}, want: "at 5 seconds within minutes 0 and 30 during the hours of 9 am and 5 pm"},
+	{spec: "5 0,30 9,17 * * *", opts: []DescribeOption{withSeconds}, want: "at 5 seconds within minutes 0 and 30 during the 9 am hour and the 5 pm hour"},
 	{spec: "5 */15 */2 * * *", opts: []DescribeOption{withSeconds}, want: "at 5 seconds within minutes 0, 15, 30, and 45 every 2 hours starting with the midnight hour in every day"},
 	{spec: "*/30 * * * * *", opts: []DescribeOption{withSeconds}, want: "at seconds 0 and 30 within a minute"},
 	{spec: "*/30 0 * * * *", opts: []DescribeOption{withSeconds}, want: "at seconds 0 and 30 past the top of every hour"},
@@ -352,7 +352,7 @@ var describeGoldens = []struct {
 	{spec: "0 H * * *", opts: []DescribeOption{withHash}, want: "at the top of a fixed hour every day; the hash key fixes the hour"},
 	{spec: "H H * * *", opts: []DescribeOption{withHash}, want: "at a fixed minute at a fixed hour every day; the hash key fixes the minute and the hour"},
 	{spec: "0 H(9-17) * * *", opts: []DescribeOption{withHash}, want: "at the top of a fixed hour between the hours of 9 am and 5 pm every day; the hash key fixes the hour"},
-	{spec: "H 9,17 * * *", opts: []DescribeOption{withHash}, want: "at a fixed minute during the hours of 9 am and 5 pm every day; the hash key fixes the minute"},
+	{spec: "H 9,17 * * *", opts: []DescribeOption{withHash}, want: "at a fixed minute during the 9 am hour and the 5 pm hour every day; the hash key fixes the minute"},
 	{spec: "H 9-17/2 * * *", opts: []DescribeOption{withHash}, want: "at a fixed minute during the hours of 9 am, 11 am, 1 pm, 3 pm, and 5 pm every day; the hash key fixes the minute"},
 	{spec: "0,30 H * * *", opts: []DescribeOption{withHash}, want: "at minutes 0 and 30 at a fixed hour every day; the hash key fixes the hour"},
 	{spec: "0 9,H * * *", opts: []DescribeOption{withHash}, want: "1 or 2 runs in every day, at 9 am and the top of a fixed hour; the hash key fixes the hour"},
@@ -391,7 +391,7 @@ var describeGoldens = []struct {
 	{spec: "* H(9-17) * * *", opts: []DescribeOption{withHash}, want: "every minute during a fixed hour between the hours of 9 am and 5 pm; the hash key fixes the hour"},
 	{spec: "*/7 H * * *", opts: []DescribeOption{withHash}, want: "at minutes 0, 7, 14, … 56 at a fixed hour every day (every 7 minutes, starting over each hour); the hash key fixes the hour"},
 	{spec: "H(0-29) H(9-17) * * *", opts: []DescribeOption{withHash}, want: "at a fixed minute between minutes 0 and 29 at a fixed hour between the hours of 9 am and 5 pm every day; the hash key fixes the minute and the hour"},
-	{spec: "H/15 9,17 * * *", opts: []DescribeOption{withHash}, want: "4 runs in every hour during the hours of 9 am and 5 pm, 15 minutes apart, starting from a fixed minute; the hash key fixes the minute"},
+	{spec: "H/15 9,17 * * *", opts: []DescribeOption{withHash}, want: "4 runs in every hour during the 9 am hour and the 5 pm hour, 15 minutes apart, starting from a fixed minute; the hash key fixes the minute"},
 	{spec: "H/15 */6 * * *", opts: []DescribeOption{withHash}, want: "4 runs in every hour during the hours of midnight, 6 am, noon, and 6 pm, 15 minutes apart, starting from a fixed minute; the hash key fixes the minute"},
 	{spec: "H/15 20-5 * * *", opts: []DescribeOption{withHash}, want: "4 runs in every hour from midnight thru 5 am and 8 pm thru 11 pm, 15 minutes apart, starting from a fixed minute; the hash key fixes the minute"},
 	{spec: "H(50-10)/5 * * * *", opts: []DescribeOption{withHash}, want: "4 or 5 runs in every hour between minutes 50 and 10, 5 minutes apart, starting from a fixed minute; the hash key fixes the minute"},
@@ -647,7 +647,8 @@ var describeNoteGoldens = []struct {
 	{spec: "H/7 * * * *", opts: []DescribeOption{withHash}, want: "at minutes h, h+7, h+14, … h+56 past the hour, where h is a fixed minute from 0 to 6; h+56 runs only when h is below 4"},
 	{spec: "H/40 * * * *", opts: []DescribeOption{withHash}, want: "at minutes h and h+40 past the hour, where h is a fixed minute from 0 to 39; h+40 runs only when h is below 20"},
 	{spec: "H/15 9 * * *", opts: []DescribeOption{withHash}, want: "at minutes h, h+15, h+30, and h+45 during the 9 am hour, where h is a fixed minute from 0 to 14"},
-	{spec: "H/15 9,17 * * *", opts: []DescribeOption{withHash}, want: "at minutes h, h+15, h+30, and h+45 during the hours of 9 am and 5 pm, where h is a fixed minute from 0 to 14"},
+	{spec: "H/15 9,17 * * *", opts: []DescribeOption{withHash}, want: "at minutes h, h+15, h+30, and h+45 during the 9 am hour and the 5 pm hour, where h is a fixed minute from 0 to 14"},
+	{spec: "H/15 9,13,17 * * *", opts: []DescribeOption{withHash}, want: "at minutes h, h+15, h+30, and h+45 during the hours of 9 am, 1 pm, and 5 pm, where h is a fixed minute from 0 to 14"},
 	{spec: "H/15 9-17 * * *", opts: []DescribeOption{withHash}, want: "at minutes h, h+15, h+30, and h+45 past every hour from 9 am thru 5 pm, where h is a fixed minute from 0 to 14"},
 	{spec: "H/20 * * * * *", opts: []DescribeOption{withSecHash}, want: "at seconds h, h+20, and h+40 within a minute, where h is a fixed second from 0 to 19"},
 	{spec: "0 H/6 * * *", opts: []DescribeOption{withHash}, want: "at the top of a fixed hour between midnight and 5 am and every 6 hours after it"},
@@ -1264,8 +1265,10 @@ func describeGrammars() (descRe, noteRe *regexp.Regexp) {
 	unit := alt("second", "minute", "hour", "day", "month", "year")
 	units := alt("seconds", "minutes", "hours", "days", "months", "years")
 	// R3: no article before a list that starts with midnight
-	hourtail := alt(" and "+clock, "(?:, "+clock+")+, and "+clock)
-	hours := alt("the "+clock+" hour", "the hours of "+clock+hourtail)
+	hourtail := "(?:, " + clock + ")+, and " + clock
+	hours := alt("the "+clock+" hour"+opt(" and the "+clock+" hour"), "the hours of "+clock+hourtail)
+	// H3: the ends of a fixed hour's range
+	hourspan := "the hours of " + clock + " and " + clock
 	// T9: a wrapped range reads as two, in clock order
 	hourrange := "from " + list(clock+" thru "+clock)
 	everyday := " every day"
@@ -1282,7 +1285,7 @@ func describeGrammars() (descRe, noteRe *regexp.Regexp) {
 	nrange := num + " and " + num
 	nspan := "between " + units + " " + nrange
 	nalts := ", either " + alt(unit+" "+num+" or "+nspan, nspan+" or "+unit+" "+num, nspan+" or "+nspan)
-	fixed := "a fixed " + unit + opt(alt(" between "+alt(units+" "+nrange, hours), nalts+opt(",")))
+	fixed := "a fixed " + unit + opt(alt(" between "+alt(units+" "+nrange, hourspan), nalts+opt(",")))
 
 	// C1: what leads, with the minutes joined to the seconds
 	secs := alt("at "+num+" seconds?", "at seconds "+vlist, "at "+fixed)
@@ -1476,6 +1479,7 @@ func TestDescribeGrammarRejects(t *testing.T) {
 		"every minute during the midnight, 6 am, noon, and 6 pm hours in every day",
 		"every minute during midnight, 6 am, noon, and 6 pm hours in every day",
 		"at minutes 0 and 30 during the 9 am and 5 pm hours",
+		"at minutes 0 and 30 during the hours of 9 am and 5 pm",
 	} {
 		if g.MatchString(s) {
 			t.Errorf("grammar accepts %q", s)

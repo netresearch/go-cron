@@ -1003,24 +1003,28 @@ func (f timeField) rangeWords(lo, hi uint) []string {
 	return []string{l + thruSep + h}
 }
 
-// named reports hours that read by name ("the hours of 9 am and 5 pm"): one
+// named reports hours that read by name ("the 9 am hour and the 5 pm hour"): one
 // hour, hours written as a list, or a range of up to 6 hours (R3, T4).
 func (f timeField) named() bool {
 	return f.single() || !f.star() && (len(f.items) > 1 || len(f.vals) <= valueLimit)
 }
 
-// hourNames names the hours: "the 9 am hour", and for two or more, the unit
-// first, "the hours of 9 am and 5 pm", "the hours of midnight, 6 am, noon,
-// and 6 pm" (R3). On a named day midnight is "12 am".
+// hourNames names the hours: "the 9 am hour", two as "the 9 am hour and the
+// 5 pm hour", which does not read as a span, and for three or more, the unit
+// first, "the hours of midnight, 6 am, noon, and 6 pm" (R3). On a named day
+// midnight is "12 am".
 func (d *describer) hourNames(f timeField) string {
 	clocks := make([]string, len(f.vals))
 	for i, h := range f.vals {
 		clocks[i] = d.onHour(h)
 	}
-	if len(clocks) == 1 {
-		return "the " + clocks[0] + " hour"
+	if len(clocks) > 2 {
+		return "the hours of " + andList(clocks)
 	}
-	return "the hours of " + andList(clocks)
+	for i, c := range clocks {
+		clocks[i] = "the " + c + " hour"
+	}
+	return andList(clocks)
 }
 
 // count writes a number with its unit, singular for 1: "1 minute", "5 seconds".

@@ -76,7 +76,7 @@ These words mean one thing across the rules, the grammar and the notes.
 | from…to | The range of a fixed value when it is plain numbers the spec does not write: "where h is a fixed minute from 0 to 14" | N2, N3, N5 | Counted numbers include the end of "from…to", as in counting from 1 to 10; a clock time after "to" does not, so clock ranges read "between" |
 | either | Joins the two parts of a fixed value's wrapped range when a part has one value or a unit: "either the 1st or between the 10th and 31st", "either minute 0 or between minutes 50 and 59" | H3, H18, N5 | The value is one of the two; a fixed value never has more than two parts |
 | the top of | Minute 0: "at the top of every hour" | T9, R4, R9, R10, C1, H4, H5, H13, H15, H16, H21, H24, P2, N4, N7 | The everyday phrase, used for minute 0 everywhere. It replaced "on the hour" |
-| the 9 am hour | A named hour: an hour given by its clock time. Two or more read "the hours of 9 am and 5 pm" | T9, R3, R6, R11, C1, H7, H8, H12, H21, H23 | It makes the unit clear |
+| the 9 am hour | A named hour: an hour given by its clock time. Two each keep the word: "the 9 am hour and the 5 pm hour". Three or more read "the hours of midnight, 6 am, noon, and 6 pm" | T9, R3, R6, R11, C1, H7, H8, H12, H21, H23 | It makes the unit clear |
 | past, within, during | How a value sits in a larger unit: minutes "past the hour", seconds "within a minute", minutes "during" a named hour | T9, R6, C1, D1, H7, N2 | Each join says which unit the value belongs to |
 | every day | Closes clock times and hour ranges: "at 9 am every day" | G8, T5, T6, J1, T9, R8, R9, R10, R11, R12, D7, H7, H8, H9, H12, H14, H16, H20, H21, H22, H23, H24 | In reader trials, nothing said daily without it |
 | span form | Several minutes over an hour range, opening with the first and last run: "from 9 am thru 5:56 pm every day, at minutes 0, 7, 14, … 56 past each hour" | T5, J1, R12, D1, H17 | In reader trials, readers dropped the runs in the last hour of "hours 9 thru 17" |
@@ -126,7 +126,7 @@ which form a spec gets. Each has an ID, which the grammar cites.
 |---|---|
 | R1 | Times are on the 12-hour clock |
 | R2 | 12:00 am is "midnight", or "12 am" on a named day; 12:00 pm is "noon" |
-| R3 | A named hour is "the 9 am hour", "the midnight hour". Two or more read "the hours of", as a list or as the ends of a fixed range: "the hours of 9 am and 5 pm", "the hours of midnight, 6 am, noon, and 6 pm" |
+| R3 | A named hour is "the 9 am hour", "the midnight hour". Two each keep the word, so they do not read as a span: "the 9 am hour and the 5 pm hour". Three or more read "the hours of": "the hours of midnight, 6 am, noon, and 6 pm". So do the ends of a fixed hour's range (H3): "a fixed hour between the hours of 9 am and 5 pm" |
 | R4 | Minute 0 alone is "the top of …": "at the top of every hour" |
 | R5 | A single value keeps its unit after the number ("at 5 minutes past the hour"); a list puts the unit first ("at minutes 0 and 30 …") |
 | R6 | Seconds fall "within" a minute. Minutes of the generic hour are "past the hour"; in a named hour they fall "during" it |
@@ -311,14 +311,16 @@ overlap: "the" "top" "of" "the" "hour" "and" fixed "past" "it"             // H4
        | "the" "top" "of" "the" "hour" "and" "every" INT units "starting" "from" fixed   // H5
        | clock "and" "the" "top" "of" fixed                               // H13
        | "the" "top" "of" fixed "and" fixed                               // H21
-fixed: "a" "fixed" unit [between | "between" hours | alts [","]]         // H1, H3
+fixed: "a" "fixed" unit [between | "between" hourspan | alts [","]]      // H1, H3
 between: "between" units INT "and" INT                                     // H3, T9
 alts: "," "either" (unit INT "or" "between" units INT "and" INT | "between" units INT "and" INT "or" unit INT | "between" units INT "and" INT "or" "between" units INT "and" INT)   // H3
 hashkey: ";" "the" "hash" "key" "fixes" list{keyunit}                      // H1, H6
 keyunit: "the" unit | "both" units
 
-hours: "the" clock "hour" | "the" "hours" "of" clock hourtail             // R3
-hourtail: "and" clock | ("," clock)+ "," "and" clock                      // R3: two or more hours, the unit first
+hours: "the" clock "hour" ["and" "the" clock "hour"]                      // R3: one hour, or two
+     | "the" "hours" "of" clock hourtail                                  // R3: three or more, the unit first
+hourtail: ("," clock)+ "," "and" clock
+hourspan: "the" "hours" "of" clock "and" clock                            // H3: the ends of a fixed hour's range
 hourrange: "from" list{crange}                                            // R8, R9, R12, T9
 crange: clock "thru" clock                                                // T9: a wrapped range is two, in clock order
 everyday: "every" "day"                                                   // J1
@@ -505,11 +507,17 @@ The "on" in "either between the 1st and 5th or on the 31st" was added after the
 trials: two readers independently said the form without it could briefly read as
 a range running to the 31st, though none answered wrongly.
 
-Two or more named hours read "the hours of 9 am and 5 pm". With the unit last
-("the 9 am and 5 pm hours") a list that starts with midnight dropped its article
+Three or more named hours read "the hours of midnight, 6 am, noon, and 6 pm",
+and so do the ends of a fixed hour's range ("between the hours of midnight and
+5 am"). With the unit last, a list that starts with midnight dropped its article
 and read "midnight and 5 am hours", where "5 am hours" looks like a plural of
 its own. The unit now comes before the values, as it does for minutes ("minutes
 0 and 30"). One hour stays "the 9 am hour".
+
+Two named hours each keep the word: "the 9 am hour and the 5 pm hour". In the
+trials one reader took both "the hours of 9 am and 5 pm" and "the 9 am and 5 pm
+hours" as every hour from 9 am to 5 pm, for 2 am and 2 pm as well, and other
+readers named that reading. With the word repeated no reader did.
 
 "fixed" replaced "hashed" because it says what a reader can rely
 on.
