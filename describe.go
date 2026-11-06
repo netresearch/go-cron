@@ -245,12 +245,13 @@ func durationText(d time.Duration) string {
 // describer builds one description: whether it names a day, and the notes
 // of the fields it cuts short.
 type describer struct {
-	named     bool              // a day clause follows the time (J1)
-	dayName   bool              // the day clause names a day of the week (R2, D7)
-	notes     []string          // the time fields' notes
-	dateNotes []string          // the date fields' notes, after the time's (G7)
-	monthDays []uint            // the month lengths a hashed day step can run in (H19)
-	dayPairs  map[uint64]uint64 // a hashed day step's days and a hashed month's lengths (H19)
+	named      bool              // a day clause follows the time (J1)
+	dayName    bool              // the day clause names a day of the week (R2, D7)
+	notes      []string          // the time fields' notes
+	dateNotes  []string          // the date fields' notes, after the time's (G7)
+	monthDays  []uint            // the month lengths a hashed day step can run in (H19)
+	dayPairs   map[uint64]uint64 // a hashed day step's days and a hashed month's lengths (H19)
+	monthNamed bool              // a month clause follows the day clause (H19)
 }
 
 // dayMissing reports a schedule whose days the calendar never has (G11): a
@@ -352,7 +353,7 @@ func (p Parser) describeDays(d *describer, domField, dowField string, hd, hw has
 	var domText string
 	switch {
 	case hd.hashes():
-		domText, short, ok = hashDom(hd, md, d.dayCount, !dowSet)
+		domText, short, ok = d.hashDom(hd, md, !dowSet)
 	case domSet:
 		domText, short = d.describeDom(md, domSpecial, !or)
 	}
@@ -496,7 +497,7 @@ func (d *describer) describeDom(md timeField, special []string, whole bool) (tex
 	if len(special) == 0 {
 		text = d.dateNums(md)
 		of := ofTheMonth
-		if _, even := md.gap(); even && !slices.ContainsFunc(md.vals, func(v uint) bool { return v > 28 }) {
+		if _, even := md.gap(); even && !d.monthNamed && !slices.ContainsFunc(md.vals, func(v uint) bool { return v > 28 }) {
 			of = " of every month"
 		}
 		return "on the " + text + of, lateClause(md.vals)

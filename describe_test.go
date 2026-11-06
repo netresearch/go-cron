@@ -414,7 +414,7 @@ var describeGoldens = []struct {
 	{spec: "0 0 H(1-15) * *", opts: []DescribeOption{withHash}, want: "at midnight on a fixed day of the month between the 1st and 15th; the hash key fixes the day"},
 	{spec: "0 0 H/10 * *", opts: []DescribeOption{withHash}, want: "at midnight on 2 to 4 days in every month, 10 days apart, starting from a fixed day; the hash key fixes the day"},
 	{spec: "0 0 H/7 * *", opts: []DescribeOption{withHash}, want: "at midnight on 4 or 5 days in every month, 7 days apart, starting from a fixed day; the hash key fixes the day"},
-	{spec: "0 0 H(1-15)/5 * *", opts: []DescribeOption{withHash}, want: "at midnight on 3 days in every month between the 1st and 15th, 5 days apart, starting from a fixed day; the hash key fixes the day"},
+	{spec: "0 0 H(1-15)/5 * *", opts: []DescribeOption{withHash}, want: "at midnight on 3 days in every month between days 1st and 15th, 5 days apart, starting from a fixed day; the hash key fixes the day"},
 	{spec: "0 9 * * H/2", opts: []DescribeOption{withHash}, want: "at 9 am on 3 or 4 days in every week, 2 days apart, starting from a fixed day; the hash key fixes the day"},
 	{spec: "0 9 * * H(1-5)/2", opts: []DescribeOption{withHash}, want: "at 9 am on 2 or 3 days in every week between Monday and Friday, 2 days apart, starting from a fixed day; the hash key fixes the day"},
 	{spec: "0 9 * * H(5-7)", opts: []DescribeOption{withHash}, want: "at 9 am on a fixed day of the week between Friday and Sunday; the hash key fixes the day"},
@@ -441,7 +441,7 @@ var describeGoldens = []struct {
 	// high, a part of one value read as that value; a day of the week and a
 	// month read in week and year order (H3, H18, H19)
 	{spec: "0 0 H(25-5) * *", opts: []DescribeOption{withHash}, want: "at midnight on a fixed day of the month between the 1st and 5th or the 25th and 31st; the hash key fixes the day"},
-	{spec: "0 0 H(25-5)/7 * *", opts: []DescribeOption{withHash}, want: "at midnight on 0 to 2 days in every month between the 25th and 5th, 7 days apart, starting from a fixed day; the hash key fixes the day"},
+	{spec: "0 0 H(25-5)/7 * *", opts: []DescribeOption{withHash}, want: "at midnight on 1 or 2 days in months between days 1st and 5th or 25th and 31st, 7 days apart, starting from a fixed day; the hash key fixes the day"},
 	{spec: "0 9 * * H(5-1)", opts: []DescribeOption{withHash}, want: "at 9 am on a fixed day of the week between Friday and Monday; the hash key fixes the day"},
 	{spec: "0 9 * * H(5-1)/2", opts: []DescribeOption{withHash}, want: "at 9 am on 2 days in every week between Friday and Monday, 2 days apart, starting from a fixed day; the hash key fixes the day"},
 	{spec: "0 0 1 H(11-2) *", opts: []DescribeOption{withHash}, want: "at midnight on the 1st of the month in a fixed month between November and February; the hash key fixes the month"},
@@ -556,18 +556,18 @@ var describeGoldens = []struct {
 	{spec: "0 0 L-3 H H(1-3) 2027", opts: []DescribeOption{WithParseOptions(Minute | Hour | Dom | Month | Dow | Extended | Hash | Year)}, want: "never runs"},
 	{spec: "0 0 H(29-30) H(2-3) * 2027", opts: []DescribeOption{WithParseOptions(Minute | Hour | Dom | Month | Dow | Hash | Year)}, want: "at midnight on a fixed day of the month between the 29th and 30th in a fixed month between February and March in year 2027; the hash key fixes the day and the month"},
 	{spec: "0 0 H(30-31) H(2-3) *", opts: []DescribeOption{withHash}, want: "at midnight on a fixed day of the month between the 30th and 31st in a fixed month between February and March; the hash key fixes the day and the month"},
-	{spec: "0 0 H/10 4 *", opts: []DescribeOption{withHash}, want: "at midnight on 3 days in every month, 10 days apart, starting from a fixed day in April; the hash key fixes the day"},
-	{spec: "0 0 H/10 2 *", opts: []DescribeOption{withHash}, want: "at midnight on 2 or 3 days in every month, 10 days apart, starting from a fixed day in February; the hash key fixes the day"},
-	{spec: "0 0 H/15 1 *", opts: []DescribeOption{withHash}, want: "at midnight on 2 or 3 days in every month, 15 days apart, starting from a fixed day in January; the hash key fixes the day"},
-	{spec: "0 0 H/30 2 *", opts: []DescribeOption{withHash}, want: "at midnight on 0 or 1 days in every month, 30 days apart, starting from a fixed day in February; the hash key fixes the day"},
-	{spec: "0 0 H/30 4 *", opts: []DescribeOption{withHash}, want: "at midnight on 1 day in every month, 30 days apart, starting from a fixed day in April; the hash key fixes the day"},
-	{spec: "0 0 H/2 2 *", opts: []DescribeOption{withHash}, want: "at midnight on 14 or 15 days in every month, 2 days apart, starting from a fixed day in February; the hash key fixes the day"},
-	{spec: "0 0 H/10 2,4 *", opts: []DescribeOption{withHash}, want: "at midnight on 2 or 3 days in every month, 10 days apart, starting from a fixed day in February and April; the hash key fixes the day"},
-	{spec: "0 0 H/28 2 * 2027", opts: []DescribeOption{withHash, withYear}, want: "at midnight on 1 day in every month, 28 days apart, starting from a fixed day in February in year 2027; the hash key fixes the day"},
-	{spec: "0 0 H(28-30)/2 H * 2028", opts: []DescribeOption{withHash, withYear}, want: "at midnight on 1 or 2 days in every month between the 28th and 30th, 2 days apart, starting from a fixed day in a fixed month in year 2028; the hash key fixes the day and the month"},
-	{spec: "0 0 H(28-30)/2 H * 2027", opts: []DescribeOption{withHash, withYear}, want: "at midnight on 0 to 2 days in every month between the 28th and 30th, 2 days apart, starting from a fixed day in a fixed month in year 2027; the hash key fixes the day and the month"},
-	{spec: "0 0 H/10 H(4-6) *", opts: []DescribeOption{withHash}, want: "at midnight on 3 or 4 days in every month, 10 days apart, starting from a fixed day in a fixed month between April and June; the hash key fixes the day and the month"},
-	{spec: "0 0 H/10 H(2-3) * 2028", opts: []DescribeOption{withHash, withYear}, want: "at midnight on 3 days in every month, 10 days apart, starting from a fixed day in a fixed month between February and March in year 2028; the hash key fixes the day and the month"},
+	{spec: "0 0 H/10 4 *", opts: []DescribeOption{withHash}, want: "at midnight on 3 days of the month, 10 days apart, starting from a fixed day in April; the hash key fixes the day"},
+	{spec: "0 0 H/10 2 *", opts: []DescribeOption{withHash}, want: "at midnight on 2 or 3 days of the month, 10 days apart, starting from a fixed day in February; the hash key fixes the day"},
+	{spec: "0 0 H/15 1 *", opts: []DescribeOption{withHash}, want: "at midnight on 2 or 3 days of the month, 15 days apart, starting from a fixed day in January; the hash key fixes the day"},
+	{spec: "0 0 H/30 2 *", opts: []DescribeOption{withHash}, want: "at midnight on a fixed day of the month in February; the hash key fixes the day"},
+	{spec: "0 0 H/30 4 *", opts: []DescribeOption{withHash}, want: "at midnight on a fixed day of the month in April; the hash key fixes the day"},
+	{spec: "0 0 H/2 2 *", opts: []DescribeOption{withHash}, want: "at midnight on 14 or 15 days of the month, 2 days apart, starting from a fixed day in February; the hash key fixes the day"},
+	{spec: "0 0 H/10 2,4 *", opts: []DescribeOption{withHash}, want: "at midnight on 2 or 3 days of the month, 10 days apart, starting from a fixed day in February and April; the hash key fixes the day"},
+	{spec: "0 0 H/28 2 * 2027", opts: []DescribeOption{withHash, withYear}, want: "at midnight on a fixed day of the month in February in year 2027; the hash key fixes the day"},
+	{spec: "0 0 H(28-30)/2 H * 2028", opts: []DescribeOption{withHash, withYear}, want: "at midnight on 1 or 2 days of the month between days 28th and 30th, 2 days apart, starting from a fixed day in a fixed month in year 2028; the hash key fixes the day and the month"},
+	{spec: "0 0 H(28-30)/2 H * 2027", opts: []DescribeOption{withHash, withYear}, want: "at midnight on 1 or 2 days of the month between days 28th and 30th, 2 days apart, starting from a fixed day in a fixed month in year 2027; the hash key fixes the day and the month"},
+	{spec: "0 0 H/10 H(4-6) *", opts: []DescribeOption{withHash}, want: "at midnight on 3 or 4 days of the month, 10 days apart, starting from a fixed day in a fixed month between April and June; the hash key fixes the day and the month"},
+	{spec: "0 0 H/10 H(2-3) * 2028", opts: []DescribeOption{withHash, withYear}, want: "at midnight on 3 days of the month, 10 days apart, starting from a fixed day in a fixed month between February and March in year 2028; the hash key fixes the day and the month"},
 	{spec: "0 0 H(29-31) 2 *", opts: []DescribeOption{withHash}, want: "at midnight on a fixed day of the month between the 29th and 31st in February; the hash key fixes the day"},
 	{spec: "0 0 H(30-31) 2,4 *", opts: []DescribeOption{withHash}, want: "at midnight on a fixed day of the month between the 30th and 31st in February and April; the hash key fixes the day"},
 
@@ -591,15 +591,25 @@ var describeGoldens = []struct {
 	{spec: "*/10 1 * * *", want: "at 1 am, 1:10 am, 1:20 am, 1:30 am, 1:40 am, and 1:50 am every day"},
 	{spec: "0 0 H(1-31) * *", opts: []DescribeOption{withHash}, want: "at midnight on a fixed day of the month; the hash key fixes the day"},
 	{spec: "0 0 * * H(2-2)", opts: []DescribeOption{withHash}, want: "at 12 am on Tuesday"},
-	{spec: "0 0 H/3 12,H,H * 2032", opts: []DescribeOption{WithParseOptions(Minute | Hour | Dom | Month | Dow | Hash | Year)}, want: "at midnight on 10 or 11 days in every month, 3 days apart, starting from a fixed day in December and a fixed month in year 2032; the hash key fixes the day and the month"},
+	{spec: "0 0 H/3 12,H,H * 2032", opts: []DescribeOption{WithParseOptions(Minute | Hour | Dom | Month | Dow | Hash | Year)}, want: "at midnight on 10 or 11 days of the month, 3 days apart, starting from a fixed day in December and a fixed month in year 2032; the hash key fixes the day and the month"},
 	{spec: "0 H(11-23),H(11-22) * * *", opts: []DescribeOption{withHash}, want: "1 or 2 runs in every day, at the top of a fixed hour between the hours of 11 am and 11 pm and a fixed hour between the hours of 11 am and 10 pm; the hash key fixes both hours"},
 	{spec: "0 0 * H(12-10)/4 *", opts: []DescribeOption{withHash}, want: "at midnight every day in 2 or 3 months in every year between December and October, 4 months apart, starting from a fixed month; the hash key fixes the month"},
 	{spec: "0 16,H * * *", opts: []DescribeOption{withHash}, want: "1 or 2 runs in every day, at 4 pm and the top of a fixed hour; the hash key fixes the hour"},
-	{spec: "0 0 H/7 12 *", opts: []DescribeOption{withHash}, want: "at midnight on 4 or 5 days in every month, 7 days apart, starting from a fixed day in December; the hash key fixes the day"},
-	{spec: "0 0 H(29-24)/7 12 *", opts: []DescribeOption{withHash}, want: "at midnight on 3 or 4 days in every month between the 29th and 24th, 7 days apart, starting from a fixed day in December; the hash key fixes the day"},
+	{spec: "0 0 H/7 12 *", opts: []DescribeOption{withHash}, want: "at midnight on 4 or 5 days of the month, 7 days apart, starting from a fixed day in December; the hash key fixes the day"},
+	{spec: "0 0 H(29-24)/7 12 *", opts: []DescribeOption{withHash}, want: "at midnight on 3 or 4 days of the month between days 1st and 24th or 29th and 31st, 7 days apart, starting from a fixed day in December; the hash key fixes the day"},
 	{spec: "* */4 * * *", want: "every minute during the hours of midnight, 4 am, 8 am, noon, 4 pm, and 8 pm in every day"},
-	{spec: "0 0 H/30 H/6 *", opts: []DescribeOption{withHash}, want: "at midnight on 1 or 2 days in every month, 30 days apart, starting from a fixed day in 2 months in every year, 6 months apart, starting from a fixed month; the hash key fixes the day and the month"},
-	{spec: "0 0 H/10 H(4-6)/10 *", opts: []DescribeOption{withHash}, want: "at midnight on 3 days in every month, 10 days apart, starting from a fixed day in a fixed month between April and June; the hash key fixes the day and the month"},
+	{spec: "0 0 H/30 H/6 *", opts: []DescribeOption{withHash}, want: "at midnight on 1 or 2 days of the month, 30 days apart, starting from a fixed day in 2 months in every year, 6 months apart, starting from a fixed month; the hash key fixes the day and the month"},
+	{spec: "0 0 H/10 H(4-6)/10 *", opts: []DescribeOption{withHash}, want: "at midnight on 3 days of the month, 10 days apart, starting from a fixed day in a fixed month between April and June; the hash key fixes the day and the month"},
+	// H19: only the days that run are counted; a step's range names its unit, low to high
+	{spec: "0 0 H/30 * *", opts: []DescribeOption{withHash}, want: "at midnight on 1 or 2 days in months, 30 days apart, starting from a fixed day; the hash key fixes the day"},
+	{spec: "0 0 H(29-31)/2 * *", opts: []DescribeOption{withHash}, want: "at midnight on 1 or 2 days in months between days 29th and 31st, 2 days apart, starting from a fixed day; the hash key fixes the day"},
+	{spec: "0 0 H/30 2,12 *", opts: []DescribeOption{withHash}, want: "at midnight on 1 or 2 days of the month, 30 days apart, starting from a fixed day in February and December; the hash key fixes the day"},
+	{spec: "0 0 H(28-30)/2 2 *", opts: []DescribeOption{withHash}, want: "at midnight on a fixed day of the month between the 28th and 30th in February; the hash key fixes the day"},
+	{spec: "0 0 H(29-24)/7 * *", opts: []DescribeOption{withHash}, want: "at midnight on 3 or 4 days in every month between days 1st and 24th or 29th and 31st, 7 days apart, starting from a fixed day; the hash key fixes the day"},
+	{spec: "0 0 H(31-2)/2 * *", opts: []DescribeOption{withHash}, want: "at midnight on 1 or 2 days in every month between days 1st and 2nd or 31st, 2 days apart, starting from a fixed day; the hash key fixes the day"},
+	{spec: "0 0 H(31-1)/2 * *", opts: []DescribeOption{withHash}, want: "minute 0, hour 0, day of month H(31-1)/2, month *, day of week *", literal: true},
+	// D2: beside a named month the days are "of the month"
+	{spec: "0 0 1,11,21 3 *", want: "at midnight on the 1st, 11th, and 21st of the month in March"},
 
 	// Literal fallback: the whole spec renders field by field
 	// H in the date fields without a form (H20)
@@ -649,6 +659,10 @@ var describeNoteGoldens = []struct {
 	{spec: "H/15 9 * * *", opts: []DescribeOption{withHash}, want: "at minutes h, h+15, h+30, and h+45 during the 9 am hour, where h is a fixed minute from 0 to 14"},
 	{spec: "H/15 9,17 * * *", opts: []DescribeOption{withHash}, want: "at minutes h, h+15, h+30, and h+45 during the 9 am hour and the 5 pm hour, where h is a fixed minute from 0 to 14"},
 	{spec: "H/15 9,13,17 * * *", opts: []DescribeOption{withHash}, want: "at minutes h, h+15, h+30, and h+45 during the hours of 9 am, 1 pm, and 5 pm, where h is a fixed minute from 0 to 14"},
+	// N3: a step of days names the values a short month lacks, with no month written too
+	{spec: "0 0 H/7 * *", opts: []DescribeOption{withHash}, want: "on days h, h+7, h+14, h+21, and h+28 of every month, where h is a fixed day from 1 to 7; h+28 runs only when h is below 4; h+28 runs only in months that have one"},
+	{spec: "0 0 H/30 * *", opts: []DescribeOption{withHash}, want: "on days h and h+30 of every month, where h is a fixed day from 1 to 30; h+30 runs only when h is below 2; h and h+30 run only in months that have them"},
+	{spec: "0 0 H(29-31)/2 * *", opts: []DescribeOption{withHash}, want: "on the 29th and 31st; or the 30th of every month, depending on the hash key; the 29th, 30th, and 31st run only in months that have them"},
 	{spec: "H/15 9-17 * * *", opts: []DescribeOption{withHash}, want: "at minutes h, h+15, h+30, and h+45 past every hour from 9 am thru 5 pm, where h is a fixed minute from 0 to 14"},
 	{spec: "H/20 * * * * *", opts: []DescribeOption{withSecHash}, want: "at seconds h, h+20, and h+40 within a minute, where h is a fixed second from 0 to 19"},
 	{spec: "0 H/6 * * *", opts: []DescribeOption{withHash}, want: "at the top of a fixed hour between midnight and 5 am and every 6 hours after it"},
@@ -674,8 +688,8 @@ var describeNoteGoldens = []struct {
 	{spec: "0 0 1 H/4 *", opts: []DescribeOption{withHash}, want: "in months h, h+4, and h+8, where h is a fixed month from 1 (January) to 4 (April)"},
 	{spec: "0 0 1 H/5 *", opts: []DescribeOption{withHash}, want: "in months h, h+5, and h+10, where h is a fixed month from 1 (January) to 5 (May); h+10 runs only when h is below 3"},
 	{spec: "0 0 1 H(11-2)/2 *", opts: []DescribeOption{withHash}, want: "in November and January; or December and February, depending on the hash key"},
-	{spec: "0 0 H/2 * *", opts: []DescribeOption{withHash}, want: "on the 1st, 3rd, 5th, … 31st; or the 2nd, 4th, 6th, … 30th of every month, depending on the hash key"},
-	{spec: "0 0 H/10 * *", opts: []DescribeOption{withHash}, want: "on days h, h+10, h+20, and h+30 of every month, where h is a fixed day from 1 to 10; h+30 runs only when h is below 2"},
+	{spec: "0 0 H/2 * *", opts: []DescribeOption{withHash}, want: "on the 1st, 3rd, 5th, … 31st; or the 2nd, 4th, 6th, … 30th of every month, depending on the hash key; the 29th, 30th, and 31st run only in months that have them"},
+	{spec: "0 0 H/10 * *", opts: []DescribeOption{withHash}, want: "on days h, h+10, h+20, and h+30 of every month, where h is a fixed day from 1 to 10; h+30 runs only when h is below 2; h+20 and h+30 run only in months that have them"},
 	{spec: "0 0 H(1-28)/7 * *", opts: []DescribeOption{withHash}, want: "on days h, h+7, h+14, and h+21 of every month, where h is a fixed day from 1 to 7"},
 	{spec: "0 0 H(25-5)/7 * *", opts: []DescribeOption{withHash}, want: "on the 25th and 1st; the 26th and 2nd; the 27th and 3rd; the 28th and 4th; the 29th and 5th; the 30th; or the 31st of every month, depending on the hash key; a short month skips the days it lacks and changes the last step"},
 	{spec: "0 0 H * *", opts: []DescribeOption{withHash}, want: "on day h of every month, where h is a fixed day from 1 to 31; a month without day h is skipped"},
@@ -691,7 +705,7 @@ var describeNoteGoldens = []struct {
 	{spec: "0 0 H(25-5) * *", opts: []DescribeOption{withHash}, want: "on day h of every month, where h is a fixed day between 1 and 5 or 25 and 31; a month without day h is skipped"},
 	{spec: "0 0 H(10-1) * *", opts: []DescribeOption{withHash}, want: "on day h of every month, where h is a fixed day, either day 1 or between days 10 and 31; a month without day h is skipped"},
 	{spec: "H/30 0 * * H/2", opts: []DescribeOption{withHash}, want: "at minutes h and h+30 during the midnight hour, where h is a fixed minute from 0 to 29, on Sunday, Tuesday, Thursday, and Saturday; or Monday, Wednesday, and Friday, depending on the hash key"},
-	{spec: "0 0 H/10 H/4 *", opts: []DescribeOption{withHash}, want: "on days h, h+10, h+20, and h+30 of the month, where h is a fixed day from 1 to 10; h+30 runs only when h is below 2, in months k, k+4, and k+8, where k is a fixed month from 1 (January) to 4 (April)"},
+	{spec: "0 0 H/10 H/4 *", opts: []DescribeOption{withHash}, want: "on days h, h+10, h+20, and h+30 of the month, where h is a fixed day from 1 to 10; h+30 runs only when h is below 2; h+20 and h+30 run only in months that have them, in months k, k+4, and k+8, where k is a fixed month from 1 (January) to 4 (April)"},
 	{spec: "0 0 H(31-5) * *", opts: []DescribeOption{withHash}, want: "on day h of every month, where h is a fixed day, either between days 1 and 5 or day 31; a month without day h is skipped"},
 	// N8: the minutes of a hashed hour step; N2 in more hour contexts (R11,
 	// R12, C1); N2, N4: a wrapped hashed range lists; N7 over a wrapped range
@@ -715,41 +729,41 @@ var describeNoteGoldens = []struct {
 	{spec: "0 0 H(29-31) 2 *", opts: []DescribeOption{withHash}, want: "on day h of the month in February, where h is a fixed day between 29 and 31; a month without day h is skipped"},
 	{spec: "0 0 H(1-15) 2,4 *", opts: []DescribeOption{withHash}, want: "on day h of the month in February and April, where h is a fixed day between 1 and 15"},
 	{spec: "0 0 H(1-30) 1-3 *", opts: []DescribeOption{withHash}, want: "on day h of the month in January thru March, where h is a fixed day between 1 and 30; a month without day h is skipped"},
-	{spec: "0 0 H(1-15)/5 3 *", opts: []DescribeOption{withHash}, want: "on days h, h+5, and h+10 of every month in March, where h is a fixed day from 1 to 5"},
-	{spec: "0 0 H/10 1 *", opts: []DescribeOption{withHash}, want: "on days h, h+10, h+20, and h+30 of every month in January, where h is a fixed day from 1 to 10; h+30 runs only when h is below 2"},
-	{spec: "0 0 H/10 4 *", opts: []DescribeOption{withHash}, want: "on days h, h+10, h+20, and h+30 of every month in April, where h is a fixed day from 1 to 10; h+30 runs only in months that have one"},
-	{spec: "0 0 H/10 2 *", opts: []DescribeOption{withHash}, want: "on days h, h+10, h+20, and h+30 of every month in February, where h is a fixed day from 1 to 10; h+20 and h+30 run only in months that have them"},
+	{spec: "0 0 H(1-15)/5 3 *", opts: []DescribeOption{withHash}, want: "on days h, h+5, and h+10 of the month in March, where h is a fixed day from 1 to 5"},
+	{spec: "0 0 H/10 1 *", opts: []DescribeOption{withHash}, want: "on days h, h+10, h+20, and h+30 of the month in January, where h is a fixed day from 1 to 10; h+30 runs only when h is below 2"},
+	{spec: "0 0 H/10 4 *", opts: []DescribeOption{withHash}, want: "on days h, h+10, h+20, and h+30 of the month in April, where h is a fixed day from 1 to 10; h+30 runs only in months that have one"},
+	{spec: "0 0 H/10 2 *", opts: []DescribeOption{withHash}, want: "on days h, h+10, h+20, and h+30 of the month in February, where h is a fixed day from 1 to 10; h+20 and h+30 run only in months that have them"},
 	// One hash picks the day and a hashed month, so a value no month it pairs
 	// with has reads as if it were not there (N3).
 	{spec: "0 0 H/10 H(2-3) * 2028", opts: []DescribeOption{withHash, withYear}, want: "on days h, h+10, and h+20 of the month, where h is a fixed day from 1 to 10"},
 	{spec: "0 0 H/15 H(4-6) *", opts: []DescribeOption{withHash}, want: "on days h and h+15 of the month, where h is a fixed day from 1 to 15"},
-	{spec: "0 0 H/30 H(2-3) *", opts: []DescribeOption{withHash}, want: "on day h of the month, where h is a fixed day from 1 to 30"},
-	{spec: "0 0 H/10 H *", opts: []DescribeOption{withHash}, want: "on days h, h+10, h+20, and h+30 of the month, where h is a fixed day from 1 to 10; h+30 runs only when h is below 2"},
+	{spec: "0 0 H/30 H(2-3) *", opts: []DescribeOption{withHash}, want: "on day h of the month, where h is a fixed day from 1 to 30; a month without day h is skipped"},
+	{spec: "0 0 H/10 H *", opts: []DescribeOption{withHash}, want: "on days h, h+10, h+20, and h+30 of the month, where h is a fixed day from 1 to 10; h+30 runs only when h is below 2; h+20 and h+30 run only in months that have them"},
 	{spec: "0 0 H(28-30)/2 H(2-3) * 2027", opts: []DescribeOption{withHash, withYear}, want: "on the 28th; or the 29th of the month, depending on the hash key"},
 	{spec: "0 0 H(29-31)/2 H(2-3) * 2027", opts: []DescribeOption{withHash, withYear}, want: "on the 30th of the month"},
-	{spec: "0 0 H/2 H(2-3) *", opts: []DescribeOption{withHash}, want: "on the 1st, 3rd, 5th, … 29th; or the 2nd, 4th, 6th, … 30th of the month, depending on the hash key"},
-	{spec: "0 0 H/2 4 *", opts: []DescribeOption{withHash}, want: "on the 1st, 3rd, 5th, … 31st; or the 2nd, 4th, 6th, … 30th of every month in April, depending on the hash key; the 31st runs only in months that have one"},
-	{spec: "0 0 H/2 2 *", opts: []DescribeOption{withHash}, want: "on the 1st, 3rd, 5th, … 31st; or the 2nd, 4th, 6th, … 30th of every month in February, depending on the hash key; the 29th, 30th, and 31st run only in months that have them"},
+	{spec: "0 0 H/2 H(2-3) *", opts: []DescribeOption{withHash}, want: "on the 1st, 3rd, 5th, … 29th; or the 2nd, 4th, 6th, … 30th of the month, depending on the hash key; the 29th runs only in months that have one"},
+	{spec: "0 0 H/2 4 *", opts: []DescribeOption{withHash}, want: "on the 1st, 3rd, 5th, … 31st; or the 2nd, 4th, 6th, … 30th of the month in April, depending on the hash key; the 31st runs only in months that have one"},
+	{spec: "0 0 H/2 2 *", opts: []DescribeOption{withHash}, want: "on the 1st, 3rd, 5th, … 31st; or the 2nd, 4th, 6th, … 30th of the month in February, depending on the hash key; the 29th, 30th, and 31st run only in months that have them"},
 	{spec: "0 0 1,H 6 *", opts: []DescribeOption{withHash}, want: "on the 1st and day h of the month in June, where h is a fixed day from 1 to 31; a month without day h runs on the 1st only"},
 	{spec: "0 0 1,H 1 *", opts: []DescribeOption{withHash}, want: "on the 1st and day h of the month in January, where h is a fixed day from 1 to 31"},
-	{spec: "0 0 H(25-5)/3 1 *", opts: []DescribeOption{withHash}, want: "on the 25th, 28th, 31st, and 3rd; the 26th, 29th, 1st, and 4th; or the 27th, 30th, 2nd, and 5th of every month in January, depending on the hash key"},
-	{spec: "0 0 H(25-5)/3 4 *", opts: []DescribeOption{withHash}, want: "on the 25th, 28th, 31st, and 3rd; the 26th, 29th, 1st, and 4th; or the 27th, 30th, 2nd, and 5th of every month in April, depending on the hash key; a short month skips the days it lacks and changes the last step"},
+	{spec: "0 0 H(25-5)/3 1 *", opts: []DescribeOption{withHash}, want: "on the 25th, 28th, 31st, and 3rd; the 26th, 29th, 1st, and 4th; or the 27th, 30th, 2nd, and 5th of the month in January, depending on the hash key"},
+	{spec: "0 0 H(25-5)/3 4 *", opts: []DescribeOption{withHash}, want: "on the 25th, 28th, 31st, and 3rd; the 26th, 29th, 1st, and 4th; or the 27th, 30th, 2nd, and 5th of the month in April, depending on the hash key; a short month skips the days it lacks and changes the last step"},
 	{spec: "0 0 H H *", opts: []DescribeOption{withHash}, want: "on day h of the month, where h is a fixed day from 1 to 31; a month without day h is skipped"},
 	{spec: "0 0 H 1,H *", opts: []DescribeOption{withHash}, want: "on day h of the month, where h is a fixed day from 1 to 31; a month without day h is skipped"},
-	{spec: "0 0 H/10 H *", opts: []DescribeOption{withHash}, want: "on days h, h+10, h+20, and h+30 of the month, where h is a fixed day from 1 to 10; h+30 runs only when h is below 2"},
+	{spec: "0 0 H/10 H *", opts: []DescribeOption{withHash}, want: "on days h, h+10, h+20, and h+30 of the month, where h is a fixed day from 1 to 10; h+30 runs only when h is below 2; h+20 and h+30 run only in months that have them"},
 	{spec: "H(50-10)/5 * * * *", opts: []DescribeOption{withHash}, want: "at minutes 50, 55, 0, 5, and 10; 51, 56, 1, and 6; 52, 57, 2, and 7; 53, 58, 3, and 8; or 54, 59, 4, and 9 past the hour, depending on the hash key"},
 	{spec: "H(50-10)/15 * * * * *", opts: []DescribeOption{withSecHash}, want: "at seconds 50 and 5; 51 and 6; 52 and 7; 53 and 8; 54 and 9; 55 and 10; 56; 57; 58; 59; 0; 1; 2; 3; or 4 within a minute, depending on the hash key"},
 	{spec: "0 H(22-4)/2 * * *", opts: []DescribeOption{withHash}, want: "at the top of a fixed hour between 10 pm and 11 pm and every 2 hours after it thru 4 am"},
 	{spec: "H/15 50-10 * * * *", opts: []DescribeOption{withSecHash}, want: "at seconds h, h+15, h+30, and h+45 within minutes 0 thru 10 and 50 thru 59 in every hour, where h is a fixed second from 0 to 14"},
 	// Limits, as in describeGoldens
 	{spec: "0 0 * H(3-2)/3 *", opts: []DescribeOption{withHash}, want: "in January, April, July, and October; February, May, August, and November; or March, June, September, and December, depending on the hash key"},
-	{spec: "0 0 H/16 6 *", opts: []DescribeOption{withHash}, want: "on days h and h+16 of every month in June, where h is a fixed day from 1 to 16; h+16 runs only in months that have one"},
-	{spec: "0 0 H/30 2,12 *", opts: []DescribeOption{withHash}, want: "on days h and h+30 of every month in February and December, where h is a fixed day from 1 to 30; h and h+30 run only in months that have them"},
+	{spec: "0 0 H/16 6 *", opts: []DescribeOption{withHash}, want: "on days h and h+16 of the month in June, where h is a fixed day from 1 to 16; h+16 runs only in months that have one"},
+	{spec: "0 0 H/30 2,12 *", opts: []DescribeOption{withHash}, want: "on days h and h+30 of the month in February and December, where h is a fixed day from 1 to 30; h and h+30 run only in months that have them"},
 	{spec: "0 0 H(5-2) 5 *", opts: []DescribeOption{withHash}, want: "on day h of the month in May, where h is a fixed day between 1 and 2 or 5 and 31"},
 	{spec: "0 0 H/30 H *", opts: []DescribeOption{withHash}, want: "on days h and h+30 of the month, where h is a fixed day from 1 to 30; h+30 runs only when h is below 2"},
 	{spec: "0 0 * H(9-5)/7 *", opts: []DescribeOption{withHash}, want: "in September and April; October and May; November; December; January; February; or March, depending on the hash key"},
 	{spec: "0 0 H(4-26)/2 * *", opts: []DescribeOption{withHash}, want: "on the 4th, 6th, 8th, 10th, 12th, 14th, 16th, 18th, 20th, 22nd, 24th, and 26th; or the 5th, 7th, 9th, 11th, 13th, 15th, 17th, 19th, 21st, 23rd, and 25th of every month, depending on the hash key"},
-	{spec: "0 0 H/7 H(11-12) *", opts: []DescribeOption{withHash}, want: "on days h, h+7, h+14, h+21, and h+28 of the month, where h is a fixed day from 1 to 7; h+28 runs only when h is below 4"},
+	{spec: "0 0 H/7 H(11-12) *", opts: []DescribeOption{withHash}, want: "on days h, h+7, h+14, h+21, and h+28 of the month, where h is a fixed day from 1 to 7; h+28 runs only when h is below 4; h+28 runs only in months that have one"},
 	{spec: "0 0 H/10,H * H/3", opts: []DescribeOption{withHash}, want: ""},
 }
 
@@ -1383,11 +1397,14 @@ func describeGrammars() (descRe, noteRe *regexp.Regexp) {
 	domspan := "between the " + ord + " and " + ord
 	domalts := ", either " + alt("the "+ord+" or "+domspan, domspan+" or on the "+ord)
 	domone := "a fixed day of the month" + domalts + opt(",")
-	hday := alt(domone, hform("a fixed day of the month", "the "+ord, "day", "month", domlo, domhi),
-		hform("a fixed day of the week", dayname, "day", "week", dayname, dayname))
 	hmonth := hform("a fixed month", monthname, "month", "year", monthname, monthname)
 	// H18, D5: a fixed day joins the other day field
 	hdomfix := alt(domone, "a fixed day of the month"+opt(" between "+domlo+" and "+domhi), "the "+ord+" and a fixed day of the month")
+	// H19: a step of days counts the days that run; its range names its unit, low to high
+	dpart := ord + opt(" and "+ord)
+	domstep := hcnt + " days? " + alt("in every month", "in months", "of the month") +
+		opt(" between days "+dpart+opt(" or "+dpart)) + hapart("day")
+	hday := alt(hdomfix, domstep, hform("a fixed day of the week", dayname, "day", "week", dayname, dayname))
 	hdowfix := alt("a fixed day of the week"+opt(" between "+dayname+" and "+dayname), dayname+" and a fixed day of the week")
 	hdowany := alt("a fixed day of the week"+opt(" between "+dayname+" and "+dayname), "any "+dayname+" and a fixed day of the week") // X4
 	andor := alt(" when it falls on "+alt(dow, hdowfix), " or on "+alt(list("any "+alt(dayrange, nth+" "+dayname)), hdowany))
@@ -1431,13 +1448,13 @@ func describeGrammars() (descRe, noteRe *regexp.Regexp) {
 		hlead+" a fixed hour between "+clock+" and "+clock+" and every "+num+" hours after it"+opt(" thru "+clock)+opt(note)) // N7, N8
 	outcome := alt(list(dayname), list(monthname), "the "+ord+opt(" and "+ord), "the "+ord+"(?:, "+ord+")+, and "+ord, "the "+ord+", "+ord+", "+ord+", … "+ord)
 	outcomes := outcome + "(?:; " + outcome + ")*; or " + outcome
-	inMonths := opt(" in " + list(monthname+opt(" thru "+monthname))) // N5: a written month
-	ofDays := alt(" of every month"+inMonths, " of the month")
+	inMonths := opt(" in " + list(monthname+opt(" thru "+monthname)))                                                         // N5: a written month
+	ofDays := alt(" of every month", " of the month"+inMonths)                                                                // N5: a written month takes "the"
 	shortTail := alt("; "+vterm+" runs only in months that have one", "; "+list2(vterm)+" run only in months that have them") // N3
 	shortDays := alt("; a short month skips the days it lacks and changes the last step",
 		"; the "+ord+" runs only in months that have one", "; the "+alt(ord+" and "+ord, ord+"(?:, "+ord+")+, and "+ord)+" run only in months that have them") // N3, N4
-	nday := alt("on days "+vals+ofDays+where+opt(alt(tail, shortTail)),
-		"on "+opt("the "+ord+" and ")+"day "+v+alt(" of every month", " of the month"+inMonths)+where+opt("; a month without day "+v+alt(" is skipped", alt(" runs on the "+ord+" only", " runs only on the "+ord+", if it has one"))),
+	nday := alt("on days "+vals+ofDays+where+opt(tail)+opt(shortTail),
+		"on "+opt("the "+ord+" and ")+"day "+v+ofDays+where+opt("; a month without day "+v+alt(" is skipped", alt(" runs on the "+ord+" only", " runs only on the "+ord+", if it has one"))),
 		"on "+outcomes+opt(ofDays)+", depending on the hash key"+opt(shortDays),
 		"on "+outcome+ofDays) // N3: one outcome left
 	nmonth := alt("in months "+vals+where+opt(tail), "in "+outcomes+", depending on the hash key")
@@ -1480,6 +1497,8 @@ func TestDescribeGrammarRejects(t *testing.T) {
 		"every minute during midnight, 6 am, noon, and 6 pm hours in every day",
 		"at minutes 0 and 30 during the 9 am and 5 pm hours",
 		"at minutes 0 and 30 during the hours of 9 am and 5 pm",
+		"at midnight on 3 days in every month between the 1st and 15th, 5 days apart, starting from a fixed day; the hash key fixes the day",
+		"at midnight on 3 or 4 days in every month between the 29th and 24th, 7 days apart, starting from a fixed day; the hash key fixes the day",
 	} {
 		if g.MatchString(s) {
 			t.Errorf("grammar accepts %q", s)

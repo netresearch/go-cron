@@ -27,24 +27,24 @@ const (
 type noter struct {
 	d    *describer
 	vars int
-	// The written month, for a fixed day of the month (N5).
-	ofDay    string // after one day: " of the month in January"
-	ofDays   string // after several: " of every month in March"
+	// The written month, for a day of the month (N5).
+	of       string // after the days: " of the month in January", " of every month"
 	shortest uint   // the most days every written month has
 }
 
 // monthPlace places a note's days of the month in the written month as the
-// description does (N5, D2). A month that is not written, or is hashed, names
-// none: "of every month", or "of the month" as the key picks it.
-func monthPlace(f hashField, field string) (ofDay, ofDays string, shortest uint) {
+// description does (N5, D2): "of the month in March". A month that is not
+// written, or is hashed, names none: "of every month", or "of the month" as
+// the key picks it.
+func monthPlace(f hashField, field string) (of string, shortest uint) {
 	shortest = 28 // February, outside a leap year
 	if f.hashes() {
-		return ofTheMonth, ofTheMonth, shortest
+		return ofTheMonth, shortest
 	}
 	var d describer
 	in := d.describeMonths(field)
 	if in == "" {
-		return ofEveryMonth, ofEveryMonth, shortest
+		return ofEveryMonth, shortest
 	}
 	shortest = dom.max
 	for _, m := range newMonthField(field).vals {
@@ -54,12 +54,12 @@ func monthPlace(f hashField, field string) (ofDay, ofDays string, shortest uint)
 			shortest = min(shortest, maxDaysInMonth[m])
 		}
 	}
-	return ofTheMonth + " " + in, ofEveryMonth + " " + in, shortest
+	return ofTheMonth + " " + in, shortest
 }
 
 // monthWritten reports a note placed in written months (N5).
 func (n *noter) monthWritten() bool {
-	return n.ofDays != ofEveryMonth && n.ofDays != ofTheMonth
+	return n.of != ofEveryMonth && n.of != ofTheMonth
 }
 
 // next takes the next variable.
@@ -75,7 +75,7 @@ func (n *noter) next() string {
 // has no form.
 func (p Parser) hashNote(d *describer, h, hd [3]hashField, dates [3]string) string {
 	n := noter{d: d}
-	n.ofDay, n.ofDays, n.shortest = monthPlace(hd[2], dates[2])
+	n.of, n.shortest = monthPlace(hd[2], dates[2])
 	sec := newTimeField(h[0].plain, unitSecond, unitMinute, seconds)
 	minute := newTimeField(h[1].plain, unitMinute, unitHour, minutes)
 	hour := newTimeField(h[2].plain, unitHour, unitDay, hours)
@@ -342,7 +342,7 @@ func (n *noter) domNote(f hashField, plain timeField) (string, bool) {
 		if !ok {
 			return "", false
 		}
-		text := fmt.Sprintf("on day %s%s, where %s is a fixed day%s", v, n.ofDay, v, placeAlternatives(from))
+		text := fmt.Sprintf("on day %s%s, where %s is a fixed day%s", v, n.of, v, placeAlternatives(from))
 		if (x.lo > x.hi && n.shortest < dom.max) || x.hi > n.shortest {
 			text += fmt.Sprintf("; a month without day %s is skipped", v)
 		}
@@ -350,7 +350,7 @@ func (n *noter) domNote(f hashField, plain timeField) (string, bool) {
 	case hashFixedPlus:
 		first := ordinal(plain.vals[0])
 		v := n.next()
-		text := fmt.Sprintf("on the %s and day %s%s, where %s is a fixed day from 1 to 31", first, v, n.ofDay, v)
+		text := fmt.Sprintf("on the %s and day %s%s, where %s is a fixed day from 1 to 31", first, v, n.of, v)
 		if n.shortest < dom.max {
 			text += fmt.Sprintf("; a month without day %s %s", v, n.plainDayTail(plain.vals[0]))
 		}
@@ -390,7 +390,7 @@ func (n *noter) outcomeNote(f hashField, r bounds, plain timeField) (string, boo
 	in, of := "on ", ""
 	switch {
 	case plain.container == unitMonth:
-		of = n.ofDays
+		of = n.of
 	case plain.unit == unitMonth:
 		in = "in "
 	}
@@ -407,8 +407,13 @@ func (n *noter) outcomeNote(f hashField, r bounds, plain timeField) (string, boo
 func (n *noter) outcomeVars(x hashed, plain timeField, in, of string, paired bool) string {
 	v := n.next()
 	vals, top, tail := stepValues(v, x, dateLimit)
-	if plain.container == unitMonth && n.monthWritten() && x.hi > n.shortest {
-		tail = shortMonthTail(v, x, top, n.shortest)
+	if plain.container == unitMonth && x.hi > n.shortest {
+		short := shortMonthTail(v, x, top, n.shortest)
+		if n.monthWritten() {
+			tail = short
+		} else {
+			tail += short // every month: the last value's limit, then the short months
+		}
 	}
 	unit, bound := plain.unit, number
 	if unit == unitMonth {
@@ -421,9 +426,35 @@ func (n *noter) outcomeVars(x hashed, plain timeField, in, of string, paired boo
 		if x.hi-x.lo < x.step {
 			plural = ""
 		}
+		tail += pairedTail(v, x, n.d.pairedLate())
 	}
 	return fmt.Sprintf("%s%s%s %s%s, where %s is a fixed %s from %s to %s%s",
 		in, unit, plural, vals, of, v, unit, bound(x.lo), bound(top), tail)
+}
+
+// pairedTail names the values of a hashed day step that a month its hash
+// picks with them lacks (N3): "; h+20 runs only in months that have one".
+func pairedTail(v string, x hashed, late []uint) string {
+	var terms []string
+	for k := uint(0); k*x.step <= x.hi-x.lo; k++ {
+		if !slices.ContainsFunc(late, func(d uint) bool { return d >= x.lo && (d-x.lo)/x.step == k }) {
+			continue
+		}
+		term := v
+		if k > 0 {
+			term = fmt.Sprintf("%s+%d", v, k*x.step)
+		}
+		terms = append(terms, term)
+	}
+	switch {
+	case len(terms) == 0:
+		return ""
+	case x.hi-x.lo < x.step: // one day: as a fixed day (N5)
+		return fmt.Sprintf("; a month without day %s is skipped", v)
+	case len(terms) == 1:
+		return "; " + terms[0] + " runs only in months that have one"
+	}
+	return "; " + andList(terms) + " run only in months that have them"
 }
 
 // outcomeList writes outcomes in the listed form (N4). One outcome left, as
@@ -450,8 +481,10 @@ func (n *noter) outcomeTail(x hashed, outs [][]uint) string {
 	switch {
 	case x.lo > x.hi && n.shortest < dom.max:
 		return "; a short month skips the days it lacks and changes the last step"
-	case x.lo <= x.hi && n.monthWritten():
+	case x.lo <= x.hi && n.of != ofTheMonth:
 		return lateClauseAfter(slices.Concat(outs...), n.shortest)
+	case x.lo <= x.hi: // a hashed month: the days some month it pairs with lacks
+		return lateClauseAfter(n.d.pairedLate(), 0)
 	}
 	return ""
 }

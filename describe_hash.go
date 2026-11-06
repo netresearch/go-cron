@@ -777,6 +777,7 @@ func (p Parser) splitDates(fields []string) (h [3]hashField, plain [3]string, ok
 // fields in that order with their H items in h (H18, H19), and the
 // short-month clause. ok is false for the combinations without a form (H20).
 func (p Parser) describeDates(d *describer, h [3]hashField, fields [3]string) (day, month, short string, ok bool) {
+	d.monthNamed = h[2].hashes() || !isWildcard(fields[2]) && !newMonthField(fields[2]).every()
 	day, short, ok = p.describeDays(d, fields[0], fields[1], h[0], h[1])
 	if !h[2].hashes() {
 		return day, d.describeMonths(fields[2]), short, ok
@@ -798,9 +799,59 @@ func hashDay(h hashField, f timeField, noun, the string, runs func(hashed) (int,
 
 // hashDom describes a fixed day of month as a day clause, with the
 // short-month clause of its plain days (H18, H19, D3).
-func hashDom(h hashField, md timeField, runs func(hashed) (int, int), alone bool) (text, short string, ok bool) {
-	text, ok = hashDay(h, md, "a fixed day of the month", "the ", runs, alone)
+func (d *describer) hashDom(h hashField, md timeField, alone bool) (text, short string, ok bool) {
+	if alone && h.shape(md) == hashStep {
+		text, ok = d.domStep(h.steps[0], md)
+	} else {
+		text, ok = hashDay(h, md, fixedDom, "the ", d.dayCount, alone)
+	}
 	return "on " + text, lateClause(md.vals), ok
+}
+
+// fixedDom names a hashed day of the month (H18).
+const fixedDom = "a fixed day of the month"
+
+// domStep describes a hashed day-of-month step by the days it runs on: "2 to 4
+// days in every month, 10 days apart, starting from a fixed day" (H19). Only
+// the days that run are counted. Where a month can be too short for all of
+// them, it reads "1 or 2 days in months". A step of one day reads as a fixed
+// day (H18). Beside a month clause it reads "2 or 3 days of the month".
+func (d *describer) domStep(x hashed, md timeField) (string, bool) {
+	lo, hi := d.dayCount(x)
+	skips := lo == 0 && hi > 0 // some month has none of its days
+	in := " in every month"
+	switch {
+	case d.monthNamed:
+		in = ofTheMonth
+	case skips:
+		in = " in months"
+	}
+	switch {
+	case hi == 1:
+		b, ok := dateBetween(x, md, "the ")
+		return fixedDom + b, ok
+	case skips:
+		lo = 1
+	}
+	return counted(lo, hi, md.unit) + in + domStepBetween(x, md) + stepTail(x, md.unit), true
+}
+
+// domStepBetween names the range of a hashed day-of-month step, low to high
+// with its unit, so that it does not read as a range of months: " between days
+// 1st and 15th", " between days 1st and 5th or 25th and 31st" (H3, T9).
+func domStepBetween(x hashed, md timeField) string {
+	if x.whole {
+		return ""
+	}
+	parts := timeItem{lo: x.lo, hi: x.hi}.parts(md.r)
+	words := make([]string, len(parts))
+	for i, p := range parts {
+		words[i] = md.w(p[0])
+		if p[0] != p[1] {
+			words[i] += " and " + md.w(p[1])
+		}
+	}
+	return betweenSep + "days " + strings.Join(words, " or ")
 }
 
 // hashDow describes a fixed day of week, counted on the parser's seven-day
@@ -816,8 +867,8 @@ func (p Parser) hashDow(h hashField, wd timeField, alone, or bool) (string, bool
 
 // hashDate describes a date field with H items, f its plain items: "a fixed
 // day of the month between the 1st and 15th", "the 1st and a fixed day of
-// the month" (H18), "2 to 4 days in every month, 10 days apart, starting
-// from a fixed day" (H19). noun names the fixed value, the is the article
+// the month" (H18), "3 or 4 days in every week, 2 days apart, starting
+// from a fixed day" (H19). A step of days of the month is domStep's. noun names the fixed value, the is the article
 // before ordinals (D2), and runs counts a step's values in its container.
 func hashDate(h hashField, f timeField, noun, the string, runs func(hashed) (int, int)) (string, bool) {
 	switch h.shape(f) {
@@ -837,17 +888,16 @@ func hashDate(h hashField, f timeField, noun, the string, runs func(hashed) (int
 
 // dateBetween names the range of a hashed date value or step by its values:
 // " between Monday and Friday", " between the 1st and 15th" (H3, H18). A
-// wrapped fixed day of the month splits low to high: " between the 1st and
-// 5th or the 25th and 31st", ", either the 1st or between the 10th and 31st"; a
-// wrapped step of days, week or year reads in its
-// order: " between the 25th and 5th", " between Friday and Monday", " between
-// November and February". ok is false for a wrapped day of the month of one
-// value per part (H20).
+// wrapped day of the month splits low to high: " between the 1st and 5th or
+// the 25th and 31st", ", either the 1st or between the 10th and 31st"; a
+// wrapped week or year reads in its order: " between Friday and Monday", "
+// between November and February". ok is false for a wrapped day of the month
+// of one value per part (H20).
 func dateBetween(x hashed, f timeField, the string) (string, bool) {
 	switch {
 	case x.whole:
 		return "", true
-	case x.lo > x.hi && f.container == unitMonth && x.step <= 1:
+	case x.lo > x.hi && f.container == unitMonth:
 		return rangeParts(x, f.r, f.w, the, "")
 	}
 	return betweenSep + the + f.w(x.lo) + " and " + f.w(x.hi), true
@@ -956,6 +1006,21 @@ func (d *describer) lastPairedDay() (last uint) {
 		}
 	}
 	return last
+}
+
+// pairedLate lists the days of a hashed day step that some month its hash
+// picks with them lacks, and another has (N3).
+func (d *describer) pairedLate() []uint {
+	var late []uint
+	for days, lengths := range d.dayPairs {
+		shortest, longest := uint(mathbits.TrailingZeros64(lengths)), uint(mathbits.Len64(lengths))-1 // #nosec G115 -- at most 64
+		for v := shortest + 1; v <= longest; v++ {
+			if days&(1<<v) != 0 {
+				late = append(late, v)
+			}
+		}
+	}
+	return late
 }
 
 // pairedOutcomes cuts each outcome of a hashed day step to the days the months
