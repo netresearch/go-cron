@@ -597,6 +597,9 @@ var describeGoldens = []struct {
 	{spec: "0 16,H * * *", opts: []DescribeOption{withHash}, want: "1 or 2 runs in every day, at 4 pm and the top of a fixed hour; the hash key fixes the hour"},
 	{spec: "0 0 H/7 12 *", opts: []DescribeOption{withHash}, want: "at midnight on 4 or 5 days in every month, 7 days apart, starting from a fixed day in December; the hash key fixes the day"},
 	{spec: "0 0 H(29-24)/7 12 *", opts: []DescribeOption{withHash}, want: "at midnight on 3 or 4 days in every month between the 29th and 24th, 7 days apart, starting from a fixed day in December; the hash key fixes the day"},
+	{spec: "* */4 * * *", want: "every minute during midnight, 4 am, 8 am, noon, 4 pm, and 8 pm hours in every day"},
+	{spec: "0 0 H/30 H/6 *", opts: []DescribeOption{withHash}, want: "at midnight on 1 or 2 days in every month, 30 days apart, starting from a fixed day in 2 months in every year, 6 months apart, starting from a fixed month; the hash key fixes the day and the month"},
+	{spec: "0 0 H/10 H(4-6)/10 *", opts: []DescribeOption{withHash}, want: "at midnight on 3 days in every month, 10 days apart, starting from a fixed day in a fixed month between April and June; the hash key fixes the day and the month"},
 
 	// Literal fallback: the whole spec renders field by field
 	// H in the date fields without a form (H20)
@@ -746,6 +749,7 @@ var describeNoteGoldens = []struct {
 	{spec: "0 0 * H(9-5)/7 *", opts: []DescribeOption{withHash}, want: "in September and April; October and May; November; December; January; February; or March, depending on the hash key"},
 	{spec: "0 0 H(4-26)/2 * *", opts: []DescribeOption{withHash}, want: "on the 4th, 6th, 8th, 10th, 12th, 14th, 16th, 18th, 20th, 22nd, 24th, and 26th; or the 5th, 7th, 9th, 11th, 13th, 15th, 17th, 19th, 21st, 23rd, and 25th of every month, depending on the hash key"},
 	{spec: "0 0 H/7 H(11-12) *", opts: []DescribeOption{withHash}, want: "on days h, h+7, h+14, h+21, and h+28 of the month, where h is a fixed day from 1 to 7; h+28 runs only when h is below 4"},
+	{spec: "0 0 H/10,H * H/3", opts: []DescribeOption{withHash}, want: ""},
 }
 
 func TestDescribeSpecNote(t *testing.T) {
