@@ -404,7 +404,7 @@ func placeAlternatives(s string) string {
 }
 
 // fixed names a hashed value: "a fixed minute", "a fixed minute between
-// minutes 0 and 29", "a fixed hour between the 9 am and 5 pm hours" (H1, H3).
+// minutes 0 and 29", "a fixed hour between the hours of 9 am and 5 pm" (H1, H3).
 // ok is false for a wrapped hour range, which has no form.
 func (d *describer) fixed(unit string, x hashed, r bounds) (string, bool) {
 	w := "a fixed " + unit

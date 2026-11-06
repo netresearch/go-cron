@@ -76,7 +76,7 @@ These words mean one thing across the rules, the grammar and the notes.
 | from…to | The range of a fixed value when it is plain numbers the spec does not write: "where h is a fixed minute from 0 to 14" | N2, N3, N5 | Counted numbers include the end of "from…to", as in counting from 1 to 10; a clock time after "to" does not, so clock ranges read "between" |
 | either | Joins the two parts of a fixed value's wrapped range when a part has one value or a unit: "either the 1st or between the 10th and 31st", "either minute 0 or between minutes 50 and 59" | H3, H18, N5 | The value is one of the two; a fixed value never has more than two parts |
 | the top of | Minute 0: "at the top of every hour" | T9, R4, R9, R10, C1, H4, H5, H13, H15, H16, H21, H24, P2, N4, N7 | The everyday phrase, used for minute 0 everywhere. It replaced "on the hour" |
-| the 9 am hour | A named hour: an hour given by its clock time | T9, R3, R6, R11, C1, H7, H8, H12, H21, H23 | It makes the unit clear |
+| the 9 am hour | A named hour: an hour given by its clock time. Two or more read "the hours of 9 am and 5 pm" | T9, R3, R6, R11, C1, H7, H8, H12, H21, H23 | It makes the unit clear |
 | past, within, during | How a value sits in a larger unit: minutes "past the hour", seconds "within a minute", minutes "during" a named hour | T9, R6, C1, D1, H7, N2 | Each join says which unit the value belongs to |
 | every day | Closes clock times and hour ranges: "at 9 am every day" | G8, T5, T6, J1, T9, R8, R9, R10, R11, R12, D7, H7, H8, H9, H12, H14, H16, H20, H21, H22, H23, H24 | In reader trials, nothing said daily without it |
 | span form | Several minutes over an hour range, opening with the first and last run: "from 9 am thru 5:56 pm every day, at minutes 0, 7, 14, … 56 past each hour" | T5, J1, R12, D1, H17 | In reader trials, readers dropped the runs in the last hour of "hours 9 thru 17" |
@@ -126,14 +126,14 @@ which form a spec gets. Each has an ID, which the grammar cites.
 |---|---|
 | R1 | Times are on the 12-hour clock |
 | R2 | 12:00 am is "midnight", or "12 am" on a named day; 12:00 pm is "noon" |
-| R3 | A named hour is "the 9 am hour", "the midnight hour", "the 9 am and 5 pm hours". A list that starts with midnight takes no article: "midnight, 6 am, noon, and 6 pm hours" |
+| R3 | A named hour is "the 9 am hour", "the midnight hour". Two or more read "the hours of", as a list or as the ends of a fixed range: "the hours of 9 am and 5 pm", "the hours of midnight, 6 am, noon, and 6 pm" |
 | R4 | Minute 0 alone is "the top of …": "at the top of every hour" |
 | R5 | A single value keeps its unit after the number ("at 5 minutes past the hour"); a list puts the unit first ("at minutes 0 and 30 …") |
 | R6 | Seconds fall "within" a minute. Minutes of the generic hour are "past the hour"; in a named hour they fall "during" it |
 | R7 | A fixed second under a fixed minute and hour reads as a clock time ("at 2:30:15 am") |
 | R8 | An hour step past 6 values reads as the step. It states the start, with the minute folded in ("every 2 hours starting at 12:30 am in every day"), and the end when the range isn't the whole day or the step doesn't divide 24 ("every 2 hours from 9:15 am thru 11:15 pm in every day"). A wrapped step reads in two parts (T9) |
 | R9 | One minute on an hour range past 6 values states the range's start and end: "at the top of every hour from 9 am thru 5 pm every day", "at 30 minutes past every hour from 9 am thru 5 pm every day". A wrapped range reads in two parts (T9) |
-| R10 | An hour step of up to 6 values (`*/6`) names its hours, followed by "in every day": "at the top of midnight, 6 am, noon, and 6 pm hours in every day", "at minutes 0 and 30 during … hours in every day" |
+| R10 | An hour step of up to 6 values (`*/6`) names its hours, followed by "in every day": "at the top of the hours of midnight, 6 am, noon, and 6 pm in every day", "at minutes 0 and 30 during the hours of … in every day" |
 | R11 | Several minutes, or every minute, on an hour step past 6 values: the minutes, then the step: "at minutes 0, 15, 30, and 45 every 2 hours starting with the midnight hour in every day", "every minute every 3 hours from the 1 am hour thru the 10 pm hour in every day". A wrapped step reads in two parts (T9) |
 | R12 | Every minute or every second on an hour range past 6 values states the first and last run: "every minute from 9 am thru 5:59 pm every day". Several minutes on a wrapped range past 6 values take the span form. A wrapped range reads in two parts (T9) |
 | C1 | Seconds other than 0 lead: "every second", "at 5 seconds", "at seconds 0 and 30". The minutes join with "within" ("within a minute", "within every minute", "within minute 30", "within minutes 0 and 30"), minute 0 with "past the top of", and after "every second" with "for" ("for minute 30"). The hours then join as for minutes: "in every hour", "during the 9 am hour", R9–R12 |
@@ -167,7 +167,7 @@ which form a spec gets. Each has an ID, which the grammar cites.
 |---|---|
 | H1 | A value the hash key picks is "fixed", and the hash clause closes the description after a semicolon: "at a fixed minute past the hour; the hash key fixes the minute" |
 | H2 | A hashed step states its count: "4 runs in every hour, 15 minutes apart, starting from a fixed minute"; "1 or 2 runs" when the fixed start decides the count |
-| H3 | A range: "a fixed minute between minutes 0 and 29"; a wrapped range in two parts, sorted (T9), each part with its unit and "either" for the two: "at a fixed minute past the hour, either between minutes 0 and 10 or between minutes 50 and 59", "either minute 0 or between minutes 50 and 59", "either between minutes 0 and 5 or minute 59". What follows the value in the clause comes before "either", so it covers both; beside another fixed value the two stay with their own, closed by a comma: "at a fixed minute, either minute 0 or between minutes 50 and 59, past the hour on a fixed day of the month". A wrapped step from its start, where its walk starts: "between minutes 50 and 10"; hours by name: "a fixed hour between the 9 am and 5 pm hours" |
+| H3 | A range: "a fixed minute between minutes 0 and 29"; a wrapped range in two parts, sorted (T9), each part with its unit and "either" for the two: "at a fixed minute past the hour, either between minutes 0 and 10 or between minutes 50 and 59", "either minute 0 or between minutes 50 and 59", "either between minutes 0 and 5 or minute 59". What follows the value in the clause comes before "either", so it covers both; beside another fixed value the two stay with their own, closed by a comma: "at a fixed minute, either minute 0 or between minutes 50 and 59, past the hour on a fixed day of the month". A wrapped step from its start, where its walk starts: "between minutes 50 and 10"; hours by name: "a fixed hour between the hours of 9 am and 5 pm" |
 | H4 | `0,H` follows R4: "at the top of the hour and a fixed minute past it" |
 | H5 | `0,H/15`: the plain value first: "at the top of the hour and every 15 minutes starting from a fixed minute" |
 | H6 | `H,H(0-29)`: "at a fixed minute and a fixed minute between minutes 0 and 29; the hash key fixes both minutes". Two fixed values of one unit merge in that clause wherever they stand: "the minute and both days", "both minutes and the day" |
@@ -184,7 +184,7 @@ which form a spec gets. Each has an ID, which the grammar cites.
 | H18 | A fixed day or month: "on a fixed day of the month", "on a fixed day of the week", "in a fixed month"; a range by its values: "between the 1st and 15th", "between Monday and Friday", "between January and June". A wrapped day of the month splits low to high: "between the 1st and 5th or the 25th and 31st", and a part of one value takes "either", placed as in H3: "a fixed day of the month, either the 1st or between the 10th and 31st", "either between the 1st and 5th or on the 31st"; a wrapped week or year reads in its order: "between Friday and Monday", "between November and February"; one plain value first: "on the 1st and a fixed day of the month". Beside a restricted other day field a fixed day joins as D5: "at 12 am on a fixed day of the month when it falls on Monday", "on the 1st of the month or on a fixed day of the week" |
 | H19 | A hashed date step counts its days or months, as H14: "on 3 or 4 days in every week, 2 days apart, starting from a fixed day", "in 4 months in every year, 3 months apart, starting from a fixed month". In the day of the month the count covers the lengths of the written months and years, a hashed month counting every month it can pick, or every month length when none is written: "on 2 to 4 days in every month, 10 days apart, starting from a fixed day". One hash picks a hashed day and month, so the count covers the pairs they can make; past 8,192 hash values, each is counted on its own |
 | H20 | Other combinations in the date fields render field by field (G10): a hashed day step beside a restricted other day field, `H` beside `L`, `W` or `#`, a fixed day ORed with a day field that is every day, a wrapped day of the month of one value per part (`H(31-1)`), several hashed items, a hashed step beside a value, or more than one value beside `H` |
-| H21 | Two fixed values in one field, and nothing else, read as H6, each in its own words, the whole range first, then low to high. The count (H2) is "1 or 2 runs" when they can fall on one value, "2 runs" when they cannot: "2 runs in every hour, at a fixed minute between minutes 0 and 9 and a fixed minute between minutes 20 and 29". Minutes take the hours as H2 does: "1 or 2 runs in every hour during the 9 am hour, at a fixed minute and a fixed minute between minutes 0 and 29". Hours take minute 0: "1 or 2 runs in every day, at the top of a fixed hour and a fixed hour between midnight and 5 am hours". Seconds take every minute of every hour |
+| H21 | Two fixed values in one field, and nothing else, read as H6, each in its own words, the whole range first, then low to high. The count (H2) is "1 or 2 runs" when they can fall on one value, "2 runs" when they cannot: "2 runs in every hour, at a fixed minute between minutes 0 and 9 and a fixed minute between minutes 20 and 29". Minutes take the hours as H2 does: "1 or 2 runs in every hour during the 9 am hour, at a fixed minute and a fixed minute between minutes 0 and 29". Hours take minute 0: "1 or 2 runs in every day, at the top of a fixed hour and a fixed hour between the hours of midnight and 5 am". Seconds take every minute of every hour |
 | H22 | Minutes other than one plain value on a hashed hour step read as H14: "at minutes 0 and 30 during 4 hours in every day, 6 hours apart, starting from a fixed hour", "at a fixed minute during 4 hours in every day, 6 hours apart, starting from a fixed hour" |
 | H23 | A hashed minute step under an hour step past 6 values: the step as H2, then the hours as R11: "4 runs in every hour, 15 minutes apart, starting from a fixed minute, every 2 hours starting with the midnight hour in every day" |
 | H24 | A fixed second takes C1's joins in place of a value: "at a fixed second past the top of every hour", "at a fixed second within minute 30 in every hour", "at a fixed second within a fixed minute in every hour"; at minute 0 of a fixed hour, "at a fixed second at the top of a fixed hour every day". A hashed second step under one minute keeps H2's count: "4 runs within minute 5 in every hour, 15 seconds apart, starting from a fixed second", "4 runs past the top of every hour, 15 seconds apart, starting from a fixed second"; under an hour range it names the last run (R12): "4 runs in every minute from 9 am thru 5:59 pm, 15 seconds apart, starting from a fixed second" |
@@ -317,8 +317,8 @@ alts: "," "either" (unit INT "or" "between" units INT "and" INT | "between" unit
 hashkey: ";" "the" "hash" "key" "fixes" list{keyunit}                      // H1, H6
 keyunit: "the" unit | "both" units
 
-hours: "the" clock "hour" | "the" (CLOCK12 | "noon") hourtail | "midnight" hourtail   // R3
-hourtail: ("and" clock | ("," clock)+ "," "and" clock) "hours"            // R3: no article before a list that starts with midnight
+hours: "the" clock "hour" | "the" "hours" "of" clock hourtail             // R3
+hourtail: "and" clock | ("," clock)+ "," "and" clock                      // R3: two or more hours, the unit first
 hourrange: "from" list{crange}                                            // R8, R9, R12, T9
 crange: clock "thru" clock                                                // T9: a wrapped range is two, in clock order
 everyday: "every" "day"                                                   // J1
@@ -504,6 +504,12 @@ the value comes before "either" so it covers both.
 The "on" in "either between the 1st and 5th or on the 31st" was added after the
 trials: two readers independently said the form without it could briefly read as
 a range running to the 31st, though none answered wrongly.
+
+Two or more named hours read "the hours of 9 am and 5 pm". With the unit last
+("the 9 am and 5 pm hours") a list that starts with midnight dropped its article
+and read "midnight and 5 am hours", where "5 am hours" looks like a plural of
+its own. The unit now comes before the values, as it does for minutes ("minutes
+0 and 30"). One hour stays "the 9 am hour".
 
 "fixed" replaced "hashed" because it says what a reader can rely
 on.
