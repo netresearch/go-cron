@@ -496,34 +496,17 @@ func (p Parser) parse(spec string) (Schedule, error) {
 		return nil, fmt.Errorf("spec too long: %d > %d", len(spec), MaxSpecLength)
 	}
 
-	loc, spec, err := parseTimezone(spec)
+	loc, descriptor, fields, yearField, err := p.specFields(spec)
 	if err != nil {
 		return nil, err
 	}
 
 	// Handle named schedules (descriptors), if configured
-	if strings.HasPrefix(spec, "@") {
+	if descriptor != "" {
 		if p.options&Descriptor == 0 {
-			return nil, fmt.Errorf("parser does not accept descriptors: %q", spec)
+			return nil, fmt.Errorf("parser does not accept descriptors: %q", descriptor)
 		}
-		return p.parseDescriptor(spec, loc)
-	}
-
-	// Split on whitespace.
-	fields := strings.Fields(spec)
-
-	// Extract year field if Year or YearOptional option is enabled (it's always the last field)
-	fields, yearField, err := p.handleYearExtraction(fields)
-	if err != nil {
-		return nil, err
-	}
-
-	// Validate & fill in any omitted or optional fields (excluding Year)
-	// Use options without Year/YearOptional flags for normalizeFields since Year is handled separately
-	normalizeOptions := p.options &^ Year &^ YearOptional
-	fields, err = normalizeFields(fields, normalizeOptions)
-	if err != nil {
-		return nil, err
+		return p.parseDescriptor(descriptor, loc)
 	}
 
 	hashEnabled := p.options&Hash != 0
@@ -613,6 +596,34 @@ func (p Parser) parse(spec string) (Schedule, error) {
 		DowOrDom:       p.options&DowOrDom > 0,
 		DSTSkip:        p.options&DSTSkip != 0,
 	}, nil
+}
+
+// specFields splits spec the way parse reads it, so the parser and
+// DescribeSpec see the same fields. It strips the time zone, then returns a
+// descriptor ("@daily", "@every 1h") as written, or the six fields second to
+// day of week with omitted fields filled in, and the year field text.
+func (p Parser) specFields(spec string) (loc *time.Location, descriptor string, fields []string, yearField string, err error) {
+	loc, spec, err = parseTimezone(spec)
+	if err != nil {
+		return nil, "", nil, "", err
+	}
+	if strings.HasPrefix(spec, "@") {
+		return loc, spec, nil, "", nil
+	}
+
+	// Extract year field if Year or YearOptional option is enabled (it's always the last field)
+	fields, yearField, err = p.handleYearExtraction(strings.Fields(spec))
+	if err != nil {
+		return nil, "", nil, "", err
+	}
+
+	// Validate & fill in any omitted or optional fields (excluding Year)
+	// Use options without Year/YearOptional flags for normalizeFields since Year is handled separately
+	fields, err = normalizeFields(fields, p.options&^Year&^YearOptional)
+	if err != nil {
+		return nil, "", nil, "", err
+	}
+	return loc, "", fields, yearField, nil
 }
 
 // fieldBounds returns r adjusted for the parser options that relax range validation.
@@ -1461,34 +1472,41 @@ func getRangeWithHash(expr string, r bounds, hashKey string, hashEnabled bool) (
 		return 0, errors.New("h expressions require hash option to be enabled")
 	}
 
+	return hashExprBits(expr, r, computeHash(hashKey))
+}
+
+// hashExprRange returns the range of hashPart, H or H(min-max), in expr.
+func hashExprRange(hashPart, expr string, r bounds) (start, end uint, err error) {
+	if hashPart == "H" {
+		return r.min, r.max, nil
+	}
+	if !strings.HasPrefix(hashPart, "H(") || !strings.HasSuffix(hashPart, ")") {
+		return 0, 0, fmt.Errorf("invalid H expression syntax: %q", expr)
+	}
+	rangeParts := strings.Split(hashPart[2:len(hashPart)-1], "-")
+	if len(rangeParts) != 2 {
+		return 0, 0, fmt.Errorf("invalid H range syntax: %q", expr)
+	}
+	start, err = mustParseInt(rangeParts[0])
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid range start in %q: %w", expr, err)
+	}
+	end, err = mustParseInt(rangeParts[1])
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid range end in %q: %w", expr, err)
+	}
+	return start, end, nil
+}
+
+// hashExprBits returns the bits an H expression selects under hashValue.
+func hashExprBits(expr string, r bounds, hashValue uint64) (uint64, error) {
 	// Parse H expression: H, H/N, H(min-max), H(min-max)/N
 	rangeAndStep := strings.Split(expr, "/")
 	hashPart := rangeAndStep[0]
 
-	// Parse range bounds from H or H(min-max)
-	var start, end uint
-	switch {
-	case hashPart == "H":
-		// Use field bounds
-		start, end = r.min, r.max
-	case strings.HasPrefix(hashPart, "H(") && strings.HasSuffix(hashPart, ")"):
-		// Parse explicit range H(min-max)
-		rangeSpec := hashPart[2 : len(hashPart)-1]
-		rangeParts := strings.Split(rangeSpec, "-")
-		if len(rangeParts) != 2 {
-			return 0, fmt.Errorf("invalid H range syntax: %q", expr)
-		}
-		var err error
-		start, err = mustParseInt(rangeParts[0])
-		if err != nil {
-			return 0, fmt.Errorf("invalid range start in %q: %w", expr, err)
-		}
-		end, err = mustParseInt(rangeParts[1])
-		if err != nil {
-			return 0, fmt.Errorf("invalid range end in %q: %w", expr, err)
-		}
-	default:
-		return 0, fmt.Errorf("invalid H expression syntax: %q", expr)
+	start, end, err := hashExprRange(hashPart, expr, r)
+	if err != nil {
+		return 0, err
 	}
 
 	if err := validateRangeBounds(start, end, r, expr); err != nil {
@@ -1510,9 +1528,6 @@ func getRangeWithHash(expr string, r bounds, hashKey string, hashEnabled bool) (
 	} else if len(rangeAndStep) > 2 {
 		return 0, fmt.Errorf("too many slashes: %q", expr)
 	}
-
-	// Compute hash-based offset
-	hashValue := computeHash(hashKey)
 
 	// Any written step selects values, H/1 included: like */1 it means every
 	// value of the range.

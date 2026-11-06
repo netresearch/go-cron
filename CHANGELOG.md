@@ -9,6 +9,21 @@ Originally based on [robfig/cron](https://github.com/robfig/cron).
 
 ## [Unreleased]
 
+### Added
+- `DescribeSpec` and `Parser.DescribeSpec` return an English description of a
+  spec, such as "at 2:05 am, 2:20 am, 2:35 am, and 2:50 am every day". Parse
+  options go through `WithParseOptions`. Wording, grammar and method:
+  `docs/DESCRIBE.md` (#205)
+- `DescribeSpec` describes the day of month, day of week, month and year
+  fields: "at 12 am on the 13th of the month when it falls on Friday",
+  "at 9 am on the 1st of the month in January thru March" (#205)
+- `DescribeSpec` describes `L`, `W`, `#`, `H`, descriptors and `@every`
+  intervals: "at a fixed minute past the hour; the hash key fixes the minute",
+  "every 1h30m from when scheduling started" (#205)
+- `DescribeSpecNote` and `Parser.DescribeSpecNote` spell out the values the
+  hash key picks; `SpecAnalysis.Description` and `SpecAnalysis.DescriptionNote`
+  carry the description and the note (#205)
+
 ### Planned for v2
 - Context-aware Job interface with graceful shutdown support
 
