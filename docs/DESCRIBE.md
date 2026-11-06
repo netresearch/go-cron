@@ -63,7 +63,7 @@ These words mean one thing across the rules, the grammar and the notes.
 
 | Term | Definition | Rules | Why |
 |---|---|---|---|
-| fixed | One value the hash key picks: "a fixed minute", "a fixed day of the month". It differs between keys and stays the same for one key | T4, T9, R7, D7, X4, H1, H2, H3, H4, H5, H6, H7, H8, H10, H12, H13, H14, H15, H16, H17, H18, H19, H20, H21, H22, H23, H24, N1, N2, N3, N4, N5, N7, N8 | It says what a reader can rely on: the value does not change. "hashed" only says how it was picked |
+| fixed | One value the hash key picks: "a fixed minute", "a fixed day of the month". It can differ between keys and stays the same for one key | T4, T9, R7, D7, X4, H1, H2, H3, H4, H5, H6, H7, H8, H10, H12, H13, H14, H15, H16, H17, H18, H19, H20, H21, H22, H23, H24, N1, N2, N3, N4, N5, N7, N8 | It says what a reader can rely on: the value does not change. "hashed" only says how it was picked |
 | hash key | The key every `H` in a spec takes its value from | H1, H6, N2, N3, N4 | The key picks the value, so it is the subject of the closing clause: "the hash key fixes the minute" |
 | hashed | Written with `H` and not one value: a hashed step (`H/15`), a wrapped hashed range (`H(50-10)/5`). A term of these rules: no description or note uses it | T9, H2, H14, H17, H19, H20, H22, H23, H24, N1, N2, N3, N5, N7, N8 | The rules need a name for the syntax; the reader needs what it does, which is "fixed", a count, or a list |
 | h, k, j, m, n, p | The letters a note uses for fixed values, in turn: "at minutes h and h+30, where h is a fixed minute from 0 to 29" | N2, N3, N5, N6 | The note can state every value a step selects without knowing the key |
