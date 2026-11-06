@@ -252,6 +252,7 @@ var describeGoldens = []struct {
 	{spec: "*/30 5 23-5 * * *", opts: []DescribeOption{withSeconds}, want: "at seconds 0 and 30 within minute 5 in every hour from midnight thru 5 am and during the 11 pm hour every day"},
 	{spec: "* 59 6-0 * * *", opts: []DescribeOption{withSeconds}, want: "every second for minute 59 during the midnight hour and in every hour from 6 am thru 11 pm every day"},
 	{spec: "* 0 23-5 * * *", opts: []DescribeOption{withSeconds}, want: "every second for minute 0 in every hour from midnight thru 5 am and during the 11 pm hour every day"},
+	{spec: "* 0 17-9 * * *", opts: []DescribeOption{withSeconds}, want: "every second for minute 0 in every hour from midnight thru 9 am and 5 pm thru 11 pm every day"},
 
 	// T3 first: a field that covers its range is every value, however written
 	{spec: "5 0-11,12-23 * * *", want: "at 5 minutes past the hour"},
@@ -452,6 +453,7 @@ var describeGoldens = []struct {
 	{spec: "H(50-0) 9 * * *", opts: []DescribeOption{withHash}, want: "at a fixed minute during the 9 am hour every day, either minute 0 or between minutes 50 and 59; the hash key fixes the minute"},
 	{spec: "H(50-0) * H * *", opts: []DescribeOption{withHash}, want: "at a fixed minute, either minute 0 or between minutes 50 and 59, past the hour on a fixed day of the month; the hash key fixes the minute and the day"},
 	{spec: "0 0 H(10-1) 2,4 *", opts: []DescribeOption{withHash}, want: "at midnight on a fixed day of the month in February and April, either the 1st or between the 10th and 31st; the hash key fixes the day"},
+	{spec: "H(50-0) * 30 * *", opts: []DescribeOption{withHash}, want: "at a fixed minute past the hour on the 30th of the month, either minute 0 or between minutes 50 and 59; the 30th runs only in months that have one; the hash key fixes the minute"},
 	{spec: "0 0 H(31-5) * *", opts: []DescribeOption{withHash}, want: "at midnight on a fixed day of the month, either between the 1st and 5th or on the 31st; the hash key fixes the day"},
 	{spec: "0 0 H(10-1) * *", opts: []DescribeOption{withHash}, want: "at midnight on a fixed day of the month, either the 1st or between the 10th and 31st; the hash key fixes the day"},
 	{spec: "0 9 * * H(6-1)", opts: []DescribeOption{withHash}, want: "at 9 am on a fixed day of the week between Saturday and Monday; the hash key fixes the day"},
@@ -495,6 +497,7 @@ var describeGoldens = []struct {
 	{spec: "H(0-9),H(5-29) * * * *", opts: []DescribeOption{withHash}, want: "1 or 2 runs in every hour, at a fixed minute between minutes 0 and 9 and a fixed minute between minutes 5 and 29; the hash key fixes both minutes"},
 	{spec: "H(0-9),H(20-29) * * * *", opts: []DescribeOption{withHash}, want: "2 runs in every hour, at a fixed minute between minutes 0 and 9 and a fixed minute between minutes 20 and 29; the hash key fixes both minutes"},
 	{spec: "0 H,H(0-5) * * *", opts: []DescribeOption{withHash}, want: "1 or 2 runs in every day, at the top of a fixed hour and a fixed hour between midnight and 5 am hours; the hash key fixes both hours"},
+	{spec: "0 H(20-23),H(1-5) * * *", opts: []DescribeOption{withHash}, want: "2 runs in every day, at the top of a fixed hour between the 1 am and 5 am hours and a fixed hour between the 8 pm and 11 pm hours; the hash key fixes both hours"},
 	{spec: "H,H(0-29) * * * * *", opts: []DescribeOption{withSecHash}, want: "1 or 2 runs in every minute, at a fixed second and a fixed second between seconds 0 and 29; the hash key fixes both seconds"},
 	// H22: a hashed hour step beside minutes
 	{spec: "0,30 H/6 * * *", opts: []DescribeOption{withHash}, want: "at minutes 0 and 30 during 4 hours in every day, 6 hours apart, starting from a fixed hour; the hash key fixes the hour"},
@@ -588,6 +591,7 @@ var describeGoldens = []struct {
 	{spec: "0 0 1,15,H * *", opts: []DescribeOption{withHash}, want: "minute 0, hour 0, day of month 1,15,H, month *, day of week *", literal: true},
 	{spec: "0 0 H,H(1-15) * *", opts: []DescribeOption{withHash}, want: "minute 0, hour 0, day of month H,H(1-15), month *, day of week *", literal: true},
 	{spec: "0 0 L,H * *", opts: []DescribeOption{WithParseOptions(Minute | Hour | Dom | Month | Dow | Extended | Hash)}, want: "minute 0, hour 0, day of month L,H, month *, day of week *", literal: true},
+	{spec: "0 0 * H/3,2 *", opts: []DescribeOption{withHash}, want: "minute 0, hour 0, day of month *, month H/3,2, day of week *", literal: true},
 	// H in the time fields without a form (H17)
 	{spec: "H(59-0) * * * *", opts: []DescribeOption{withHash}, want: "minute H(59-0), hour *, day of month *, month *, day of week *", literal: true},
 	{spec: "H/15,H/20 * * * *", opts: []DescribeOption{withHash}, want: "minute H/15,H/20, hour *, day of month *, month *, day of week *", literal: true},
@@ -598,6 +602,15 @@ var describeGoldens = []struct {
 	{spec: "5,H * * * *", opts: []DescribeOption{withHash}, want: "minute 5,H, hour *, day of month *, month *, day of week *", literal: true},
 	{spec: "30 9,H * * *", opts: []DescribeOption{withHash}, want: "minute 30, hour 9,H, day of month *, month *, day of week *", literal: true},
 	{spec: "0 H(9-17)/2 * * *", opts: []DescribeOption{withHash}, want: "minute 0, hour H(9-17)/2, day of month *, month *, day of week *", literal: true},
+	{spec: "H,5 0 * * * *", opts: []DescribeOption{withSecHash}, want: "second H,5, minute 0, hour *, day of month *, month *, day of week *", literal: true},
+	{spec: "H,5 H * * *", opts: []DescribeOption{withHash}, want: "minute H,5, hour H, day of month *, month *, day of week *", literal: true},
+	{spec: "H/15 * */2 * * *", opts: []DescribeOption{withSecHash}, want: "second H/15, minute *, hour */2, day of month *, month *, day of week *", literal: true},
+	{spec: "H 30 H * * *", opts: []DescribeOption{withSecHash}, want: "second H, minute 30, hour H, day of month *, month *, day of week *", literal: true},
+	{spec: "H H/15 * * * *", opts: []DescribeOption{withSecHash}, want: "second H, minute H/15, hour *, day of month *, month *, day of week *", literal: true},
+	{spec: "H 5-10 9-17 * * *", opts: []DescribeOption{withSecHash}, want: "second H, minute 5-10, hour 9-17, day of month *, month *, day of week *", literal: true},
+	{spec: "30 H(20-23),H(1-5) * * *", opts: []DescribeOption{withHash}, want: "minute 30, hour H(20-23),H(1-5), day of month *, month *, day of week *", literal: true},
+	{spec: "0 H/6,9 * * *", opts: []DescribeOption{withHash}, want: "minute 0, hour H/6,9, day of month *, month *, day of week *", literal: true},
+	{spec: "H(59-0) H/6 * * *", opts: []DescribeOption{withHash}, want: "minute H(59-0), hour H/6, day of month *, month *, day of week *", literal: true},
 }
 
 // describeNoteGoldens are the binding notes (docs/DESCRIBE.md, N1–N8).
