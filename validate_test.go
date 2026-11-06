@@ -1190,3 +1190,22 @@ func TestCronValidateSpecNilParser(t *testing.T) {
 		t.Errorf("expected error mentioning parser is nil, got: %v", err)
 	}
 }
+
+// TestValidateSpecPanicsOnInvalidOptions checks that ValidateSpec and
+// AnalyzeSpec panic on options no parser accepts, as NewParser does.
+func TestValidateSpecPanicsOnInvalidOptions(t *testing.T) {
+	bad := SecondOptional | Minute | Hour | Dom | Month | DowOptional
+	for name, call := range map[string]func(){
+		"ValidateSpec": func() { _ = ValidateSpec("0 0 * * *", bad) },
+		"AnalyzeSpec":  func() { _ = AnalyzeSpec("0 0 * * *", bad) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			defer func() {
+				if recover() == nil {
+					t.Errorf("%s did not panic on invalid options", name)
+				}
+			}()
+			call()
+		})
+	}
+}

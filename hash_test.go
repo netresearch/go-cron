@@ -4,6 +4,7 @@
 package cron
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -323,5 +324,21 @@ func TestHashFieldConcurrent(t *testing.T) {
 
 	for range 10 {
 		<-done
+	}
+}
+
+// TestHashFieldMalformed checks the error each malformed H form returns.
+func TestHashFieldMalformed(t *testing.T) {
+	parser := NewParser(Minute | Hour | Dom | Month | Dow | Hash)
+	for _, tt := range []struct{ spec, want string }{
+		{"H(5 * * * *", "invalid H expression syntax"},
+		{"H(5) * * * *", "invalid H range syntax"},
+		{"H(a-5) * * * *", "invalid range start"},
+		{"H(5-b) * * * *", "invalid range end"},
+	} {
+		_, err := parser.ParseWithHashKey(tt.spec, "job1")
+		if err == nil || !strings.Contains(err.Error(), tt.want) {
+			t.Errorf("ParseWithHashKey(%q) error = %v, want one containing %q", tt.spec, err, tt.want)
+		}
 	}
 }
