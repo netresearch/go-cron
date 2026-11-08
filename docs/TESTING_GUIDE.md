@@ -351,21 +351,26 @@ func TestDSTSpringForward(t *testing.T) {
         cron.WithLocation(nyc),
     )
 
-    var fired bool
     // This time doesn't exist during spring forward
-    c.AddFunc("30 2 * * *", func() { fired = true })
+    ran := make(chan time.Time, 1)
+    c.AddFunc("30 2 * * *", func() { ran <- fakeClock.Now() })
 
     c.Start()
     defer c.Stop()
     fakeClock.BlockUntil(1)
 
-    // Advance past DST transition
-    fakeClock.Advance(2 * time.Hour)
-    time.Sleep(10 * time.Millisecond)
+    // Advance to 3:30 EDT: 1:30 EST plus one hour of elapsed time
+    fakeClock.Advance(time.Hour)
 
-    // Job should have run immediately after the skip
-    if !fired {
-        t.Error("job should have fired after DST skip")
+    // The job runs at 3:30, shifted by the one-hour gap
+    want := time.Date(2024, 3, 10, 3, 30, 0, 0, nyc)
+    select {
+    case got := <-ran:
+        if !got.Equal(want) {
+            t.Errorf("expected job at %v, got %v", want, got)
+        }
+    case <-time.After(time.Second):
+        t.Fatal("job did not fire after DST skip")
     }
 }
 ```
