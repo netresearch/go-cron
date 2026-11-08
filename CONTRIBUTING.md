@@ -154,6 +154,28 @@ git commit --amend -s --no-edit
 git rebase --signoff main
 ```
 
+### Signed Commits
+
+The `main` branch accepts only commits with a verified signature. This is a
+separate requirement from the DCO sign-off above: `-s` adds a text trailer,
+whereas `-S` signs the commit with a GPG, SSH or S/MIME key that GitHub can
+verify. The signature proves who made the commit and so prevents impersonation
+(see [BRANCH_PROTECTION.md](.github/BRANCH_PROTECTION.md)).
+
+Set up signing once, as described in GitHub's
+[commit signature verification](https://docs.github.com/en/authentication/managing-commit-signature-verification)
+guide, then sign and sign off each commit:
+
+```bash
+git commit -S -s -m "feat(parser): add timezone alias support"
+
+# Sign and sign off all commits on your branch
+git rebase --exec 'git commit --amend --no-edit -S -s' main
+```
+
+If you cannot sign your commits, say so in the pull request. A maintainer can
+then sign your commits with their own key; you stay the commit author.
+
 ### Testing
 
 - Write tests for new functionality
