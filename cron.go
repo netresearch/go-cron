@@ -363,7 +363,8 @@ type Entry struct {
 	heapIndex int
 
 	// runImmediately is an internal flag set by WithRunImmediately().
-	// When true, the entry will be scheduled to run immediately upon registration.
+	// When true, the entry is scheduled to run at the scheduler's current time when it is
+	// first scheduled: at registration while running, otherwise when the scheduler starts.
 	runImmediately bool
 
 	// immediateDue is set while Next holds the run-immediately time, so the
@@ -652,8 +653,10 @@ func WithPrev(prev time.Time) JobOption {
 	}
 }
 
-// WithRunImmediately causes the job to run immediately upon registration,
-// then follow the normal schedule thereafter.
+// WithRunImmediately causes the job's first run to happen as soon as the
+// scheduler is running, then follow the normal schedule thereafter. A job
+// added while the Cron is running runs at registration; a job added before
+// Start or Run first runs when the scheduler starts.
 // This is useful for:
 //   - Initial sync: running a sync job once at startup before regular schedule
 //   - Health checks: ensuring service connectivity is verified immediately
