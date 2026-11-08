@@ -383,6 +383,10 @@ Spring Forward (clocks skip an hour):
   - Example: A 2:30 AM job during US spring DST runs at 3:30 AM
   - Prev reports that run as well, so it agrees with Next
   - A job at the first skipped time (2:00 AM) runs at the transition (3:00 AM)
+  - Several skipped times of one job merge into one run at the earliest of
+    them: every 15 minutes runs once at 3:00 AM
+  - With the DSTSkip parse option (part of RobfigCompat), jobs in the gap are
+    skipped instead, as in robfig/cron
 
 Fall Back (clocks repeat an hour):
   - A job at fixed times (30 1 * * *, 0,30 1 * * *) runs each time once: during

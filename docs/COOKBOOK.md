@@ -486,23 +486,27 @@ func TestDSTBehavior(t *testing.T) {
         cron.WithLocation(loc),
     )
 
-    var executionTime time.Time
+    ran := make(chan time.Time, 1)
     c.AddFunc("30 2 * * *", func() { // 2:30 AM
-        executionTime = clock.Now()
+        ran <- clock.Now()
     })
 
     c.Start()
     defer c.Stop()
 
     clock.BlockUntil(1)
-    clock.Advance(2 * time.Hour) // Cross the DST boundary
+    clock.Advance(31 * time.Minute) // 1:59 EST + 31 minutes = 3:30 EDT
 
-    time.Sleep(100 * time.Millisecond)
-
-    // During spring DST, 2:30 AM doesn't exist
-    // Job runs at 3:30 AM (shifted by the one-hour gap)
-    if executionTime.Hour() != 3 {
-        t.Errorf("Expected job to run at 3 AM, got %v", executionTime)
+    // During spring DST, 2:30 AM doesn't exist.
+    // The job runs at 3:30 AM (shifted by the one-hour gap).
+    want := time.Date(2024, 3, 10, 3, 30, 0, 0, loc)
+    select {
+    case got := <-ran:
+        if !got.Equal(want) {
+            t.Errorf("expected job to run at %v, got %v", want, got)
+        }
+    case <-time.After(time.Second):
+        t.Fatal("job did not run")
     }
 }
 

@@ -116,14 +116,14 @@ Use `entry.Run()` instead of `entry.Job.Run()` to ensure chain decorators are re
 
 **Before (robfig/cron):**
 ```
-Schedule: "0 30 2 * * *" (2:30 AM)
+Schedule: "30 2 * * *" (2:30 AM)
 DST transition: 2:00 AM → 3:00 AM
 Result: Job SKIPPED (time 2:30 never exists)
 ```
 
 **After (netresearch/go-cron):**
 ```
-Schedule: "0 30 2 * * *" (2:30 AM)
+Schedule: "30 2 * * *" (2:30 AM)
 DST transition: 2:00 AM → 3:00 AM
 Result: Job runs at 3:30 AM (in the hour after the transition)
 ```
@@ -429,9 +429,10 @@ func TestDSTBehavior(t *testing.T) {
 
     next := schedule.Next(before)
 
-    // Should be 3:30 AM (shifted by the one-hour gap), not next day
-    if next.Hour() != 3 || next.Minute() != 30 || next.Day() != 10 {
-        t.Errorf("expected 3:30 AM same day, got %v", next)
+    // Should be 3:30 AM the same day (shifted by the one-hour gap)
+    want := time.Date(2024, 3, 10, 3, 30, 0, 0, loc)
+    if !next.Equal(want) {
+        t.Errorf("expected %v, got %v", want, next)
     }
 }
 ```

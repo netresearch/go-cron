@@ -216,7 +216,7 @@ This library handles DST transitions as follows:
 
 | Transition | Behavior |
 |------------|----------|
-| **Spring Forward** (hour skipped) | A skipped time runs once, shifted by the length of the gap (2:30 runs at 3:30) |
+| **Spring Forward** (hour skipped) | A job runs once per gap, at its earliest skipped time shifted by the length of the gap (2:30 runs at 3:30; every 15 minutes runs once at 3:00). `DSTSkip` skips the gap instead |
 | **Fall Back** (hour repeats) | Fixed times run once (in the second occurrence only if the entry did not run them in the first); hourly or more frequent jobs keep their rhythm where a full hour repeats ([limits](docs/DST_HANDLING.md)) |
 | **Midnight DST** (midnight doesn't exist) | Automatically normalized to valid time |
 

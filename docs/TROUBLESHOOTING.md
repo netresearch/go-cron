@@ -250,7 +250,7 @@ During "spring forward" (e.g., 2 AM → 3 AM), the 2:xx hour doesn't exist.
 
 ```go
 // Scheduled for 2:30 AM on DST transition day
-// Actually runs at ~3:00 AM when clock jumps
+// Runs at 3:30 AM that day, shifted by the one-hour gap
 c.AddFunc("30 2 * * *", myJob)
 ```
 
