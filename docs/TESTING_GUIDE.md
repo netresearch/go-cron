@@ -546,7 +546,7 @@ wg.Add(2)  // Not 1!
 
 **Problem:** `panic: close of closed channel` in a job that signals the test by closing a channel.
 
-**Cause:** `WithRunImmediately()` runs the job once at registration, and an `@every` schedule keeps running it after that. The second run closes the channel again.
+**Cause:** a recurring schedule runs the job more than once, and the second run closes the channel again. `WithRunImmediately()` is not required; it only moves the first run forward (to registration, or to `Start` for a job added before it), so the panic comes one interval sooner.
 
 **Solution:** Guard the close with `sync.Once`, as the tests in `cron_test.go` do:
 
