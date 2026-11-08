@@ -173,9 +173,6 @@ git commit -S -s -m "feat(parser): add timezone alias support"
 git rebase --exec 'git commit --amend --no-edit -S -s' main
 ```
 
-If you cannot sign your commits, say so in the pull request. A maintainer can
-then sign your commits with their own key; you stay the commit author.
-
 ### Testing
 
 - Write tests for new functionality
