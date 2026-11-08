@@ -655,8 +655,10 @@ func WithPrev(prev time.Time) JobOption {
 
 // WithRunImmediately causes the job's first run to happen as soon as the
 // scheduler is running, then follow the normal schedule thereafter. A job
-// added while the Cron is running runs at registration; a job added before
-// Start or Run first runs when the scheduler starts.
+// added while the Cron is running is scheduled at registration; a job added
+// before Start or Run is first scheduled when the scheduler starts. The run
+// itself is asynchronous: AddFunc returns before the job starts, so a caller
+// that needs the first run finished must synchronize with the job.
 // This is useful for:
 //   - Initial sync: running a sync job once at startup before regular schedule
 //   - Health checks: ensuring service connectivity is verified immediately
