@@ -542,6 +542,24 @@ time.Sleep(10 * time.Millisecond)  // Let goroutine execute
 wg.Add(2)  // Not 1!
 ```
 
+### Close of Closed Channel
+
+**Problem:** `panic: close of closed channel` in a job that signals the test by closing a channel.
+
+**Cause:** a recurring schedule runs the job more than once, and the second run closes the channel again. `WithRunImmediately()` is not required; it only moves the first run forward (to registration, or to `Start` for a job added before it), so the panic comes one interval sooner.
+
+**Solution:** Guard the close with `sync.Once`, as the tests in `cron_test.go` do:
+
+```go
+started := make(chan struct{})
+var startOnce sync.Once
+
+c.AddFunc("@every 1s", func() {
+    startOnce.Do(func() { close(started) })
+    // ...
+}, cron.WithRunImmediately())
+```
+
 ### Race Conditions
 
 **Problem:** Test passes sometimes, fails other times.
