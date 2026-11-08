@@ -1362,8 +1362,12 @@ before giving up. Default is 5 years.
 func WithRunImmediately() JobOption
 ```
 
-WithRunImmediately causes the job to run immediately upon registration,
-then follow the normal schedule thereafter.
+WithRunImmediately causes the job's first run to happen as soon as the
+scheduler is running, then follow the normal schedule thereafter. A job
+added while the Cron is running is scheduled at registration; a job added
+before Start or Run is first scheduled when the scheduler starts. The run
+itself is asynchronous: AddFunc returns before the job starts, so a caller
+that needs the first run finished must synchronize with the job.
 
 #### func WithRunOnce
 
