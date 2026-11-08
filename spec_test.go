@@ -118,7 +118,7 @@ func TestNext(t *testing.T) {
 		{"Mon Jul 9 23:35 2012", "0 0 0 29 Feb ?", "Mon Feb 29 00:00 2016"},
 
 		// Daylight savings time 2am EST (-5) -> 3am EDT (-4)
-		// ISC cron behavior: Jobs in skipped DST hour run immediately at 3am
+		// A job in the skipped DST hour runs shifted by the one-hour gap: 2:30 at 3:30
 		{"2012-03-11T00:00:00-0500", "TZ=America/New_York 0 30 2 11 Mar ?", "2012-03-11T03:30:00-0400"},
 
 		// hourly job

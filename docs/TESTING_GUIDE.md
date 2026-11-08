@@ -363,7 +363,7 @@ func TestDSTSpringForward(t *testing.T) {
     fakeClock.Advance(2 * time.Hour)
     time.Sleep(10 * time.Millisecond)
 
-    // Job should have run immediately after the skip
+    // Job should have run at 3:30, shifted by the one-hour gap
     if !fired {
         t.Error("job should have fired after DST skip")
     }

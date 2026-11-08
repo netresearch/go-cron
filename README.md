@@ -25,7 +25,7 @@ A production-grade cron job scheduler for Go — drop-in replacement for [robfig
 |------|----------|-----------|
 | TZ= parsing | Panics on malformed input | Fixed (#554, #555) |
 | Chain decorators | `Entry.Run()` bypasses chains | Properly invokes wrappers (#551) |
-| DST spring-forward | Jobs silently skipped | Runs immediately (ISC behavior, #541) |
+| DST spring-forward | Jobs silently skipped | Runs once, shifted by the length of the gap (2:30 runs at 3:30) |
 | DOM/DOW logic | OR (confusing) | AND (logical, consistent) |
 | Runtime updates | Remove + re-add | `UpdateSchedule`, `UpsertJob` |
 | Pause/Resume | None | `PauseEntry`, `ResumeEntry` |
@@ -212,11 +212,11 @@ c := cron.New(cron.WithLocation(nyc))
 
 ### Daylight Saving Time (DST) Handling
 
-This library implements ISC cron-compatible DST behavior:
+This library runs every scheduled time across DST transitions:
 
 | Transition | Behavior |
 |------------|----------|
-| **Spring Forward** (hour skipped) | Jobs in skipped hour run immediately after transition |
+| **Spring Forward** (hour skipped) | A skipped time runs once, shifted by the length of the gap (2:30 runs at 3:30) |
 | **Fall Back** (hour repeats) | Fixed times run once (in the second occurrence only if the entry did not run them in the first); hourly or more frequent jobs keep their rhythm where a full hour repeats ([limits](docs/DST_HANDLING.md)) |
 | **Midnight DST** (midnight doesn't exist) | Automatically normalized to valid time |
 

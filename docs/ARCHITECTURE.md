@@ -375,7 +375,7 @@ User Input: "CRON_TZ=Asia/Tokyo 0 9 * * *"
 
 ### DST Handling
 
-Jobs scheduled during DST leap-ahead are run immediately after the skipped hour (ISC cron-compatible behavior).
+A time that a DST leap-ahead skips runs once, shifted by the length of the gap (2:30 runs at 3:30). See [DST_HANDLING.md](DST_HANDLING.md) and ADR-016.
 
 ---
 

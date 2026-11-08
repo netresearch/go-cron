@@ -500,7 +500,7 @@ func TestDSTBehavior(t *testing.T) {
     time.Sleep(100 * time.Millisecond)
 
     // During spring DST, 2:30 AM doesn't exist
-    // Job should run at 3:00 AM (ISC cron behavior)
+    // Job runs at 3:30 AM (shifted by the one-hour gap)
     if executionTime.Hour() != 3 {
         t.Errorf("Expected job to run at 3 AM, got %v", executionTime)
     }

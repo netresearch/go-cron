@@ -9,7 +9,7 @@ DST transitions create two problematic scenarios for cron schedulers:
 1. **Spring Forward** (clock jumps ahead): An hour is skipped, making some scheduled times non-existent
 2. **Fall Back** (clock repeats): An hour occurs twice, creating ambiguity
 
-This library implements ISC cron-compatible behavior to handle these cases predictably.
+This library handles these cases predictably: no scheduled time is lost, and none runs twice.
 
 ## Spring Forward (Clock Jumps Ahead)
 
@@ -50,9 +50,9 @@ schedule also matches after the gap, the job runs once at that time.
 
 `Next` and `Prev` in `spec.go` first find the next or previous wall time that exists. They then walk the zone transitions between the start time and that result with `time.Time.ZoneBounds`. A transition that moves the clock forward is a gap; `gapRun` returns its run, and `Next` or `Prev` returns it when it comes first.
 
-### Why ISC Behavior?
+### Why Run Skipped Times?
 
-The original `robfig/cron` silently skipped jobs scheduled during spring-forward transitions. This fork implements ISC cron behavior (used by most Unix systems) where skipped-hour jobs run immediately, ensuring no scheduled work is lost.
+The original `robfig/cron` silently skipped jobs scheduled during spring-forward transitions. This fork runs each skipped time once, shifted by the length of the gap, so no scheduled work is lost. Vixie cron also runs such jobs, but right at the transition (a 2:30 job at about 3:00); go-cron keeps the minute (ADR-016).
 
 To keep the robfig/cron behavior, add the `DSTSkip` parse option (or
 `RobfigCompat`, which includes it). `Next` and `Prev` then skip runs in the gap.

@@ -82,7 +82,7 @@ We focus on being a better robfig/cron, not a different library.
 | Change | robfig/cron | This Fork | Impact |
 |--------|-------------|-----------|--------|
 | DOM/DOW matching | OR logic | AND logic | "Friday the 13th" patterns now work |
-| DST spring-forward | Jobs skipped | Jobs run immediately | More reliable scheduling |
+| DST spring-forward | Jobs skipped | Jobs run once, shifted by the gap | More reliable scheduling |
 | `Entry.Run()` | Bypasses chain | Respects chain | Wrappers always apply |
 | Invalid TZ= | Panics | Returns error | No production crashes |
 
@@ -150,7 +150,7 @@ This is consistent with how all other cron fields work (minute AND hour AND mont
 ```
 2:00 AM → 3:00 AM (2:00-2:59 doesn't exist)
 ```
-Jobs scheduled during the skipped hour run immediately at 3:00 AM.
+Jobs scheduled during the skipped hour run once, shifted by the length of the gap: 2:00 runs at 3:00, 2:30 at 3:30.
 
 **Fall Back (hour repeats):**
 ```

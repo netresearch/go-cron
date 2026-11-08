@@ -369,19 +369,20 @@ For example:
 
 The prefix "TZ=(TIME ZONE)" is also supported for legacy compatibility.
 
-Jobs scheduled during daylight-savings leap-ahead transitions will run
-immediately after the skipped hour (ISC cron-compatible behavior).
+Jobs scheduled during daylight-savings leap-ahead transitions run once,
+shifted by the length of the gap (2:30 runs at 3:30).
 
 # Daylight Saving Time (DST) Handling
 
-This library follows ISC cron-compatible DST behavior. Understanding these edge
+This library runs every scheduled time across DST transitions. Understanding these edge
 cases is critical for time-sensitive scheduling.
 
 Spring Forward (clocks skip an hour):
-  - Jobs scheduled during the skipped hour run immediately after the transition
+  - Jobs scheduled during the skipped hour run once, shifted by the length of
+    the gap
   - Example: A 2:30 AM job during US spring DST runs at 3:30 AM
   - Prev reports that run as well, so it agrees with Next
-  - Jobs scheduled exactly at the transition boundary may run immediately
+  - A job at the first skipped time (2:00 AM) runs at the transition (3:00 AM)
 
 Fall Back (clocks repeat an hour):
   - A job at fixed times (30 1 * * *, 0,30 1 * * *) runs each time once: during
@@ -405,7 +406,7 @@ Midnight Doesn't Exist:
   - The same DST handling rules apply, but at 30-minute boundaries
 
 ⚠️ Important Edge Cases:
-  - Jobs during spring-forward gap: Run immediately after transition
+  - Jobs during spring-forward gap: run once, shifted by the length of the gap
   - Jobs during fall-back repeat: fixed times run once, hourly or more frequent
     jobs keep their rhythm (with the limits listed under Fall Back)
   - Multi-timezone systems: Each job uses its configured timezone independently

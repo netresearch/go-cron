@@ -62,7 +62,7 @@ While the API is compatible, there are knowingly accepted behavior changes that 
 |-------|----------------|---------------------|
 | **TZ= parsing panics** | Crashes on empty or malformed timezone | Returns descriptive error |
 | **Entry.Run() bypasses chains** | `entry.Run()` calls job directly | `entry.Run()` honors chain wrappers |
-| **DST spring-forward** | Jobs silently skipped | Jobs run immediately after transition (ISC behavior) |
+| **DST spring-forward** | Jobs silently skipped | Jobs run once, shifted by the length of the gap (2:30 runs at 3:30) |
 | **DOM/DOW logic** | OR when both restricted | AND (logical, consistent with other fields) |
 | **Day-of-week `N/step`** | Runs up to Saturday (6), so `1/2` is MON,WED,FRI | Runs up to Sunday as 7, so `1/2` also selects Sunday |
 | **NewParser with no fields** | Panics | Returns error |
@@ -128,7 +128,7 @@ DST transition: 2:00 AM → 3:00 AM
 Result: Job runs at 3:30 AM (in the hour after the transition)
 ```
 
-This follows ISC cron behavior used by most Unix systems.
+Vixie cron runs such a job right at the transition (about 3:00); go-cron keeps the minute (ADR-016).
 
 #### DOM/DOW AND Logic (#277)
 
@@ -429,9 +429,9 @@ func TestDSTBehavior(t *testing.T) {
 
     next := schedule.Next(before)
 
-    // Should be 3:00 AM (immediately after transition), not next day
-    if next.Hour() != 3 || next.Day() != 10 {
-        t.Errorf("expected 3:00 AM same day, got %v", next)
+    // Should be 3:30 AM (shifted by the one-hour gap), not next day
+    if next.Hour() != 3 || next.Minute() != 30 || next.Day() != 10 {
+        t.Errorf("expected 3:30 AM same day, got %v", next)
     }
 }
 ```
