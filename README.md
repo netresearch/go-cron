@@ -212,7 +212,7 @@ c := cron.New(cron.WithLocation(nyc))
 
 ### Daylight Saving Time (DST) Handling
 
-This library runs every scheduled time across DST transitions:
+This library handles DST transitions as follows:
 
 | Transition | Behavior |
 |------------|----------|

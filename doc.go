@@ -374,7 +374,7 @@ shifted by the length of the gap (2:30 runs at 3:30).
 
 # Daylight Saving Time (DST) Handling
 
-This library runs every scheduled time across DST transitions. Understanding these edge
+This library handles DST transitions as described below. Understanding these edge
 cases is critical for time-sensitive scheduling.
 
 Spring Forward (clocks skip an hour):

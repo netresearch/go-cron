@@ -9,7 +9,7 @@ DST transitions create two problematic scenarios for cron schedulers:
 1. **Spring Forward** (clock jumps ahead): An hour is skipped, making some scheduled times non-existent
 2. **Fall Back** (clock repeats): An hour occurs twice, creating ambiguity
 
-This library handles these cases predictably: no scheduled time is lost, and none runs twice.
+This library handles these cases predictably, as described below.
 
 ## Spring Forward (Clock Jumps Ahead)
 
@@ -52,7 +52,7 @@ schedule also matches after the gap, the job runs once at that time.
 
 ### Why Run Skipped Times?
 
-The original `robfig/cron` silently skipped jobs scheduled during spring-forward transitions. This fork runs each skipped time once, shifted by the length of the gap, so no scheduled work is lost. Vixie cron also runs such jobs, but right at the transition (a 2:30 job at about 3:00); go-cron keeps the minute (ADR-016).
+The original `robfig/cron` silently skipped jobs scheduled during spring-forward transitions. This fork runs a job whose times fall in the gap once, at the earliest skipped time shifted by the length of the gap, so the job still runs that day. Vixie cron also runs such jobs, but right at the transition (a 2:30 job at about 3:00); go-cron keeps the minute (ADR-016).
 
 To keep the robfig/cron behavior, add the `DSTSkip` parse option (or
 `RobfigCompat`, which includes it). `Next` and `Prev` then skip runs in the gap.
