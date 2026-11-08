@@ -159,8 +159,8 @@ git rebase --signoff main
 The `main` branch accepts only commits with a verified signature. This is a
 separate requirement from the DCO sign-off above: `-s` adds a text trailer,
 whereas `-S` signs the commit with a GPG, SSH or S/MIME key that GitHub can
-verify. Signed commits make the release provenance traceable to the people who
-wrote the code.
+verify. The signature proves who made the commit and so prevents impersonation
+(see [BRANCH_PROTECTION.md](.github/BRANCH_PROTECTION.md)).
 
 Set up signing once, as described in GitHub's
 [commit signature verification](https://docs.github.com/en/authentication/managing-commit-signature-verification)
