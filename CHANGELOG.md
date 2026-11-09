@@ -23,6 +23,14 @@ Originally based on [robfig/cron](https://github.com/robfig/cron).
 - `DescribeSpecNote` and `Parser.DescribeSpecNote` spell out the values the
   hash key picks; `SpecAnalysis.Description` and `SpecAnalysis.DescriptionNote`
   carry the description and the note (#205)
+- `DescribeSpec` names a spec's `TZ=`/`CRON_TZ=` zone and its shift from UTC
+  and from the scheduler's zone, given with `WithSchedulerLocation`: "at 2:30
+  am every day New York time, 5 hours behind UTC, 4 hours from March to
+  November"; `DescribeSpecNote` names the windows where two moving zones
+  differ (#205)
+- `Parser.AnalyzeSpec` analyzes a spec with the parser's own settings and
+  takes `WithSchedulerLocation`, so `SpecAnalysis.Description` gives a written
+  zone's shift from the Cron's zone, not the host's (#205)
 
 ### Planned for v2
 - Context-aware Job interface with graceful shutdown support

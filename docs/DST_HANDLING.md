@@ -167,6 +167,25 @@ c.AddFunc(`CRON_TZ='Europe/London' 0 9 * * *`, job)
 2. `WithLocation()` option on Cron instance
 3. `time.Local` (system default)
 
+### Where time zone data comes from
+
+go-cron loads a zone with Go's `time.LoadLocation`, which reads the first of
+these that has the zone:
+
+1. The directory or uncompressed zip file named by the `ZONEINFO` environment
+   variable
+2. The system's directories (`/usr/share/zoneinfo/` first on Unix)
+3. The copy embedded in a program that imports `time/tzdata`; go-cron does not
+   import it
+4. `$GOROOT/lib/time/zoneinfo.zip`
+
+`ZONEINFO` gives a program current zone data without a rebuild. It must hold a
+complete set: a zone missing there is read from the next source, which can be
+older. Go reads the variable once, at the first lookup.
+
+A running entry keeps the `Location` it was parsed with until it is parsed
+again or the process restarts. `DescribeSpec` and `Next` read the same data.
+
 ### Interaction with SpecSchedule.Location
 
 When a schedule is parsed:

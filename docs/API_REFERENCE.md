@@ -2004,11 +2004,15 @@ ParseOption represents parser configuration flags. `AlignEvery` changes only wha
 type DescribeOption func(*describeConfig)
 
 func WithParseOptions(o ParseOption) DescribeOption
+func WithSchedulerLocation(loc *time.Location) DescribeOption
 ```
 
-DescribeOption configures the package-level `DescribeSpec` and `DescribeSpecNote`. `WithParseOptions`
-sets their parse options; several calls OR together. The `Parser` methods use the
-parser's own settings and ignore it.
+DescribeOption configures `DescribeSpec` and `DescribeSpecNote`. `WithParseOptions`
+sets the parse options of the package functions; several calls OR together. The `Parser` methods use the
+parser's own settings and ignore it. `WithSchedulerLocation` names the zone the
+scheduler runs in, so a description can give a written zone's shift from it. The
+default, and nil, is `time.Local`, as `cron.New`. Both the package functions and
+the `Parser` methods honor it.
 
 ---
 
@@ -2692,7 +2696,9 @@ type SpecAnalysis struct {
 SpecAnalysis contains detailed information about a parsed cron specification.
 Returned by `AnalyzeSpec`. `Description` and `DescriptionNote` are what
 `DescribeSpec` and `DescribeSpecNote` give for the spec; both are empty when
-it is invalid.
+it is invalid. For a spec with a written zone they give its shift from the
+scheduler's zone, by default `time.Local`; `Parser.AnalyzeSpec` takes
+`WithSchedulerLocation` to name another.
 
 ---
 
@@ -2995,18 +3001,39 @@ The seed (e.g., job name) produces deterministic, distributed scheduling times.
 for other field counts it is empty. `NextRun` reflects the chosen values. See
 [Hash expressions](#hash-expressions-h).
 
+### Parser.AnalyzeSpec
+
+```go
+func (p Parser) AnalyzeSpec(spec string, opts ...DescribeOption) SpecAnalysis
+```
+
+Parser.AnalyzeSpec analyzes a spec as the parser parses it, with the parser's
+own settings, as its hash key. `AnalyzeSpec` and `AnalyzeSpecWithHash` call it
+with the default scheduler zone, `time.Local`. Pass `WithSchedulerLocation`
+when the spec will run in a Cron on another zone, so that `Description` gives
+a written zone's shift from that zone and not from the host's.
+`WithParseOptions` is ignored.
+
+```go
+result := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow).
+	AnalyzeSpec("CRON_TZ=Europe/Berlin 0 0 * * *", cron.WithSchedulerLocation(c.Location()))
+```
+
 ### DescribeSpec
 
 ```go
 func DescribeSpec(spec string, opts ...DescribeOption) (string, error)
 func (p Parser) DescribeSpec(spec string, opts ...DescribeOption) (string, error)
 func WithParseOptions(o ParseOption) DescribeOption
+func WithSchedulerLocation(loc *time.Location) DescribeOption
 ```
 
 DescribeSpec returns an English description of a cron expression, or the parse
 error. The package function parses as `AnalyzeSpec` does (the standard parser
 unless `WithParseOptions` is given; several calls OR together); the `Parser`
-method uses the parser's own settings and ignores `WithParseOptions`. Times are on the 12-hour clock. Descriptions carry no time zone. A
+method uses the parser's own settings and ignores `WithParseOptions`. Times are on the 12-hour clock. A spec with a
+`TZ=`/`CRON_TZ=` prefix names its zone, the zone's shift from UTC and its shift
+from the scheduler's zone (`WithSchedulerLocation`). A
 valid spec always gets a description; one that never runs is "never runs",
 but past 8,192 hash values each `H` is tested on its own, so a spec whose `H`
 values never fit together can read as running.
@@ -3030,6 +3057,8 @@ desc, err = cron.DescribeSpec("0 9 13 * 5")
 // "at 9 am on the 13th of the month when it falls on Friday"
 desc, err = cron.DescribeSpec("@weekly")
 // "at 12 am on Sunday"
+desc, err = cron.DescribeSpec("CRON_TZ=America/New_York 30 2 * * *", cron.WithSchedulerLocation(time.UTC))
+// "at 2:30 am every day New York time, 5 hours behind UTC, 4 hours from March to November"
 ```
 
 ### DescribeSpecNote
@@ -3040,8 +3069,11 @@ func (p Parser) DescribeSpecNote(spec string, opts ...DescribeOption) (string, e
 ```
 
 DescribeSpecNote spells out the values the hash key picks, which the
-description of a hashed step or fixed day leaves as "a fixed …". It is "" unless a
-field has a hashed step or a fixed day of the month, and parses as
+description of a hashed step or fixed day leaves as "a fixed …". For a spec
+with a written zone it names the windows in which that zone is off the shift
+the description states. It is "" unless a
+field has a hashed step or a fixed day of the month, or the zone has such a
+window, and parses as
 `DescribeSpec` does. The note rules and grammar are in
 [DESCRIBE.md](DESCRIBE.md).
 
@@ -3051,6 +3083,9 @@ note, err := cron.DescribeSpecNote("H/15 * * * *", cron.WithParseOptions(cron.Mi
 // "at minutes h, h+15, h+30, and h+45 past the hour, where h is a fixed minute from 0 to 14"
 note, err = cron.DescribeSpecNote("0 9 * * H/2", cron.WithParseOptions(cron.Minute|cron.Hour|cron.Dom|cron.Month|cron.Dow|cron.Hash))
 // "on Sunday, Tuesday, Thursday, and Saturday; or Monday, Wednesday, and Friday, depending on the hash key"
+newYork, _ := time.LoadLocation("America/New_York")
+note, err = cron.DescribeSpecNote("CRON_TZ=Europe/Berlin 0 0 * * *", cron.WithSchedulerLocation(newYork))
+// "Berlin is 5 hours ahead of New York from March 14 to 28 and from October 31 to November 7, between the two zones' clock changes" (in 2027)
 ```
 
 ### WorkflowExecutionID
