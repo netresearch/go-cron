@@ -15,6 +15,7 @@ import (
 
 type describeConfig struct {
 	parse []ParseOption
+	sched *time.Location // nil means time.Local
 }
 
 // DescribeOption configures DescribeSpec.
@@ -30,6 +31,14 @@ func WithParseOptions(o ParseOption) DescribeOption {
 		}
 		c.parse[0] |= o
 	}
+}
+
+// WithSchedulerLocation names the zone the scheduler runs in, as cron.New's
+// WithLocation does, so a description can give a written zone's shift from
+// it; callers in a running scheduler pass c.Location(). The default, and nil,
+// is time.Local. Both the package functions and the Parser methods honor it.
+func WithSchedulerLocation(loc *time.Location) DescribeOption {
+	return func(c *describeConfig) { c.sched = loc }
 }
 
 // newDescribeConfig applies opts to a zero describeConfig.
@@ -56,8 +65,9 @@ func DescribeSpec(spec string, opts ...DescribeOption) (string, error) {
 }
 
 // DescribeSpecNote returns the note that spells out the values the hash key
-// picks in spec's description, or "" when it has none, or the parse error. It
-// parses as DescribeSpec does. See Parser.DescribeSpecNote.
+// picks in spec's description and the windows of a written zone, or "" when
+// it has none, or the parse error. It parses as DescribeSpec does. See
+// Parser.DescribeSpecNote.
 func DescribeSpecNote(spec string, opts ...DescribeOption) (string, error) {
 	p, err := tryParserForOptions(newDescribeConfig(opts).parse)
 	if err != nil {
@@ -68,12 +78,13 @@ func DescribeSpecNote(spec string, opts ...DescribeOption) (string, error) {
 
 // DescribeSpec returns an English description of spec as p parses it, or the
 // parse error. The description follows the grammar in docs/DESCRIBE.md and
-// names a written TZ=/CRON_TZ= zone and its shift from UTC. A valid spec
-// always gets a description and a nil error; one that never runs is "never
-// runs", within the limit on H in G11 of docs/DESCRIBE.md. Combinations of H
-// without a form (H17 and H20 in docs/DESCRIBE.md) get each written field by
-// name, as written: "minute 0, hour 0, day of month H/10, month *, day of week
-// 1". A descriptor reads as its cron equivalent
+// names a written TZ=/CRON_TZ= zone and its shift from UTC and from the
+// scheduler's zone (WithSchedulerLocation), as docs/DESCRIBE.md Z1–Z9 say. A
+// valid spec always gets a description and a nil error; one that never runs
+// is "never runs", within the limit on H in G11 of docs/DESCRIBE.md.
+// Combinations of H without a form (H17 and H20 in docs/DESCRIBE.md) get each
+// written field by name, as written: "minute 0, hour 0, day of month H/10,
+// month *, day of week 1". A descriptor reads as its cron equivalent
 // ("@weekly" is "at 12 am on Sunday"), and "@triggered", "@manual" and "@none"
 // read "only when triggered". An interval reads as it runs, from its anchor,
 // with the parser's minimum: "every 1h30m from when scheduling started",
@@ -81,18 +92,20 @@ func DescribeSpecNote(spec string, opts ...DescribeOption) (string, error) {
 // not depend on it. With no key, StrictDays does not check a spec with H in
 // the day of the month or the month when the value the key picks decides that
 // check; when no key finds the day, the parser's error returns.
-func (p Parser) DescribeSpec(spec string, _ ...DescribeOption) (string, error) {
-	desc, _, err := p.describe(spec)
+func (p Parser) DescribeSpec(spec string, opts ...DescribeOption) (string, error) {
+	desc, _, err := p.describe(spec, newDescribeConfig(opts).sched)
 	return desc, err
 }
 
 // DescribeSpecNote returns the note that spells out the values the hash
 // key picks in spec's description, as p parses it: "at minutes h, h+15,
 // h+30, and h+45 past the hour, where h is a fixed minute from 0 to 14".
-// It is "" unless a field has a hashed step or a fixed day of the month. A
+// For a spec with a written zone it names the windows in which that zone is
+// off the shift the description states (Z4). It is "" unless a field has a
+// hashed step or a fixed day of the month, or the zone has such a window. A
 // description given field by field still gets its note. See docs/DESCRIBE.md.
-func (p Parser) DescribeSpecNote(spec string, _ ...DescribeOption) (string, error) {
-	_, note, err := p.describe(spec)
+func (p Parser) DescribeSpecNote(spec string, opts ...DescribeOption) (string, error) {
+	_, note, err := p.describe(spec, newDescribeConfig(opts).sched)
 	return note, err
 }
 
@@ -115,8 +128,9 @@ func (p Parser) withPlaceholderKey(spec string) Parser {
 	return p
 }
 
-// describe returns the description of spec and its note (N1–N8).
-func (p Parser) describe(spec string) (desc, note string, err error) {
+// describe returns the description of spec and its note (N1–N8). sched is
+// the scheduler's zone; nil means time.Local.
+func (p Parser) describe(spec string, sched *time.Location) (desc, note string, err error) {
 	strict := p.options&StrictDays != 0
 	p = p.withPlaceholderKey(spec)
 	sch, err := p.Parse(spec)
@@ -132,12 +146,12 @@ func (p Parser) describe(spec string) (desc, note string, err error) {
 	if err := p.strictDaysError(spec, strict, sch, fields); err != nil {
 		return "", "", err
 	}
-	zone := zoneClause(loc, describeNow())
+	zone, znote := zoneClause(loc, sched, describeNow())
 	// No spec reaches this today: every item the parser takes matches
 	// describableItem or one of the special forms. It keeps an item syntax the
 	// parser adds later from being described as something else.
 	if !allDescribable(fields) || !describable(yearField) {
-		return p.describeLiteral(spec, fields, yearField) + zone, "", nil
+		return p.describeLiteral(spec, fields, yearField) + zone, znote, nil
 	}
 	if p.dayMissing(sch, fields) {
 		return "never runs", "", nil
@@ -151,7 +165,7 @@ func (p Parser) describe(spec string) (desc, note string, err error) {
 	d := p.dayDescriber(sch, fields)
 	day, month, short, dok := p.describeDates(&d, hd, dates)
 	if !ok || !dok {
-		return p.describeLiteral(spec, fields, yearField) + zone, p.hashNote(&d, h, hd, dates), nil
+		return p.describeLiteral(spec, fields, yearField) + zone, joinNote(p.hashNote(&d, h, hd, dates), znote), nil
 	}
 	d.named = day != ""
 	var timeText string
@@ -160,7 +174,7 @@ func (p Parser) describe(spec string) (desc, note string, err error) {
 	} else if t, ok := d.describeHashTime(h); ok {
 		timeText = t
 	} else {
-		return p.describeLiteral(spec, fields, yearField) + zone, p.hashNote(&d, h, hd, dates), nil
+		return p.describeLiteral(spec, fields, yearField) + zone, joinNote(p.hashNote(&d, h, hd, dates), znote), nil
 	}
 	parts := []string{timeText}
 	for _, clause := range []string{day, month, d.describeYears(yearField)} {
@@ -169,7 +183,7 @@ func (p Parser) describe(spec string) (desc, note string, err error) {
 		}
 	}
 	desc = placeAlternatives(strings.Join(parts, " ")+d.noteText()) + zone + short + hashKeyClause(units)
-	return desc, p.hashNote(&d, h, hd, dates), nil
+	return desc, joinNote(p.hashNote(&d, h, hd, dates), znote), nil
 }
 
 // descriptorFields holds the fields, second to day of week, that each

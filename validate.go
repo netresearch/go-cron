@@ -48,8 +48,9 @@ type SpecAnalysis struct {
 	Description string
 
 	// DescriptionNote spells out the values the hash key picks, as
-	// DescribeSpecNote gives it. Empty unless a field has a hashed step or
-	// a hashed day of the month.
+	// DescribeSpecNote gives it, and the windows in which a written zone is
+	// off the shift the description states. Empty unless a field has a
+	// hashed step or a hashed day of the month, or the zone has a window.
 	DescriptionNote string
 
 	// Warnings contains non-fatal warnings about the schedule.
@@ -181,7 +182,7 @@ func AnalyzeSpec(spec string, options ...ParseOption) SpecAnalysis {
 
 	result.Valid = true
 	result.Schedule = schedule
-	result.Description, result.DescriptionNote, _ = parser.describe(spec)
+	result.Description, result.DescriptionNote, _ = parser.describe(spec, nil)
 
 	// Extract location and analyze the spec
 	result.analyzeSpec(spec)
@@ -226,7 +227,7 @@ func AnalyzeSpecWithHash(spec string, options ParseOption, hashSeed string) Spec
 
 	result.Valid = true
 	result.Schedule = schedule
-	result.Description, result.DescriptionNote, _ = parser.describe(spec)
+	result.Description, result.DescriptionNote, _ = parser.describe(spec, nil)
 
 	result.analyzeSpec(spec)
 	result.checkDomDowWarning()

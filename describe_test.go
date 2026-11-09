@@ -94,7 +94,7 @@ var describeGoldens = []struct {
 	{spec: "0 22-2/2 * * *", want: "at midnight, 2 am, and 10 pm every day"},
 	{spec: "0 0 * * *", want: "at midnight every day"},
 	{spec: "0 12 * * *", want: "at noon every day"},
-	{spec: "CRON_TZ=UTC 0 0 * * *", want: "at midnight every day UTC"},
+	{spec: "CRON_TZ=UTC 0 0 * * *", opts: []DescribeOption{schedUTC}, want: "at midnight every day UTC"},
 	{spec: "0 17,9 * * *", want: "at 9 am and 5 pm every day"},
 	{spec: "0 0,12,13 * * *", want: "at midnight, noon, and 1 pm every day"},
 
@@ -472,7 +472,7 @@ var describeGoldens = []struct {
 	{spec: "@triggered", want: "only when triggered"},
 	{spec: "@manual", want: "only when triggered"},
 	{spec: "@none", want: "only when triggered"},
-	{spec: "CRON_TZ=Europe/Berlin @daily", want: "at midnight every day Berlin time, 1 hour ahead of UTC, 2 hours from March to October"},
+	{spec: "CRON_TZ=Europe/Berlin @daily", opts: []DescribeOption{schedUTC}, want: "at midnight every day Berlin time, 1 hour ahead of UTC, 2 hours from March to October"},
 	{spec: "@daily", opts: []DescribeOption{withSeconds}, want: "at midnight every day"},
 
 	// Intervals: as they run, from their anchor (P3)
@@ -642,23 +642,37 @@ var describeGoldens = []struct {
 	{spec: "30 H(20-23),H(1-5) * * *", opts: []DescribeOption{withHash}, want: "minute 30, hour H(20-23),H(1-5), day of month *, month *, day of week *", literal: true},
 	{spec: "0 H/6,9 * * *", opts: []DescribeOption{withHash}, want: "minute 0, hour H/6,9, day of month *, month *, day of week *", literal: true},
 	{spec: "H(59-0) H/6 * * *", opts: []DescribeOption{withHash}, want: "minute H(59-0), hour H/6, day of month *, month *, day of week *", literal: true},
-	// Time zones: the zone's name and its shift from UTC (Z1, Z2, Z6)
-	{spec: "CRON_TZ=America/New_York 30 2 * * *", want: "at 2:30 am every day New York time, 5 hours behind UTC, 4 hours from March to November"},
-	{spec: "TZ=Asia/Kolkata 0 9 * * *", want: "at 9 am every day Kolkata time, 5 hours 30 minutes ahead of UTC"},
-	{spec: "CRON_TZ=Australia/Lord_Howe 0 0 1 1 * 2027", opts: []DescribeOption{withYear}, want: "at midnight on the 1st of the month in January in year 2027 Lord Howe time, 11 hours ahead of UTC, 10 hours 30 minutes from April to October"},
-	{spec: "CRON_TZ=Europe/London 0 12 * * *", want: "at noon every day London time, the same as UTC, 1 hour ahead from March to October"},
-	{spec: "CRON_TZ=Etc/UTC 0 0 * * *", want: "at midnight every day Etc/UTC time, the same as UTC"},
-	{spec: "CRON_TZ=America/Argentina/Buenos_Aires 0 0 1 1-3 *", want: "at midnight on the 1st of the month in January thru March Buenos Aires time, 3 hours behind UTC"},
-	{spec: "TZ=\"America/New_York\" */15 * * * *", want: "at minutes 0, 15, 30, and 45 past the hour New York time, 5 hours behind UTC, 4 hours from March to November"},
-	{spec: "CRON_TZ=US/Eastern 0 9 * * *", want: "at 9 am every day US/Eastern time, 5 hours behind UTC, 4 hours from March to November"},
-	{spec: "TZ=Local 0 0 * * *", want: "at midnight every day"},
-	{spec: "CRON_TZ=America/New_York @every 1h", want: "every 1h from when scheduling started"},
-	{spec: "CRON_TZ=America/New_York @triggered", want: "only when triggered"},
-	{spec: "CRON_TZ=America/New_York 0 0 30 2 *", want: "never runs"},
-	{spec: "CRON_TZ=Europe/Berlin */7 * * * *", want: "at minutes 0, 7, 14, … 56 past the hour (every 7 minutes, starting over each hour) Berlin time, 1 hour ahead of UTC, 2 hours from March to October"},
-	{spec: "CRON_TZ=Europe/Berlin H(50-10) * * * *", opts: []DescribeOption{withHash}, want: "at a fixed minute past the hour, either between minutes 0 and 10 or between minutes 50 and 59 Berlin time, 1 hour ahead of UTC, 2 hours from March to October; the hash key fixes the minute"},
-	{spec: "CRON_TZ=Europe/Berlin 0 0 1/10 * *", want: "at midnight on the 1st, 11th, 21st, and 31st of the month Berlin time, 1 hour ahead of UTC, 2 hours from March to October; the 31st runs only in months that have one"},
-	{spec: "CRON_TZ=Europe/Berlin 0 0 H/10 * 1", opts: []DescribeOption{withHash}, want: "minute 0, hour 0, day of month H/10, month *, day of week 1 Berlin time, 1 hour ahead of UTC, 2 hours from March to October", literal: true},
+	// Time zones (Z1–Z9)
+	{spec: "CRON_TZ=America/New_York 30 2 * * *", opts: []DescribeOption{schedUTC}, want: "at 2:30 am every day New York time, 5 hours behind UTC, 4 hours from March to November"},
+	{spec: "TZ=Asia/Kolkata 0 9 * * *", opts: []DescribeOption{schedUTC}, want: "at 9 am every day Kolkata time, 5 hours 30 minutes ahead of UTC"},
+	{spec: "CRON_TZ=Australia/Lord_Howe 0 0 1 1 * 2027", opts: []DescribeOption{withYear, schedUTC}, want: "at midnight on the 1st of the month in January in year 2027 Lord Howe time, 11 hours ahead of UTC, 10 hours 30 minutes from April to October"},
+	{spec: "CRON_TZ=Europe/London 0 12 * * *", opts: []DescribeOption{schedUTC}, want: "at noon every day London time, the same as UTC, 1 hour ahead from March to October"},
+	{spec: "CRON_TZ=Etc/UTC 0 0 * * *", opts: []DescribeOption{schedUTC}, want: "at midnight every day Etc/UTC time, the same as UTC"},
+	{spec: "CRON_TZ=America/Argentina/Buenos_Aires 0 0 1 1-3 *", opts: []DescribeOption{schedUTC}, want: "at midnight on the 1st of the month in January thru March Buenos Aires time, 3 hours behind UTC"},
+	{spec: "TZ=\"America/New_York\" */15 * * * *", opts: []DescribeOption{schedUTC}, want: "at minutes 0, 15, 30, and 45 past the hour New York time, 5 hours behind UTC, 4 hours from March to November"},
+	{spec: "CRON_TZ=US/Eastern 0 9 * * *", opts: []DescribeOption{schedUTC}, want: "at 9 am every day US/Eastern time, 5 hours behind UTC, 4 hours from March to November"},
+	{spec: "TZ=Local 0 0 * * *", opts: []DescribeOption{schedUTC}, want: "at midnight every day"},
+	{spec: "CRON_TZ=America/New_York @every 1h", opts: []DescribeOption{schedUTC}, want: "every 1h from when scheduling started"},
+	{spec: "CRON_TZ=America/New_York @triggered", opts: []DescribeOption{schedUTC}, want: "only when triggered"},
+	{spec: "CRON_TZ=America/New_York 0 0 30 2 *", opts: []DescribeOption{schedUTC}, want: "never runs"},
+	{spec: "CRON_TZ=Europe/Berlin */7 * * * *", opts: []DescribeOption{schedUTC}, want: "at minutes 0, 7, 14, … 56 past the hour (every 7 minutes, starting over each hour) Berlin time, 1 hour ahead of UTC, 2 hours from March to October"},
+	{spec: "CRON_TZ=Europe/Berlin H(50-10) * * * *", opts: []DescribeOption{withHash, schedUTC}, want: "at a fixed minute past the hour, either between minutes 0 and 10 or between minutes 50 and 59 Berlin time, 1 hour ahead of UTC, 2 hours from March to October; the hash key fixes the minute"},
+	{spec: "CRON_TZ=Europe/Berlin 0 0 1/10 * *", opts: []DescribeOption{schedUTC}, want: "at midnight on the 1st, 11th, 21st, and 31st of the month Berlin time, 1 hour ahead of UTC, 2 hours from March to October; the 31st runs only in months that have one"},
+	{spec: "CRON_TZ=Europe/Berlin 0 0 H/10 * 1", opts: []DescribeOption{withHash, schedUTC}, want: "minute 0, hour 0, day of month H/10, month *, day of week 1 Berlin time, 1 hour ahead of UTC, 2 hours from March to October", literal: true},
+	// The shift from the scheduler's zone (Z3, Z9)
+	{spec: "CRON_TZ=UTC 0 0 * * *", opts: []DescribeOption{schedLA}, want: "at midnight every day UTC, 8 hours ahead of Los Angeles time, 7 hours from March to November"},
+	{spec: "CRON_TZ=Europe/Berlin 0 0 * * *", opts: []DescribeOption{schedNY}, want: "at midnight every day Berlin time, 1 hour ahead of UTC, 2 hours from March to October, and 6 hours ahead of New York time"},
+	{spec: "CRON_TZ=America/New_York 30 2 * * *", opts: []DescribeOption{schedNY}, want: "at 2:30 am every day New York time, 5 hours behind UTC, 4 hours from March to November"},
+	{spec: "CRON_TZ=America/Detroit 30 2 * * *", opts: []DescribeOption{schedNY}, want: "at 2:30 am every day Detroit time, 5 hours behind UTC, 4 hours from March to November"},
+	{spec: "CRON_TZ=America/New_York 30 2 * * *", opts: []DescribeOption{schedLA}, want: "at 2:30 am every day New York time, 5 hours behind UTC, 4 hours from March to November, and 3 hours ahead of Los Angeles time"},
+	{spec: "CRON_TZ=UTC 0 0 * * *", opts: []DescribeOption{schedLocal}, want: "at midnight every day UTC, 8 hours ahead of the scheduler's time"},
+	{spec: "CRON_TZ=Australia/Lord_Howe 0 0 * * *", opts: []DescribeOption{schedKol}, want: "at midnight every day Lord Howe time, 11 hours ahead of UTC, 10 hours 30 minutes from April to October, and 5 hours 30 minutes ahead of Kolkata time, 5 hours from April to October"},
+	{spec: "CRON_TZ=UTC 0 0 * * *", opts: []DescribeOption{schedLon}, want: "at midnight every day UTC, the same as London time, 1 hour behind from March to October"},
+	{spec: "CRON_TZ=Europe/Berlin 0 0 * * *", opts: []DescribeOption{WithSchedulerLocation(mustZone("US/Eastern"))}, want: "at midnight every day Berlin time, 1 hour ahead of UTC, 2 hours from March to October, and 6 hours ahead of US/Eastern time"},
+	// A scheduler on UTC under another name adds no shift (Z3)
+	{spec: "CRON_TZ=Europe/Berlin 0 0 * * *", opts: []DescribeOption{WithSchedulerLocation(mustZone("Etc/UTC"))}, want: "at midnight every day Berlin time, 1 hour ahead of UTC, 2 hours from March to October"},
+	{spec: "CRON_TZ=Europe/Berlin 0 0 * * *", opts: []DescribeOption{WithSchedulerLocation(time.FixedZone("Local", 0))}, want: "at midnight every day Berlin time, 1 hour ahead of UTC, 2 hours from March to October"},
+	{spec: "CRON_TZ=Asia/Kolkata 0 0 * * *", opts: []DescribeOption{WithSchedulerLocation(time.FixedZone("", 3600))}, want: "at midnight every day Kolkata time, 5 hours 30 minutes ahead of UTC, and 4 hours 30 minutes ahead of the scheduler's time"},
 }
 
 // describeNoteGoldens are the binding notes (docs/DESCRIBE.md, N1–N8).
@@ -792,6 +806,12 @@ var describeNoteGoldens = []struct {
 	{spec: "0 0 H * MON#2", opts: []DescribeOption{WithParseOptions(Minute | Hour | Dom | Month | Dow | Extended | Hash | DowOrDom)}, want: "on day h of every month, where h is a fixed day from 1 to 31"},
 	{spec: "0 0 H * MON", opts: []DescribeOption{withHash}, want: "on day h of every month, where h is a fixed day from 1 to 31; a month without day h is skipped"},
 	{spec: "0 0 H/10,H * H/3", opts: []DescribeOption{withHash}, want: ""},
+	// Time zones (Z4)
+	{spec: "CRON_TZ=Europe/Berlin 0 0 * * *", opts: []DescribeOption{schedNY}, want: "Berlin is 5 hours ahead of New York from March 14 to 28 and from October 31 to November 7, between the two zones' clock changes"},
+	{spec: "CRON_TZ=America/New_York 30 2 * * *", opts: []DescribeOption{schedLA}, want: ""},
+	{spec: "CRON_TZ=Europe/Berlin H/15 9 * * *", opts: []DescribeOption{withHash, schedNY}, want: "at minutes h, h+15, h+30, and h+45 during the 9 am hour, where h is a fixed minute from 0 to 14; Berlin is 5 hours ahead of New York from March 14 to 28 and from October 31 to November 7, between the two zones' clock changes"},
+	{spec: "CRON_TZ=Europe/Berlin 0 0 * * *", opts: []DescribeOption{schedUTC}, want: ""},
+	{spec: "CRON_TZ=UTC 0 0 * * *", opts: []DescribeOption{schedLA}, want: ""},
 }
 
 // TestDayNoteOrRunsShortMonths binds the note of a fixed day under DowOrDom
@@ -1486,7 +1506,11 @@ func describeGrammars() (descRe, noteRe *regexp.Regexp) {
 	second := func(other string) string { return alt(offset, offset+" "+alt("behind", "ahead"), "the same as "+other) }
 	months := " from " + monthname + " to " + monthname
 	utcShift := shiftTo("UTC") + opt(", "+second("UTC")+months)
-	zone := " " + alt("UTC", plain+" time, "+utcShift)
+	// Z3: its shift from the scheduler's zone
+	zname := alt(plain, "the scheduler's") // an unnamed time.Local
+	schedName := zname + " time"
+	schedShift := shiftTo(schedName) + opt(", "+second(schedName)+months)
+	zone := " " + alt("UTC"+opt(", "+schedShift), plain+" time, "+utcShift+opt(", and "+schedShift))
 	schedule := time + opt(" "+day) + opt(" "+month) + opt(" "+year) + opt(note) + opt(alt(nalts, domalts)) + opt(zone) + "(?:" + short + ")*" + opt(hashkey)
 	// P3: an interval as it runs, from its anchor
 	dur := `[-+]?(?:(?:(?:\d+\.?\d*|\.\d+)(?:ns|us|µs|μs|ms|s|m|h))+|0)` // Go's duration: "1.s", ".5m", "0"
@@ -1529,7 +1553,12 @@ func describeGrammars() (descRe, noteRe *regexp.Regexp) {
 		"on "+outcome+ofDays) // N3: one outcome left
 	nmonth := alt("in months "+vals+where+opt(tail), "in "+outcomes+", depending on the hash key")
 	nclause := alt(ntime, nday, nmonth)
-	noteRe = regexp.MustCompile("^" + nclause + "(?:, " + nclause + ")*$")
+	// Z4: the windows where a zone is off its stated shift, by date
+	zdate := monthname + ` \d+`
+	window := "from " + zdate + " to " + alt(zdate, num)
+	zsent := plain + " is " + shiftTo(alt(plain, "the scheduler's time")) + " " + window + "(?: and " + window + ")*"
+	znote := zsent + "(?:; " + zsent + ")*" + opt(", between the two zones' clock changes")
+	noteRe = regexp.MustCompile("^" + alt(nclause+"(?:, "+nclause+")*"+opt("; "+znote), znote) + "$")
 	return descRe, noteRe
 }
 

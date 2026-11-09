@@ -25,6 +25,7 @@ type zoneShift struct {
 // the offset on January 1 and each change after it.
 type zoneYear struct {
 	loc    *time.Location
+	year   int
 	base   time.Duration
 	shifts []zoneShift
 }
@@ -38,7 +39,7 @@ const maxZoneBounds = 12
 // stored transitions.
 func zoneYearOf(loc *time.Location, year int) zoneYear {
 	t := time.Date(year, time.January, 1, 0, 0, 0, 0, loc)
-	z := zoneYear{loc: loc, base: offsetOf(t)}
+	z := zoneYear{loc: loc, year: year, base: offsetOf(t)}
 	prev := z.base
 	for range maxZoneBounds {
 		_, end := t.ZoneBounds()
@@ -75,14 +76,19 @@ var tzAreas = []string{
 
 // zoneName returns the name a description gives loc (Z1): for a name under
 // one of the tz areas its last part with spaces, "New York"; any other name
-// as written, "UTC", "Etc/GMT+5", "US/Eastern".
-func zoneName(loc *time.Location) string {
+// as written, "UTC", "Etc/GMT+5", "US/Eastern". generic is true for a zone
+// with no name of its own, time.Local or an unnamed one, which reads "the
+// scheduler's".
+func zoneName(loc *time.Location) (name string, generic bool) {
 	s := loc.String()
+	if s == "Local" || s == "" {
+		return "the scheduler's", true
+	}
 	area, _, _ := strings.Cut(s, "/")
 	if !slices.Contains(tzAreas, area) {
-		return s
+		return s, false
 	}
-	return strings.ReplaceAll(s[strings.LastIndex(s, "/")+1:], "_", " ")
+	return strings.ReplaceAll(s[strings.LastIndex(s, "/")+1:], "_", " "), false
 }
 
 // offsetWords names the size of an offset: "5 hours", "1 hour", "10 hours
@@ -140,25 +146,192 @@ func monthsWords(a, b time.Time, loc *time.Location) string {
 
 // utcShift names a zone's offset from UTC over the year (Z2): "5 hours
 // behind UTC", and for a zone that changes with the season "5 hours behind
-// UTC, 4 hours from March to November".
-func utcShift(z zoneYear) string {
-	s := shiftWords(z.base, "UTC")
-	if !z.seasonal() {
-		return s
+// UTC, 4 hours from March to November". A zone that changes in another way
+// gets its January offset, and the note names the rest of the year (Z4).
+func utcShift(z zoneYear, name string) (clause, note string) {
+	clause = shiftWords(z.base, "UTC")
+	switch {
+	case len(z.shifts) == 0:
+		return clause, ""
+	case z.seasonal():
+		return clause + ", " + secondWords(z.base, z.shifts[0].off, "UTC") + monthsWords(z.shifts[0].at, z.shifts[1].at, z.loc), ""
 	}
-	return s + ", " + secondWords(z.base, z.shifts[0].off, "UTC") + monthsWords(z.shifts[0].at, z.shifts[1].at, z.loc)
+	return clause, windowNote(name, "UTC", zoneSpans(z, zoneYearOf(time.UTC, z.year)), z.base, z.loc, false)
 }
 
-// zoneClause returns the clause that names the zone a spec wrote and its
-// shift from UTC (Z1, Z2), with its leading space. It is "" for a spec with no
-// zone and for TZ=Local, which reads as no zone does (Z6).
-func zoneClause(spec *time.Location, now time.Time) string {
-	if spec == nil || spec == time.Local {
+// dateWords names t's date, "March 14", or its day alone after a date of
+// the same month, "28".
+func dateWords(t time.Time, sameMonth bool) string {
+	if sameMonth {
+		return strconv.Itoa(t.Day())
+	}
+	return t.Month().String() + " " + strconv.Itoa(t.Day())
+}
+
+// windowNote names the windows in which subject's zone is off the steady
+// shift the description states (Z4), by the dates, in loc, of each window's
+// first and last instant: "Berlin is 5 hours ahead of New York from March 14
+// to 28 and from October 31 to November 7". Each shift gets one sentence. A
+// window under a day is left out. tail says that the windows lie between two
+// zones' clock changes.
+func windowNote(subject, object string, spans []zoneSpan, steady time.Duration, loc *time.Location, tail bool) string {
+	var order []time.Duration
+	windows := map[time.Duration][]string{}
+	for _, s := range spans {
+		if s.off == steady || s.to.Sub(s.from) < 24*time.Hour {
+			continue
+		}
+		if windows[s.off] == nil {
+			order = append(order, s.off)
+		}
+		from, last := s.from.In(loc), s.to.Add(-1).In(loc)
+		windows[s.off] = append(windows[s.off], "from "+dateWords(from, false)+" to "+dateWords(last, from.Month() == last.Month()))
+	}
+	if len(order) == 0 {
 		return ""
 	}
-	name := zoneName(spec)
-	if name == "UTC" {
-		return " UTC"
+	sentences := make([]string, len(order))
+	for i, off := range order {
+		sentences[i] = subject + " is " + shiftWords(off, object) + " " + strings.Join(windows[off], " and ")
 	}
-	return " " + name + " time, " + utcShift(zoneYearOf(spec, now.In(spec).Year()))
+	note := strings.Join(sentences, "; ")
+	if tail {
+		note += ", between the two zones' clock changes"
+	}
+	return note
+}
+
+// utc reports whether the zone is on UTC all year, whatever its name.
+func (z zoneYear) utc() bool {
+	return z.base == 0 && len(z.shifts) == 0
+}
+
+// same reports whether o has z's offsets all year.
+func (z zoneYear) same(o zoneYear) bool {
+	return z.base == o.base && slices.EqualFunc(z.shifts, o.shifts, func(a, b zoneShift) bool {
+		return a.at.Equal(b.at) && a.off == b.off
+	})
+}
+
+// zoneSpan is a stretch of the year, from its start up to its end, in which
+// a spec's zone keeps one offset from the scheduler's.
+type zoneSpan struct {
+	from, to time.Time
+	off      time.Duration
+}
+
+// zoneSpans splits spec's year, in its own zone, at each offset change of
+// either zone. Neighbors with one offset are one span, as when both zones
+// change at the same instant.
+func zoneSpans(spec, sched zoneYear) []zoneSpan {
+	start := time.Date(spec.year, time.January, 1, 0, 0, 0, 0, spec.loc)
+	end := start.AddDate(1, 0, 0)
+	cuts := []time.Time{start}
+	for _, s := range slices.Concat(spec.shifts, sched.shifts) {
+		if s.at.After(start) && s.at.Before(end) {
+			cuts = append(cuts, s.at)
+		}
+	}
+	slices.SortFunc(cuts, time.Time.Compare)
+	var spans []zoneSpan
+	for i, from := range cuts {
+		to := end
+		if i+1 < len(cuts) {
+			to = cuts[i+1]
+		}
+		off := offsetOf(from.In(spec.loc)) - offsetOf(from.In(sched.loc))
+		if n := len(spans); n > 0 && spans[n-1].off == off {
+			spans[n-1].to = to
+			continue
+		}
+		spans = append(spans, zoneSpan{from: from, to: to, off: off})
+	}
+	return spans
+}
+
+// steadyOf picks the offset the description states when it states one for
+// the year: with two seasonal zones the one in force for the most time, the
+// earlier on a tie; otherwise the offset at the start of the year.
+func steadyOf(spans []zoneSpan, bothSeasonal bool) time.Duration {
+	best := spans[0].off
+	if !bothSeasonal {
+		return best
+	}
+	total := map[time.Duration]time.Duration{}
+	for _, s := range spans {
+		total[s.off] += s.to.Sub(s.from)
+	}
+	for _, s := range spans {
+		if total[s.off] > total[best] {
+			best = s.off
+		}
+	}
+	return best
+}
+
+// schedShift names a spec zone's shift from the scheduler's zone (Z3): one
+// value when it holds all year; the months form when one zone changes with
+// the season and the other does not, "8 hours ahead of Los Angeles time, 7
+// hours from March to November"; otherwise the steady value, and the note
+// names the windows off it (Z4). name is the spec zone's name; sname is the
+// scheduler's, generic when it has none of its own.
+func schedShift(spec, sched zoneYear, name, sname string, generic bool) (clause, note string) {
+	other := sname + " time"
+	spans := zoneSpans(spec, sched)
+	moving := spec
+	if len(spec.shifts) == 0 {
+		moving = sched
+	}
+	oneMoves := len(spec.shifts) == 0 || len(sched.shifts) == 0
+	switch {
+	case len(spans) == 1:
+		return shiftWords(spans[0].off, other), ""
+	case oneMoves && moving.seasonal():
+		return shiftWords(spans[0].off, other) + ", " + secondWords(spans[0].off, spans[1].off, other) +
+			monthsWords(moving.shifts[0].at, moving.shifts[1].at, spec.loc), ""
+	}
+	steady := steadyOf(spans, spec.seasonal() && sched.seasonal())
+	object := sname
+	if generic {
+		object = other
+	}
+	return shiftWords(steady, other), windowNote(name, object, spans, steady, spec.loc, !oneMoves)
+}
+
+// zoneClause returns the clause that names the zone a spec wrote, its shift
+// from UTC and its shift from the scheduler's zone (Z1–Z3), with its leading
+// space, and the note for the windows off those shifts (Z4). Both are "" for
+// a spec with no zone and for TZ=Local, which reads as no zone does (Z6). A
+// nil sched is time.Local. The scheduler's shift is left out when the
+// scheduler runs on UTC, under any name, or has the spec zone's offsets all
+// year.
+func zoneClause(spec, sched *time.Location, now time.Time) (clause, note string) {
+	if spec == nil || spec == time.Local {
+		return "", ""
+	}
+	if sched == nil {
+		sched = time.Local
+	}
+	z := zoneYearOf(spec, now.In(spec).Year())
+	name, _ := zoneName(spec)
+	clause, join := " UTC", ", "
+	if name != "UTC" {
+		shift, n := utcShift(z, name)
+		clause, note, join = " "+name+" time, "+shift, n, ", and "
+	}
+	sname, generic := zoneName(sched)
+	if s := zoneYearOf(sched, z.year); !s.utc() && !s.same(z) {
+		shift, n := schedShift(z, s, name, sname, generic)
+		clause, note = clause+join+shift, joinNote(note, n)
+	}
+	return clause, note
+}
+
+// joinNote joins two notes, as the note for the hashed values and the note
+// for the zone.
+func joinNote(hash, zone string) string {
+	if hash == "" || zone == "" {
+		return hash + zone
+	}
+	return hash + "; " + zone
 }
