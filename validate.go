@@ -161,6 +161,18 @@ func ValidateSpecs(specs []string, options ...ParseOption) map[int]error {
 //	    log.Printf("Fields: %v", result.Fields)
 //	}
 func AnalyzeSpec(spec string, options ...ParseOption) SpecAnalysis {
+	if spec == "" { // before the options, which may be invalid
+		return standardParser.AnalyzeSpec(spec)
+	}
+	return getParserForOptions(options).AnalyzeSpec(spec)
+}
+
+// AnalyzeSpec analyzes spec as p parses it, with p's own settings, as its
+// hash key; see the package function AnalyzeSpec. WithSchedulerLocation
+// names the zone that Description gives a written zone's shift from, by
+// default time.Local; callers in a running scheduler pass c.Location().
+// WithParseOptions is ignored.
+func (p Parser) AnalyzeSpec(spec string, opts ...DescribeOption) SpecAnalysis {
 	result := SpecAnalysis{
 		Fields: make(map[string]string),
 	}
@@ -171,10 +183,8 @@ func AnalyzeSpec(spec string, options ...ParseOption) SpecAnalysis {
 		return result
 	}
 
-	parser := getParserForOptions(options)
-
 	// Parse the spec
-	schedule, err := parser.Parse(spec)
+	schedule, err := p.Parse(spec)
 	if err != nil {
 		result.Error = err
 		return result
@@ -182,7 +192,7 @@ func AnalyzeSpec(spec string, options ...ParseOption) SpecAnalysis {
 
 	result.Valid = true
 	result.Schedule = schedule
-	result.Description, result.DescriptionNote, _ = parser.describe(spec, nil)
+	result.Description, result.DescriptionNote, _ = p.describe(spec, newDescribeConfig(opts).sched)
 
 	// Extract location and analyze the spec
 	result.analyzeSpec(spec)
@@ -208,32 +218,10 @@ func AnalyzeSpec(spec string, options ...ParseOption) SpecAnalysis {
 //	    log.Printf("Next run: %v", result.NextRun)
 //	}
 func AnalyzeSpecWithHash(spec string, options ParseOption, hashSeed string) SpecAnalysis {
-	result := SpecAnalysis{
-		Fields: make(map[string]string),
+	if spec == "" { // before the options, which may be invalid
+		return standardParser.AnalyzeSpec(spec)
 	}
-
-	if len(spec) == 0 {
-		result.Error = ErrEmptySpec
-		return result
-	}
-
-	parser := NewParser(options).WithHashKey(hashSeed)
-
-	schedule, err := parser.Parse(spec)
-	if err != nil {
-		result.Error = err
-		return result
-	}
-
-	result.Valid = true
-	result.Schedule = schedule
-	result.Description, result.DescriptionNote, _ = parser.describe(spec, nil)
-
-	result.analyzeSpec(spec)
-	result.checkDomDowWarning()
-	result.NextRun = schedule.Next(time.Now())
-
-	return result
+	return NewParser(options).WithHashKey(hashSeed).AnalyzeSpec(spec)
 }
 
 // checkDomDowWarning adds a warning if both DOM and DOW are restricted.

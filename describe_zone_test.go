@@ -4,6 +4,7 @@
 package cron
 
 import (
+	"errors"
 	"slices"
 	"testing"
 	"time"
@@ -324,5 +325,32 @@ func TestZoneOffsetsBehindGoldens(t *testing.T) {
 				t.Errorf("%s at noon on %s %d, 2027: offset %v, want %v", zone, d.month, d.day, got, d.want)
 			}
 		}
+	}
+}
+
+func TestParserAnalyzeSpec(t *testing.T) {
+	pinDescribeYear(t)
+	const spec = "CRON_TZ=Europe/Berlin 0 0 * * *"
+	got := standardParser.AnalyzeSpec(spec, schedNY)
+	wantDesc := "at midnight every day Berlin time, 1 hour ahead of UTC, 2 hours from March to October, and 6 hours ahead of New York time"
+	wantNote := "Berlin is 5 hours ahead of New York from March 14 to 28 and from October 31 to November 7, between the two zones' clock changes"
+	if !got.Valid || got.Description != wantDesc || got.DescriptionNote != wantNote {
+		t.Errorf("scheduler in New York: valid %v\n got %q, %q\nwant %q, %q", got.Valid, got.Description, got.DescriptionNote, wantDesc, wantNote)
+	}
+	if got.Location == nil || got.Location.String() != "Europe/Berlin" || got.NextRun.IsZero() {
+		t.Errorf("location %v, next run %v", got.Location, got.NextRun)
+	}
+	// The parser's own settings apply, as its hash key does.
+	const hashed = "H H * * *"
+	opts := Minute | Hour | Dom | Month | Dow | Hash
+	keyed, want := NewParser(opts).WithHashKey("job").AnalyzeSpec(hashed), AnalyzeSpecWithHash(hashed, opts, "job")
+	if !keyed.Valid || keyed.Description != want.Description || !keyed.NextRun.Equal(want.NextRun) {
+		t.Errorf("hash key: got %q at %v, want %q at %v", keyed.Description, keyed.NextRun, want.Description, want.NextRun)
+	}
+	if got := standardParser.AnalyzeSpec(""); got.Valid || !errors.Is(got.Error, ErrEmptySpec) {
+		t.Errorf("empty spec: %+v", got)
+	}
+	if got := standardParser.AnalyzeSpec("not a spec"); got.Valid || got.Error == nil {
+		t.Errorf("bad spec: %+v", got)
 	}
 }
