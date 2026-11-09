@@ -3006,8 +3006,10 @@ method uses the parser's own settings and ignores `WithParseOptions`. Times are 
 valid spec always gets a description.
 Specs outside the fields covered so far, and specs with `H`, get
 each written field by name ("minute 0, hour 9, day of month *, month *, day of
-week 1-5"); a descriptor is returned as written. `H` needs no hash key. The
-wording and its grammar are in [DESCRIBE.md](DESCRIBE.md).
+week 1-5"); a descriptor is returned as written. `H` needs no hash key. With
+no key, `StrictDays` does not check a spec with `H` in the day of the month
+or the month, as the value the key picks decides that check. The wording and
+its grammar are in [DESCRIBE.md](DESCRIBE.md).
 
 **Example:**
 ```go
