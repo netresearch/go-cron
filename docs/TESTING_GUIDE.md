@@ -351,21 +351,26 @@ func TestDSTSpringForward(t *testing.T) {
         cron.WithLocation(nyc),
     )
 
-    var fired bool
     // This time doesn't exist during spring forward
-    c.AddFunc("30 2 * * *", func() { fired = true })
+    ran := make(chan time.Time, 1)
+    c.AddFunc("30 2 * * *", func() { ran <- fakeClock.Now() })
 
     c.Start()
     defer c.Stop()
     fakeClock.BlockUntil(1)
 
-    // Advance past DST transition
-    fakeClock.Advance(2 * time.Hour)
-    time.Sleep(10 * time.Millisecond)
+    // Advance to 3:30 EDT: 1:30 EST plus one hour of elapsed time
+    fakeClock.Advance(time.Hour)
 
-    // Job should have run immediately after the skip
-    if !fired {
-        t.Error("job should have fired after DST skip")
+    // The job runs at 3:30, shifted by the one-hour gap
+    want := time.Date(2024, 3, 10, 3, 30, 0, 0, nyc)
+    select {
+    case got := <-ran:
+        if !got.Equal(want) {
+            t.Errorf("expected job at %v, got %v", want, got)
+        }
+    case <-time.After(time.Second):
+        t.Fatal("job did not fire after DST skip")
     }
 }
 ```
@@ -535,6 +540,24 @@ time.Sleep(10 * time.Millisecond)  // Let goroutine execute
 // If you have 2 every-second jobs and advance 1 second:
 // Both fire = 2 Done() calls
 wg.Add(2)  // Not 1!
+```
+
+### Close of Closed Channel
+
+**Problem:** `panic: close of closed channel` in a job that signals the test by closing a channel.
+
+**Cause:** a recurring schedule runs the job more than once, and the second run closes the channel again. `WithRunImmediately()` is not required; it only moves the first run forward (to registration, or to `Start` for a job added before it), so the panic comes one interval sooner.
+
+**Solution:** Guard the close with `sync.Once`, as the tests in `cron_test.go` do:
+
+```go
+started := make(chan struct{})
+var startOnce sync.Once
+
+c.AddFunc("@every 1s", func() {
+    startOnce.Do(func() { close(started) })
+    // ...
+}, cron.WithRunImmediately())
 ```
 
 ### Race Conditions

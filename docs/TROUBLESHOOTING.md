@@ -246,11 +246,11 @@ log.Printf("Next run: %v", entry.Next.In(loc)) // Shows local
 
 During "spring forward" (e.g., 2 AM → 3 AM), the 2:xx hour doesn't exist.
 
-**go-cron behavior:** Jobs scheduled during skipped hour run immediately at the new time (ISC cron compatible).
+**go-cron behavior:** Jobs scheduled during the skipped hour run once, shifted by the length of the gap (2:30 runs at 3:30).
 
 ```go
 // Scheduled for 2:30 AM on DST transition day
-// Actually runs at ~3:00 AM when clock jumps
+// Runs at 3:30 AM that day, shifted by the one-hour gap
 c.AddFunc("30 2 * * *", myJob)
 ```
 

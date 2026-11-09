@@ -19,7 +19,7 @@ Cron spec parser and job scheduler for Go (successor to robfig/cron).
 ### Key improvements over robfig/cron
 - Panic fixes for TZ= parsing (issues #554, #555)
 - `Entry.Run()` method for proper chain decorator invocation (#551)
-- DST "spring forward" jobs run immediately (ISC cron behavior, PR #541)
+- DST "spring forward" jobs run once, shifted by the length of the gap (2:30 runs at 3:30) instead of being skipped (ADR-016)
 - DOM/DOW uses AND logic by default (consistent, enables useful patterns) (#277)
 - Heap-based scheduling for O(log n) performance
 - FakeClock for deterministic testing
