@@ -301,16 +301,13 @@ func schedShift(spec, sched zoneYear, name, sname string, generic bool) (clause,
 // zoneClause returns the clause that names the zone a spec wrote, its shift
 // from UTC and its shift from the scheduler's zone (Z1–Z3), with its leading
 // space, and the note for the windows off those shifts (Z4). Both are "" for
-// a spec with no zone and for TZ=Local, which reads as no zone does (Z6). A
-// nil sched is time.Local. The scheduler's shift is left out when the
-// scheduler runs on UTC, under any name, or has the spec zone's offsets all
-// year.
+// a spec with no zone and for TZ=Local, which reads as no zone does (Z6). The
+// scheduler's shift is left out when sched is nil, as the scheduler may run
+// in another process and zone than the caller (Z9), and when the scheduler
+// runs on UTC, under any name, or has the spec zone's offsets all year.
 func zoneClause(spec, sched *time.Location, now time.Time) (clause, note string) {
 	if spec == nil || spec == time.Local {
 		return "", ""
-	}
-	if sched == nil {
-		sched = time.Local
 	}
 	z := zoneYearOf(spec, now.In(spec).Year())
 	name, _ := zoneName(spec)
@@ -318,6 +315,9 @@ func zoneClause(spec, sched *time.Location, now time.Time) (clause, note string)
 	if name != "UTC" {
 		shift, n := utcShift(z, name)
 		clause, note, join = " "+name+" time, "+shift, n, ", and "
+	}
+	if sched == nil {
+		return clause, note
 	}
 	sname, generic := zoneName(sched)
 	if s := zoneYearOf(sched, z.year); !s.utc() && !s.same(z) {

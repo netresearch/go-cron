@@ -169,8 +169,9 @@ func AnalyzeSpec(spec string, options ...ParseOption) SpecAnalysis {
 
 // AnalyzeSpec analyzes spec as p parses it, with p's own settings, as its
 // hash key; see the package function AnalyzeSpec. WithSchedulerLocation
-// names the zone that Description gives a written zone's shift from, by
-// default time.Local; callers in a running scheduler pass c.Location().
+// names the zone that Description gives a written zone's shift from; callers
+// in a running scheduler pass c.Location(). Without it Description gives the
+// shift from UTC only.
 // WithParseOptions is ignored.
 func (p Parser) AnalyzeSpec(spec string, opts ...DescribeOption) SpecAnalysis {
 	result := SpecAnalysis{

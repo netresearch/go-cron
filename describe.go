@@ -15,7 +15,7 @@ import (
 
 type describeConfig struct {
 	parse []ParseOption
-	sched *time.Location // nil means time.Local
+	sched *time.Location // nil: not given, no shift from it
 }
 
 // DescribeOption configures DescribeSpec.
@@ -35,8 +35,9 @@ func WithParseOptions(o ParseOption) DescribeOption {
 
 // WithSchedulerLocation names the zone the scheduler runs in, as cron.New's
 // WithLocation does, so a description can give a written zone's shift from
-// it; callers in a running scheduler pass c.Location(). The default, and nil,
-// is time.Local. Both the package functions and the Parser methods honor it.
+// it; callers in a running scheduler pass c.Location(). Without it, and for
+// nil, a description gives the shift from UTC only. Both the package
+// functions and the Parser methods honor it.
 func WithSchedulerLocation(loc *time.Location) DescribeOption {
 	return func(c *describeConfig) { c.sched = loc }
 }
@@ -129,7 +130,7 @@ func (p Parser) withPlaceholderKey(spec string) Parser {
 }
 
 // describe returns the description of spec and its note (N1–N8). sched is
-// the scheduler's zone; nil means time.Local.
+// the scheduler's zone; nil gives no shift from it.
 func (p Parser) describe(spec string, sched *time.Location) (desc, note string, err error) {
 	strict := p.options&StrictDays != 0
 	p = p.withPlaceholderKey(spec)

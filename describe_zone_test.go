@@ -19,8 +19,8 @@ func mustZone(name string) *time.Location {
 	return loc
 }
 
-// The scheduler zones the zoned goldens pass, so that none depends on the
-// host's time.Local. schedLocal is a zone named "Local", as time.Local is.
+// The scheduler zones the zoned goldens pass; a golden that passes none
+// gives the shift from UTC only. schedLocal is a zone named "Local", as time.Local is.
 var (
 	schedUTC   = WithSchedulerLocation(time.UTC)
 	schedNY    = WithSchedulerLocation(mustZone("America/New_York"))
@@ -36,7 +36,7 @@ func TestWithSchedulerLocation(t *testing.T) {
 		t.Errorf("sched = %v, want Los Angeles", c.sched)
 	}
 	if c := newDescribeConfig([]DescribeOption{WithSchedulerLocation(nil)}); c.sched != nil {
-		t.Errorf("nil: sched = %v, want nil (time.Local)", c.sched)
+		t.Errorf("nil: sched = %v, want nil (none)", c.sched)
 	}
 	if c := newDescribeConfig(nil); c.parse != nil || c.sched != nil {
 		t.Errorf("zero config changed: %+v", c)
@@ -217,27 +217,31 @@ func TestSteadyOf(t *testing.T) {
 	}
 }
 
-// TestSchedulerDefaultIsLocal checks that the default scheduler zone is
-// time.Local on every host, for the package functions, AnalyzeSpec and the
-// Parser methods alike (Z9).
-func TestSchedulerDefaultIsLocal(t *testing.T) {
+// TestSchedulerDefaultIsNone checks that with no scheduler zone given a
+// description states the shift from UTC only, on every host, for the package
+// functions, AnalyzeSpec and the Parser methods alike (Z9).
+func TestSchedulerDefaultIsNone(t *testing.T) {
 	pinDescribeYear(t)
-	const spec = "CRON_TZ=UTC 0 0 * * *"
-	want, err := DescribeSpec(spec)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for name, opt := range map[string]DescribeOption{"time.Local": WithSchedulerLocation(time.Local), "nil": WithSchedulerLocation(nil)} {
-		if got, _ := DescribeSpec(spec, opt); got != want {
-			t.Errorf("%s: %q, want the default %q", name, got, want)
+	const spec = "CRON_TZ=Europe/Berlin 0 9 * * *"
+	const want = "at 9 am every day Berlin time, 1 hour ahead of UTC, 2 hours from March to October"
+	p := NewParser(Minute | Hour | Dom | Month | Dow)
+	for name, opts := range map[string][]DescribeOption{"default": nil, "nil": {WithSchedulerLocation(nil)}, "UTC": {schedUTC}} {
+		if got, _ := DescribeSpec(spec, opts...); got != want {
+			t.Errorf("%s: DescribeSpec: %q, want %q", name, got, want)
+		}
+		if got, _ := p.DescribeSpec(spec, opts...); got != want {
+			t.Errorf("%s: Parser.DescribeSpec: %q, want %q", name, got, want)
+		}
+		if got := p.AnalyzeSpec(spec, opts...).Description; got != want {
+			t.Errorf("%s: Parser.AnalyzeSpec: %q, want %q", name, got, want)
 		}
 	}
 	if got := AnalyzeSpec(spec).Description; got != want {
 		t.Errorf("AnalyzeSpec: %q, want %q", got, want)
 	}
-	const la = "at midnight every day UTC, 8 hours ahead of Los Angeles time, 7 hours from March to November"
-	if got, _ := NewParser(Minute|Hour|Dom|Month|Dow).DescribeSpec(spec, schedLA); got != la {
-		t.Errorf("Parser.DescribeSpec: %q, want %q", got, la)
+	const la = want + ", and 9 hours ahead of Los Angeles time"
+	if got, _ := p.DescribeSpec(spec, schedLA); len(got) < len(la) || got[:len(la)] != la {
+		t.Errorf("scheduler in Los Angeles: %q, want it to start %q", got, la)
 	}
 }
 
