@@ -44,51 +44,73 @@ func checkNamedTimes(desc string, sch Schedule) []string {
 	desc = trailingIvl.ReplaceAllString(desc, "") // "(every 7 minutes, …)" names an interval, not a value
 	var bad []string
 	for _, m := range namedClock.FindAllStringSubmatch(desc, -1) {
-		h, minute, sec := 0, -1, -1
-		switch m[1] {
-		case "midnight":
-		case "noon":
-			h = 12
-		default:
-			h, _ = strconv.Atoi(m[2])
-			h %= 12
-			if m[5] == "p" {
-				h += 12
-			}
-			if m[3] != "" {
-				minute, _ = strconv.Atoi(m[3])
-			}
-			if m[4] != "" {
-				sec, _ = strconv.Atoi(m[4])
-			}
-		}
-		ok := hours[h]
-		switch {
-		case sec >= 0:
-			ok = times[h*3600+minute*60+sec]
-		case minute >= 0:
-			ok = false
-			for s := range 60 {
-				ok = ok || times[h*3600+minute*60+s]
-			}
-		}
-		if !ok {
+		if h, minute, sec := namedClockTime(m); !clockRuns(h, minute, sec, hours, times) {
 			bad = append(bad, m[1])
 		}
 	}
 	for _, m := range namedValues.FindAllStringSubmatch(desc, -1) {
-		unit, list := m[1], m[2]
-		if unit == "" {
-			unit, list = m[4], m[3]
-		}
-		runs := minutes
-		if unit == "second" {
-			runs = seconds
-		}
-		for _, d := range digits.FindAllString(list, -1) {
-			if v, _ := strconv.Atoi(d); !runs[v] {
-				bad = append(bad, unit+" "+d)
+		bad = append(bad, namedValueMisses(m, minutes, seconds)...)
+	}
+	return bad
+}
+
+// namedClockTime returns the hour of a clock time that namedClock matched,
+// and its minute and second, -1 for each one not written.
+func namedClockTime(m []string) (h, minute, sec int) {
+	switch m[1] {
+	case "midnight":
+		return 0, -1, -1
+	case "noon":
+		return 12, -1, -1
+	}
+	h, _ = strconv.Atoi(m[2])
+	h %= 12
+	if m[5] == "p" {
+		h += 12
+	}
+	minute, sec = -1, -1
+	if m[3] != "" {
+		minute, _ = strconv.Atoi(m[3])
+	}
+	if m[4] != "" {
+		sec, _ = strconv.Atoi(m[4])
+	}
+	return h, minute, sec
+}
+
+// clockRuns reports whether a named clock time is a run: with seconds the
+// time itself, with minutes any second of that minute, and a bare hour any
+// time in that hour.
+func clockRuns(h, minute, sec int, hours, times map[int]bool) bool {
+	switch {
+	case sec >= 0:
+		return times[h*3600+minute*60+sec]
+	case minute >= 0:
+		for s := range 60 {
+			if times[h*3600+minute*60+s] {
+				return true
 			}
+		}
+		return false
+	}
+	return hours[h]
+}
+
+// namedValueMisses returns "minute 5" or "second 5" for each value that
+// namedValues matched and no run has.
+func namedValueMisses(m []string, minutes, seconds map[int]bool) []string {
+	unit, list := m[1], m[2]
+	if unit == "" {
+		unit, list = m[4], m[3]
+	}
+	runs := minutes
+	if unit == "second" {
+		runs = seconds
+	}
+	var bad []string
+	for _, d := range digits.FindAllString(list, -1) {
+		if v, _ := strconv.Atoi(d); !runs[v] {
+			bad = append(bad, unit+" "+d)
 		}
 	}
 	return bad
@@ -117,30 +139,36 @@ func randomTimeField(r *rand.Rand, lo, hi int) string {
 	return strings.Join(items, ",")
 }
 
+// checkSpecNamesRuns reports an error for each time the description of spec
+// names that Next() does not run at. It returns false for a spec that p does
+// not take or that is described field by field, which names no time.
+func checkSpecNamesRuns(t *testing.T, p Parser, spec string) bool {
+	t.Helper()
+	sch, err := p.Parse(spec)
+	if err != nil {
+		return false
+	}
+	desc, err := p.DescribeSpec(spec)
+	if err != nil {
+		t.Errorf("DescribeSpec(%q): unexpected error %v", spec, err)
+		return false
+	}
+	if literalForm.MatchString(desc) {
+		return false
+	}
+	if bad := checkNamedTimes(desc, sch); len(bad) > 0 {
+		t.Errorf("DescribeSpec(%q) = %q: names %s, which Next() does not run at", spec, desc, strings.Join(bad, ", "))
+	}
+	return true
+}
+
 // TestDescribeSpecNamesRuns enforces G1 for the time fields: every clock
 // time, minute and second that a description names is one the scheduler
 // runs at, for the goldens and for random time fields.
 func TestDescribeSpecNamesRuns(t *testing.T) {
 	five := NewParser(Minute | Hour | Dom | Month | Dow | Descriptor)
 	six := NewParser(Second | Minute | Hour | Dom | Month | Dow | Descriptor)
-	check := func(p Parser, spec string) bool {
-		sch, err := p.Parse(spec)
-		if err != nil {
-			return false // not a spec this parser takes
-		}
-		desc, err := p.DescribeSpec(spec)
-		if err != nil {
-			t.Errorf("DescribeSpec(%q): unexpected error %v", spec, err)
-			return false
-		}
-		if literalForm.MatchString(desc) {
-			return false // field by field: it names no time
-		}
-		if bad := checkNamedTimes(desc, sch); len(bad) > 0 {
-			t.Errorf("DescribeSpec(%q) = %q: names %s, which Next() does not run at", spec, desc, strings.Join(bad, ", "))
-		}
-		return true
-	}
+	check := func(p Parser, spec string) bool { return checkSpecNamesRuns(t, p, spec) }
 
 	checked := 0
 	for _, tt := range describeGoldens {
