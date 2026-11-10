@@ -50,7 +50,7 @@ which form a spec gets. Each has an ID, which the grammar cites.
 
 | ID | Rule |
 |---|---|
-| G1 | A description says what the scheduler runs: each golden in `describe_test.go` was checked against the runs `Next()` computes |
+| G1 | A description says what the scheduler runs: each golden in `describe_test.go` was checked against the runs `Next()` computes. `TestDescribeSpecNamesRuns` keeps the times in check: every clock time, minute and second a description names must be one `Next()` runs at, for the goldens and for random time fields. The check is one-sided: it does not find a run the description leaves out |
 | G2 | A parser oddity is described as it runs |
 | G3 | The description is built from the spec text as the parser splits it, and its values follow the parser's options |
 | G6 | Wording is for people |
