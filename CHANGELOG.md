@@ -29,8 +29,8 @@ Originally based on [robfig/cron](https://github.com/robfig/cron).
   November"; `DescribeSpecNote` names the windows where two moving zones
   differ (#205)
 - `Parser.AnalyzeSpec` analyzes a spec with the parser's own settings and
-  takes `WithSchedulerLocation`, so `SpecAnalysis.Description` gives a written
-  zone's shift from the Cron's zone, not the host's (#205)
+  takes `WithSchedulerLocation`, so `SpecAnalysis.Description` also gives a
+  written zone's shift from the Cron's zone (#205)
 
 ### Planned for v2
 - Context-aware Job interface with graceful shutdown support

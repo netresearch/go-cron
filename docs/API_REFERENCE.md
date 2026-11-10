@@ -2010,8 +2010,9 @@ func WithSchedulerLocation(loc *time.Location) DescribeOption
 DescribeOption configures `DescribeSpec` and `DescribeSpecNote`. `WithParseOptions`
 sets the parse options of the package functions; several calls OR together. The `Parser` methods use the
 parser's own settings and ignore it. `WithSchedulerLocation` names the zone the
-scheduler runs in, so a description can give a written zone's shift from it. The
-default, and nil, is `time.Local`, as `cron.New`. Both the package functions and
+scheduler runs in, so a description can give a written zone's shift from it.
+There is no default: without it, and for nil, a description gives the shift from
+UTC only. Both the package functions and
 the `Parser` methods honor it.
 
 ---
@@ -2696,9 +2697,9 @@ type SpecAnalysis struct {
 SpecAnalysis contains detailed information about a parsed cron specification.
 Returned by `AnalyzeSpec`. `Description` and `DescriptionNote` are what
 `DescribeSpec` and `DescribeSpecNote` give for the spec; both are empty when
-it is invalid. For a spec with a written zone they give its shift from the
-scheduler's zone, by default `time.Local`; `Parser.AnalyzeSpec` takes
-`WithSchedulerLocation` to name another.
+it is invalid. For a spec with a written zone they give its shift from UTC;
+`Parser.AnalyzeSpec` takes `WithSchedulerLocation` to add the shift from the
+scheduler's zone.
 
 ---
 
@@ -3009,9 +3010,9 @@ func (p Parser) AnalyzeSpec(spec string, opts ...DescribeOption) SpecAnalysis
 
 Parser.AnalyzeSpec analyzes a spec as the parser parses it, with the parser's
 own settings, as its hash key. `AnalyzeSpec` and `AnalyzeSpecWithHash` call it
-with the default scheduler zone, `time.Local`. Pass `WithSchedulerLocation`
-when the spec will run in a Cron on another zone, so that `Description` gives
-a written zone's shift from that zone and not from the host's.
+with no scheduler zone, so `Description` gives a written zone's shift from UTC
+only. Pass `WithSchedulerLocation` with the zone of the Cron the spec will run
+in, so that `Description` also gives the shift from that zone.
 `WithParseOptions` is ignored.
 
 ```go

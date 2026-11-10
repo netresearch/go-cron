@@ -49,9 +49,10 @@ func WithSchedulerLocation(loc *time.Location) DescribeOption   // package funct
   from UTC and from the scheduler's zone (Z1–Z9); the note names the windows
   where two moving zones differ (Z4). A spec without a prefix reads as
   before.
-- `WithSchedulerLocation` names the zone the scheduler runs in (default
-  `time.Local`, as `cron.New`); the description gives a written zone's shift
-  from it (Z3). A caller inside a running scheduler passes `c.Location()`.
+- `WithSchedulerLocation` names the zone the scheduler runs in; the
+  description gives a written zone's shift from it (Z3). There is no default:
+  without it the description gives the shift from UTC only (Z9). A caller
+  inside a running scheduler passes `c.Location()`.
 - `DescribeSpecNote` spells out the values the hash key picks, which the
   description leaves as "a fixed …": "at minutes h, h+15, h+30, and h+45
   past the hour, where h is a fixed minute from 0 to 14". It is "" unless
@@ -221,7 +222,7 @@ The examples are for 2027.
 | Z6 | A spec with no prefix reads as it did, and so does `TZ=Local`: both run in the scheduler's zone |
 | Z7 | The zone follows the schedule and the alternatives of a fixed value, and precedes the short-month and hash key clauses (G7): "at midnight on the 1st, 11th, 21st, and 31st of the month Berlin time, 1 hour ahead of UTC, 2 hours from March to October; the 31st runs only in months that have one". A descriptor takes it as its cron equivalent does, and so does a description given field by field. "never runs", "only when triggered" and an interval take no zone |
 | Z8 | The shifts, months and dates are those of the current year in the spec's zone, also for a spec that writes years. For a zone with a steady rule the description is the same every year; the dates in the note change with the year |
-| Z9 | The scheduler's zone defaults to `time.Local`, as `cron.New` does, and nil means the same. `time.Local` has a name only when the `TZ` environment variable gives it one; without one, as any zone with no name, it reads "the scheduler's time": "at midnight every day UTC, 8 hours ahead of the scheduler's time" |
+| Z9 | The scheduler's zone has no default: without `WithSchedulerLocation`, and for nil, the description gives the shift from UTC only, as the caller may describe a scheduler that runs in another process and zone: "at 2:30 am every day New York time, 5 hours behind UTC, 4 hours from March to November". A caller passes `time.Local` to name the host's zone. `time.Local` has a name only when the `TZ` environment variable gives it one; without one, as any zone with no name, it reads "the scheduler's time": "at midnight every day UTC, 8 hours ahead of the scheduler's time" |
 
 ### Notes (`DescribeSpecNote`)
 
