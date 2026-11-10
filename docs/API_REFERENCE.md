@@ -19,6 +19,7 @@
   - [AlignedSchedule](#alignedschedule)
   - [Parser](#parser)
   - [ParseOption](#parseoption)
+  - [DescribeOption](#describeoption)
   - [Chain](#chain)
   - [JobWrapper](#jobwrapper)
   - [Job](#job)
@@ -1997,6 +1998,20 @@ ParseOption represents parser configuration flags. `AlignEvery` changes only wha
 
 ---
 
+### DescribeOption
+
+```go
+type DescribeOption func(*describeConfig)
+
+func WithParseOptions(o ParseOption) DescribeOption
+```
+
+DescribeOption configures the package-level `DescribeSpec`. `WithParseOptions`
+sets its parse options; several calls OR together. The `Parser` method uses the
+parser's own settings and ignores it.
+
+---
+
 ### Chain
 
 ```go
@@ -2975,6 +2990,34 @@ The seed (e.g., job name) produces deterministic, distributed scheduling times.
 `Fields` holds the spec's text (`H`), not the values chosen for the seed;
 for other field counts it is empty. `NextRun` reflects the chosen values. See
 [Hash expressions](#hash-expressions-h).
+
+### DescribeSpec
+
+```go
+func DescribeSpec(spec string, opts ...DescribeOption) (string, error)
+func (p Parser) DescribeSpec(spec string, opts ...DescribeOption) (string, error)
+func WithParseOptions(o ParseOption) DescribeOption
+```
+
+DescribeSpec returns an English description of a cron expression, or the parse
+error. The package function parses as `AnalyzeSpec` does (the standard parser
+unless `WithParseOptions` is given; several calls OR together); the `Parser`
+method uses the parser's own settings and ignores `WithParseOptions`. Times are on the 12-hour clock. Descriptions carry no time zone. A
+valid spec always gets a description.
+Specs outside the fields covered so far, and specs with `H`, get
+each written field by name ("minute 0, hour 9, day of month *, month *, day of
+week 1-5"); a descriptor is returned as written. `H` needs no hash key. With
+no key, `StrictDays` does not check a spec with `H` in the day of the month
+or the month, as the value the key picks decides that check. The wording and
+its grammar are in [DESCRIBE.md](DESCRIBE.md).
+
+**Example:**
+```go
+desc, err := cron.DescribeSpec("0 22-2/2 * * *")
+// "at midnight, 2 am, and 10 pm every day"
+desc, err = cron.DescribeSpec("*/15 * * * *")
+// "at minutes 0, 15, 30, and 45 past the hour"
+```
 
 ### WorkflowExecutionID
 
