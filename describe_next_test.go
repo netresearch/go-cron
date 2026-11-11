@@ -338,12 +338,13 @@ func checkSpecNamesRuns(t *testing.T, p Parser, spec string) bool {
 }
 
 // namesNotRun returns each time and date desc names that Next() does not
-// run at, and "never runs" when the spec runs. The times are read with both
-// day fields as "*": the time fields run the same on every day, and a day
-// the day fields allow may be years away.
+// run at, and "never runs" when the spec runs within the 30 years that
+// anyDay lets Next() search, past the parser's default span. The times are
+// read with both day fields as "*": the time fields run the same on every
+// day, and a day the day fields allow may be years away.
 func namesNotRun(desc string, p Parser, spec string, sch Schedule) []string {
 	if desc == "never runs" {
-		if sch.Next(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)).IsZero() {
+		if anyDay(p, spec, sch, false, false).Next(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)).IsZero() {
 			return nil
 		}
 		return []string{desc}
@@ -454,6 +455,7 @@ func TestNamesNotRun(t *testing.T) {
 		{five, "0 0 1 3 *", "at midnight on the 1st of the month in April", "April"},
 		{years, "0 0 1 1 * 2027", "at midnight on the 1st of the month in January in year 2028", "2028"},
 		{five, "0 0 1 1 *", "never runs", "never runs"},
+		{years, "0 0 1 1 * 2035", "never runs", "never runs"}, // past the parser's default search span
 	} {
 		sch, err := tt.p.Parse(tt.spec)
 		if err != nil {
