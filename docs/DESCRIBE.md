@@ -123,8 +123,17 @@ the first day that has one; every day of the month, day of the week and month
 must have a run in the five years from there, or in the year of the first run
 after them, in the spec's zone; and every year must be one the year field
 allows. Each day field is checked alone, a day that D3 says runs only in
-months that have it needs no run, and "never runs" must have none. The check
-is one-sided: it does not find a run a description leaves out.
+months that have it needs no run, and "never runs" must have no run in any
+year the spec allows. Years with the same calendar, leap or not and starting
+on the same day of the week, have the same runs, so the check takes one year
+of each of the 14 calendars. The check does not model daylight saving, so a
+correct time or date can read as not run: a run in an hour that daylight
+saving skips moves forward by the gap's length, several such runs becoming
+one, or with `DSTSkip` does not happen. With `DSTSkip`, two years of one
+calendar can also differ where the zone's transition dates differ (its rules
+changed, or tzdata lists each year's dates), which one year per calendar does
+not see. The check is one-sided: it does not find a run a description leaves
+out.
 
 ```ebnf
 // "x" literal, [x] optional, (x)* repeat, a | b choice.

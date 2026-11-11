@@ -5,8 +5,10 @@ package cron
 
 import (
 	"fmt"
+	"maps"
 	"math/rand/v2"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -433,18 +435,73 @@ func checkSpecNamesRuns(t *testing.T, p Parser, spec string) bool {
 }
 
 // namesNotRun returns each time and date desc names that Next() does not
-// run at, and "never runs" when the spec runs within the 30 years that
-// anyDay lets Next() search, past the parser's default span. The times are
-// read with both day fields as "*": the time fields run the same on every
-// day, and a day the day fields allow may be years away.
+// run at, and "never runs" when the spec runs in a year it allows. The
+// times are read with both day fields as "*": the time fields run the same
+// on every day, and a day the day fields allow may be years away.
 func namesNotRun(desc string, p Parser, spec string, sch Schedule) []string {
 	if desc == "never runs" {
-		if anyDay(p, spec, sch, false, false).Next(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)).IsZero() {
-			return nil
+		if runsSomeYear(anyDay(p, spec, sch, false, false)) {
+			return []string{desc}
 		}
-		return []string{desc}
+		return nil
 	}
 	return append(checkNamedTimes(desc, anyDay(p, spec, sch, true, true)), checkNamedDates(desc, p, spec, sch)...)
+}
+
+// yearKind returns which of the 14 calendars year y follows: the day of the
+// week of January 1, plus 7 in a leap year. Years of one kind put the same
+// dates on the same days of the week.
+func yearKind(y int) int {
+	k := int(time.Date(y, time.January, 1, 0, 0, 0, 0, time.UTC).Weekday())
+	if daysIn(y, time.February) == 29 {
+		k += 7
+	}
+	return k
+}
+
+// runsSomeYear reports whether sch runs in a year it allows, or, when it
+// allows any, in a year from firstYear on. Whether a year has a run depends
+// only on its yearKind, so it asks Next() in the first year of each kind: at
+// most 14 calls, each from the start of its year, however far apart the
+// years are.
+// NOTE: with DSTSkip, a run in an hour that daylight saving skips does not
+// happen, so a year can lose runs that another year of its kind keeps, where
+// the zone's transition dates differ (its rules changed, or tzdata lists
+// each year's dates); a wrong "never runs" can then pass.
+func runsSomeYear(sch Schedule) bool {
+	loc := scheduleZone(sch)
+	for _, y := range firstOfEachKindList(sch) {
+		if t := sch.Next(yearStart(y, loc)); !t.IsZero() && t.Year() == y {
+			return true
+		}
+	}
+	return false
+}
+
+// firstOfEachKindMap returns the first year of each yearKind that sch
+// allows, by kind, from firstYear on when it allows any.
+func firstOfEachKindMap(sch Schedule) map[int]int {
+	first := map[int]int{}
+	if s, ok := sch.(*SpecSchedule); ok && s.Year != nil {
+		for y := range s.Year {
+			if k := yearKind(y); first[k] == 0 || y < first[k] {
+				first[k] = y
+			}
+		}
+		return first
+	}
+	for y := firstYear; len(first) < 14; y++ {
+		if k := yearKind(y); first[k] == 0 {
+			first[k] = y
+		}
+	}
+	return first
+}
+
+// firstOfEachKindList returns the years of firstOfEachKindMap, earliest
+// first.
+func firstOfEachKindList(sch Schedule) []int {
+	return slices.Sorted(maps.Values(firstOfEachKindMap(sch)))
 }
 
 // checkGoldensNameRuns runs checkSpecNamesRuns on each golden, with the
@@ -525,6 +582,7 @@ func TestDescribeSpecNamesRunsCases(t *testing.T) {
 		{years, "0 0 1 1 * 2035,2037"},               // two years apart
 		{years, "0 0 1 1 * 2027,2035"},               // a year after the five years walked
 		{years, "0 0 1 1 * 2026-102025"},             // 100,000 years, the most a year field takes
+		{years, "0 0 30 2 * 2100000000"},             // never runs, in a year near YearMax
 		{five, "0 0 29 2 1"},                         // February 29 on a Monday: no run for years
 		{five, "CRON_TZ=America/New_York 0 9 * * *"}, // 9 am in New York, 13:00 or 14:00 in UTC
 		{five, "CRON_TZ=Asia/Tokyo 0 3 5 * *"},       // the 5th in Tokyo, the 4th in UTC
@@ -555,7 +613,11 @@ func TestNamesNotRun(t *testing.T) {
 		{five, "0 0 1 3 *", "at midnight on the 1st of the month in April", "April"},
 		{years, "0 0 1 1 * 2027", "at midnight on the 1st of the month in January in year 2028", "2028"},
 		{five, "0 0 1 1 *", "never runs", "never runs"},
-		{years, "0 0 1 1 * 2035", "never runs", "never runs"}, // past the parser's default search span
+		{years, "0 0 1 1 * 2035", "never runs", "never runs"},       // past the parser's default search span
+		{years, "0 0 1 1 * 2060", "never runs", "never runs"},       // past a 30-year search from 2026
+		{years, "0 0 1 1 * 2025", "never runs", "never runs"},       // before 2026
+		{five, "0 0 29 2 1", "never runs", "never runs"},            // February 29 on a Monday: first in 2044
+		{years, "0 0 29 2 1 2026-2060", "never runs", "never runs"}, // the same, in a year field
 		{years, "0 0 1 1 * 2035,2037", "at midnight on the 1st of the month in January in years 2035 and 2036", "2036"},
 		{years, "0 0 1 1 * 2026-2030", "at midnight on the 1st of the month in January in years 2026 thru 2031", "2026 thru 2031"},
 		{years, "0 0 1 1 * 2035", "at midnight on the 1st of the month in January in year 1", "1"}, // the zero time is in year 1
