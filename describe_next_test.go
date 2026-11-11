@@ -290,13 +290,18 @@ func anyDay(p Parser, spec string, sch Schedule, dom, dow bool) Schedule {
 
 // namedMisses returns each item of re in s, a value in group 1 or a range
 // over groups 1 and 2, that has a value with no run. A range whose end is
-// below its start wraps past hi to lo, as "Friday thru Monday" does.
+// below its start wraps past hi to lo, as "Friday thru Monday" does. A
+// value outside lo thru hi has no run.
 func namedMisses(s string, re *regexp.Regexp, runs map[int]bool, lo, hi int) []string {
 	var bad []string
 	for _, m := range re.FindAllStringSubmatch(s, -1) {
 		v, end := dateValue(m[1]), dateValue(m[1])
 		if m[2] != "" {
 			end = dateValue(m[2])
+		}
+		if min(v, end) < lo || max(v, end) > hi { // no field has the value
+			bad = append(bad, m[0])
+			continue
 		}
 		for ; runs[v] && v != end; v++ {
 			if v == hi {
@@ -487,6 +492,8 @@ func TestNamesNotRun(t *testing.T) {
 		{years, "0 0 1 1 * 2035", "never runs", "never runs"}, // past the parser's default search span
 		{five, "0 9,17 * * *", "at the top of every hour from 9 am thru 5 pm every day", "9 am thru 5 pm"},
 		{five, "0,10 * * * *", "at minutes 0 thru 10 past the hour", "minute 0 thru 10"},
+		{five, "* * * * *", "at minutes 0 thru 60 past the hour", "minute 0 thru 60"}, // an end past 59
+		{five, "0 0 * * *", "at midnight on the 1st thru 32nd of the month", "1st thru 32nd"},
 	} {
 		sch, err := tt.p.Parse(tt.spec)
 		if err != nil {
