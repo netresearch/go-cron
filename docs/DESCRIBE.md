@@ -51,7 +51,7 @@ which form a spec gets. Each has an ID, which the grammar cites.
 
 | ID | Rule |
 |---|---|
-| G1 | A description says what the scheduler runs: each golden in `describe_test.go` was checked against the runs `Next()` computes. `TestDescribeSpecNamesRuns` keeps the times in check: every clock time, minute and second a description names must be one `Next()` runs at, for the goldens and for random time fields. The check is one-sided: it does not find a run the description leaves out |
+| G1 | A description says what the scheduler runs: each golden in `describe_test.go` was checked against the runs `Next()` computes. `TestDescribeSpecNamesRuns` keeps the times and dates in check: every clock time, minute, second, day of the month, day of the week, month and year a description names must be one `Next()` runs at, for the goldens and for random specs. Each day field is checked alone, and a day that D3 says runs only in months that have it needs no run. The check is one-sided: it does not find a run the description leaves out |
 | G2 | A parser oddity is described as it runs |
 | G3 | The description is built from the spec text as the parser splits it, and its values follow the parser's options |
 | G6 | Wording is for people |

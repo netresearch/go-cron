@@ -22,12 +22,15 @@ var (
 	digits      = regexp.MustCompile(`\d+`)
 )
 
-// dayRuns walks Next() over one day and returns the hours, the minutes and
-// the seconds that run, and every time of day as h*3600+m*60+s.
+// dayRuns walks Next() over the day of the first run from 2026 on and
+// returns the hours, the minutes and the seconds that run, and every time of
+// day as h*3600+m*60+s. A spec that never runs has none; Next() returns the
+// zero time for it.
 func dayRuns(sch Schedule) (hours, minutes, seconds, times map[int]bool) {
 	hours, minutes, seconds, times = map[int]bool{}, map[int]bool{}, map[int]bool{}, map[int]bool{}
-	start := time.Date(2027, time.January, 1, 0, 0, 0, 0, time.UTC)
-	for t := sch.Next(start.Add(-time.Second)); t.Before(start.AddDate(0, 0, 1)); t = sch.Next(t) {
+	first := sch.Next(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC).Add(-time.Second))
+	start := time.Date(first.Year(), first.Month(), first.Day(), 0, 0, 0, 0, time.UTC)
+	for t := first; !t.IsZero() && t.Before(start.AddDate(0, 0, 1)); t = sch.Next(t) {
 		hours[t.Hour()], minutes[t.Minute()], seconds[t.Second()] = true, true, true
 		times[t.Hour()*3600+t.Minute()*60+t.Second()] = true
 	}
@@ -116,9 +119,130 @@ func namedValueMisses(m []string, minutes, seconds map[int]bool) []string {
 	return bad
 }
 
-// randomTimeField returns a field of one to three items over lo thru hi: a
+// The dates a description names (G1): days of the month, days of the week
+// and months, each a value or a range, and the years after "in year(s)".
+var (
+	namedOrdinals = regexp.MustCompile(`\b(\d+)(?:st|nd|rd|th)(?: thru (\d+)(?:st|nd|rd|th))?\b`)
+	namedDays     = regexp.MustCompile(`\b(Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday)(?: thru (Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday))?\b`)
+	namedMonths   = regexp.MustCompile(`\b(January|February|March|April|May|June|July|August|September|October|November|December)(?: thru (January|February|March|April|May|June|July|August|September|October|November|December))?\b`)
+	namedYears    = regexp.MustCompile(`\bin years? (\d+(?:(?:, and |, … |, | and | thru )\d+)*)`)
+	shortMonths   = regexp.MustCompile(`; the (.*) runs? only in months that have`)
+	yearItem      = regexp.MustCompile(`(\d+)(?: thru (\d+))?`)
+)
+
+// dateNames maps the names of the days of the week and of the months to
+// their values, as time.Weekday and time.Month spell them.
+var dateNames = func() map[string]int {
+	m := map[string]int{}
+	for d := time.Sunday; d <= time.Saturday; d++ {
+		m[d.String()] = int(d)
+	}
+	for mo := time.January; mo <= time.December; mo++ {
+		m[mo.String()] = int(mo)
+	}
+	return m
+}()
+
+// runDates holds the days of the month, the months, the days of the week
+// and the years that have a run.
+type runDates struct{ doms, months, dows, years map[int]bool }
+
+// dateRuns walks Next() from 2026 thru 2030, one call per day with a run.
+func dateRuns(sch Schedule) runDates {
+	r := runDates{map[int]bool{}, map[int]bool{}, map[int]bool{}, map[int]bool{}}
+	end := time.Date(2031, time.January, 1, 0, 0, 0, 0, time.UTC)
+	t := sch.Next(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC).Add(-time.Second))
+	for ; !t.IsZero() && t.Before(end); t = sch.Next(time.Date(t.Year(), t.Month(), t.Day(), 23, 59, 59, 0, time.UTC)) {
+		r.doms[t.Day()], r.months[int(t.Month())], r.dows[int(t.Weekday())], r.years[t.Year()] = true, true, true, true
+	}
+	return r
+}
+
+// checkNamedDates reports every date desc names that has no run: each day
+// of the month, day of the week, month and year, and each value of a range
+// of them. It checks each field alone, through the spec with the other day
+// field, or both, as "*" ("the 13th when it falls on Friday" needs runs on
+// a 13th and on a Friday, not on a Friday the 13th), and a day that D3 says
+// runs only in months that have it needs none. Like checkNamedTimes, it is
+// one-sided.
+func checkNamedDates(desc string, p Parser, spec string, sch Schedule) []string {
+	doms := dateRuns(anyDay(p, spec, sch, false, true)).doms
+	dows := dateRuns(anyDay(p, spec, sch, true, false)).dows
+	both := dateRuns(anyDay(p, spec, sch, true, true))
+	for _, m := range shortMonths.FindAllStringSubmatch(desc, -1) {
+		for _, d := range digits.FindAllString(m[1], -1) {
+			doms[dateValue(d)] = true
+		}
+	}
+	bad := namedMisses(desc, namedOrdinals, doms, 1, 31)
+	bad = append(bad, namedMisses(desc, namedDays, dows, 0, 6)...)
+	bad = append(bad, namedMisses(desc, namedMonths, both.months, 1, 12)...)
+	for _, m := range namedYears.FindAllStringSubmatch(desc, -1) {
+		bad = append(bad, namedMisses(m[1], yearItem, both.years, 0, 9999)...)
+	}
+	return bad
+}
+
+// anyDay returns the schedule of spec with its day of the month (dom), its
+// day of the week (dow), or both as "*", or sch when it can't.
+func anyDay(p Parser, spec string, sch Schedule, dom, dow bool) Schedule {
+	f := strings.Fields(spec)
+	i := 2 // the day of the month follows the minute and the hour
+	if strings.HasPrefix(f[0], "CRON_TZ=") || strings.HasPrefix(f[0], "TZ=") {
+		i++
+	}
+	if p.options&Second != 0 {
+		i++
+	}
+	if i+2 >= len(f) {
+		return sch
+	}
+	if dom {
+		f[i] = "*"
+	}
+	if dow {
+		f[i+2] = "*"
+	}
+	if s, err := p.Parse(strings.Join(f, " ")); err == nil {
+		return s
+	}
+	return sch
+}
+
+// namedMisses returns each item of re in s, a value in group 1 or a range
+// over groups 1 and 2, that has a value with no run. A range whose end is
+// below its start wraps past hi to lo, as "Friday thru Monday" does.
+func namedMisses(s string, re *regexp.Regexp, runs map[int]bool, lo, hi int) []string {
+	var bad []string
+	for _, m := range re.FindAllStringSubmatch(s, -1) {
+		v, end := dateValue(m[1]), dateValue(m[1])
+		if m[2] != "" {
+			end = dateValue(m[2])
+		}
+		for ; runs[v] && v != end; v++ {
+			if v == hi {
+				v = lo - 1
+			}
+		}
+		if !runs[v] {
+			bad = append(bad, m[0])
+		}
+	}
+	return bad
+}
+
+// dateValue returns the value of a day or month name, or of a number.
+func dateValue(s string) int {
+	if v, ok := dateNames[s]; ok {
+		return v
+	}
+	v, _ := strconv.Atoi(s)
+	return v
+}
+
+// randomField returns a field of one to three items over lo thru hi: a
 // value, a range, plain or wrapped, or a step.
-func randomTimeField(r *rand.Rand, lo, hi int) string {
+func randomField(r *rand.Rand, lo, hi int) string {
 	if r.IntN(8) == 0 {
 		return "*"
 	}
@@ -131,7 +255,7 @@ func randomTimeField(r *rand.Rand, lo, hi int) string {
 		case 2:
 			items[i] = fmt.Sprintf("%d-%d", val(), val())
 		case 3:
-			items[i] = fmt.Sprintf("*/%d", 2+r.IntN(hi/2))
+			items[i] = fmt.Sprintf("*/%d", 2+r.IntN((hi-lo+1)/2))
 		default:
 			items[i] = fmt.Sprintf("%d-%d/%d", val(), val(), 2+r.IntN(6))
 		}
@@ -139,9 +263,10 @@ func randomTimeField(r *rand.Rand, lo, hi int) string {
 	return strings.Join(items, ",")
 }
 
-// checkSpecNamesRuns reports an error for each time the description of spec
-// names that Next() does not run at. It returns false for a spec that p does
-// not take or that is described field by field, which names no time.
+// checkSpecNamesRuns reports an error for each time or date the description
+// of spec names that Next() does not run at. It returns false for a spec
+// that p does not take or that is described field by field, which names
+// none.
 func checkSpecNamesRuns(t *testing.T, p Parser, spec string) bool {
 	t.Helper()
 	sch, err := p.Parse(spec)
@@ -156,49 +281,72 @@ func checkSpecNamesRuns(t *testing.T, p Parser, spec string) bool {
 	if literalForm.MatchString(desc) {
 		return false
 	}
-	if bad := checkNamedTimes(desc, sch); len(bad) > 0 {
+	if bad := append(checkNamedTimes(desc, sch), checkNamedDates(desc, p, spec, sch)...); len(bad) > 0 {
 		t.Errorf("DescribeSpec(%q) = %q: names %s, which Next() does not run at", spec, desc, strings.Join(bad, ", "))
 	}
 	return true
 }
 
-// TestDescribeSpecNamesRuns enforces G1 for the time fields: every clock
-// time, minute and second that a description names is one the scheduler
-// runs at, for the goldens and for random time fields.
-func TestDescribeSpecNamesRuns(t *testing.T) {
-	five := NewParser(Minute | Hour | Dom | Month | Dow | Descriptor)
-	six := NewParser(Second | Minute | Hour | Dom | Month | Dow | Descriptor)
-	check := func(p Parser, spec string) bool { return checkSpecNamesRuns(t, p, spec) }
-
+// checkGoldensNameRuns runs checkSpecNamesRuns on each golden, with the
+// parser its options give, and returns how many it checked.
+func checkGoldensNameRuns(t *testing.T) int {
+	t.Helper()
 	checked := 0
 	for _, tt := range describeGoldens {
-		p := five
-		if len(strings.Fields(strings.TrimPrefix(tt.spec, "CRON_TZ=UTC "))) == 6 {
-			p = six
+		p, err := tryParserForOptions(newDescribeConfig(tt.opts).parse)
+		if err != nil {
+			t.Fatalf("parser for %q: %v", tt.spec, err)
 		}
-		if check(p, tt.spec) {
+		if checkSpecNamesRuns(t, p, tt.spec) {
 			checked++
 		}
 	}
-	if checked < 100 {
-		t.Errorf("checked %d goldens, want at least 100", checked)
+	return checked
+}
+
+// TestDescribeSpecNamesRuns enforces G1: every clock time, minute, second,
+// day of the month, day of the week, month and year that a description
+// names is one the scheduler runs at, for the goldens with their parse
+// options and for random specs.
+func TestDescribeSpecNamesRuns(t *testing.T) {
+	if checked := checkGoldensNameRuns(t); checked < 180 {
+		t.Errorf("checked %d goldens, want at least 180", checked)
 	}
 
 	r := rand.New(rand.NewPCG(1, 2)) // fixed seed: the same specs on every run
-	checked = 0
-	for range 600 {
-		spec := randomTimeField(r, 0, 59) + " " + randomTimeField(r, 0, 23) + " * * *"
-		if check(five, spec) {
-			checked++
-		}
+	field := func(lo, hi int) string { return randomField(r, lo, hi) }
+	days := func() string {
+		return fmt.Sprintf("%d %d %s %s %s", r.IntN(60), r.IntN(24), field(1, 31), field(1, 12), field(0, 6))
 	}
-	for range 100 {
-		spec := strconv.Itoa(r.IntN(60)) + " " + randomTimeField(r, 0, 59) + " " + randomTimeField(r, 0, 23) + " * * *"
-		if check(six, spec) {
-			checked++
+	year := func() string { // a year or a range: the year field takes no wrapped range
+		y := 2026 + r.IntN(5)
+		if r.IntN(2) == 0 {
+			return strconv.Itoa(y)
 		}
+		return fmt.Sprintf("%d-%d", y, y+r.IntN(2031-y))
 	}
-	if checked < 400 {
-		t.Errorf("checked %d random specs, want at least 400", checked)
+	for _, c := range []struct {
+		name     string
+		p        Parser
+		n, least int
+		spec     func() string
+	}{
+		{"time fields", NewParser(Minute | Hour | Dom | Month | Dow), 600, 500, func() string { return field(0, 59) + " " + field(0, 23) + " * * *" }},
+		{"seconds", NewParser(Second | Minute | Hour | Dom | Month | Dow), 100, 80, func() string {
+			return strconv.Itoa(r.IntN(60)) + " " + field(0, 59) + " " + field(0, 23) + " * * *"
+		}},
+		{"date fields", NewParser(Minute | Hour | Dom | Month | Dow), 400, 240, days},
+		{"DowOrDom", NewParser(Minute | Hour | Dom | Month | Dow | DowOrDom), 200, 100, days},
+		{"years", NewParser(Minute | Hour | Dom | Month | Dow | Year), 100, 60, func() string { return days() + " " + year() }},
+	} {
+		checked := 0
+		for range c.n {
+			if checkSpecNamesRuns(t, c.p, c.spec()) {
+				checked++
+			}
+		}
+		if checked < c.least {
+			t.Errorf("%s: checked %d random specs, want at least %d", c.name, checked, c.least)
+		}
 	}
 }
