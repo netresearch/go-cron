@@ -4,6 +4,7 @@
 package cron
 
 import (
+	"cmp"
 	"fmt"
 	"regexp"
 	"slices"
@@ -54,167 +55,559 @@ func DescribeSpec(spec string, opts ...DescribeOption) (string, error) {
 	return p.DescribeSpec(spec, opts...)
 }
 
+// DescribeSpecNote returns the note that spells out the values the hash key
+// picks in spec's description, or "" when it has none, or the parse error. It
+// parses as DescribeSpec does. See Parser.DescribeSpecNote.
+func DescribeSpecNote(spec string, opts ...DescribeOption) (string, error) {
+	p, err := tryParserForOptions(newDescribeConfig(opts).parse)
+	if err != nil {
+		return "", err
+	}
+	return p.DescribeSpecNote(spec, opts...)
+}
+
 // DescribeSpec returns an English description of spec as p parses it, or the
 // parse error. The description follows the grammar in docs/DESCRIBE.md and
 // leaves out the time zone; callers show the location beside it. A valid spec
 // always gets a description and a nil error; one that never runs is "never
-// runs". Specs outside the fields covered so far (see docs/DESCRIBE.md) get
-// each written field by name, as written: "minute 0, hour 0, day of month L,
-// month *, day of week *". A descriptor such as "@daily" is returned as
-// written. H needs no hash key here: the description does not depend on it.
-// With no key, StrictDays does not check a spec with H in the day of the
-// month or the month, as the value the key picks decides that check.
+// runs", within the limit on H in G11 of docs/DESCRIBE.md. Combinations of H
+// without a form (H17 and H20 in docs/DESCRIBE.md) get each written field by
+// name, as written: "minute 0, hour 0, day of month H/10, month *, day of week
+// 1". A descriptor reads as its cron equivalent
+// ("@weekly" is "at 12 am on Sunday"), and "@triggered", "@manual" and "@none"
+// read "only when triggered". An interval reads as it runs, from its anchor,
+// with the parser's minimum: "every 1h30m from when scheduling started",
+// "every 15m from Unix epoch". H needs no hash key here: the description does
+// not depend on it. With no key, StrictDays does not check a spec with H in
+// the day of the month or the month when the value the key picks decides that
+// check; when no key finds the day, the parser's error returns.
 func (p Parser) DescribeSpec(spec string, _ ...DescribeOption) (string, error) {
-	if p.hashKey == "" {
-		p.hashKey = "describe"
-		// A spec that fails to split fails again in Parse below.
-		if _, _, fields, _, err := p.specFields(spec); err == nil && len(fields) > 4 && containsHashExpr(fields[3:5]) {
-			p.options &^= StrictDays // the result would depend on the placeholder key
-		}
+	desc, _, err := p.describe(spec)
+	return desc, err
+}
+
+// DescribeSpecNote returns the note that spells out the values the hash
+// key picks in spec's description, as p parses it: "at minutes h, h+15,
+// h+30, and h+45 past the hour, where h is a fixed minute from 0 to 14".
+// It is "" unless a field has a hashed step or a fixed day of the month. A
+// description given field by field still gets its note. See docs/DESCRIBE.md.
+func (p Parser) DescribeSpecNote(spec string, _ ...DescribeOption) (string, error) {
+	_, note, err := p.describe(spec)
+	return note, err
+}
+
+// withPlaceholderKey gives a parser with no hash key one, as the description
+// does not depend on it. StrictDays is dropped when H is in the day of the
+// month or the month, where the result would depend on that key; describe
+// restores it when no key finds the day.
+func (p Parser) withPlaceholderKey(spec string) Parser {
+	if p.hashKey != "" {
+		return p
 	}
+	p.hashKey = "describe"
+	if len(spec) > MaxSpecLength { // Parse rejects it, so it need not be split.
+		return p
+	}
+	// A spec that fails to split fails again in Parse.
+	if _, _, fields, _, err := p.specFields(spec); err == nil && len(fields) > 4 && containsHashExpr(fields[3:5]) {
+		p.options &^= StrictDays
+	}
+	return p
+}
+
+// describe returns the description of spec and its note (N1–N8).
+func (p Parser) describe(spec string) (desc, note string, err error) {
+	strict := p.options&StrictDays != 0
+	p = p.withPlaceholderKey(spec)
 	sch, err := p.Parse(spec)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	// The spec parsed, so the split cannot fail.
 	_, descriptor, fields, yearField, _ := p.specFields(spec)
-	if descriptor != "" {
-		return descriptor, nil
+	fields, text := p.expandDescriptor(descriptor, fields)
+	if text != "" {
+		return text, "", nil
 	}
-	if containsHashExpr(fields) || !allDescribable(fields) || !describable(yearField) {
-		return p.describeLiteral(spec, fields, yearField), nil
+	if err := p.strictDaysError(spec, strict, sch, fields); err != nil {
+		return "", "", err
 	}
-	if p.dayMissing(sch) {
-		return "never runs", nil
+	if !allDescribable(fields) || !describable(yearField) {
+		return p.describeLiteral(spec, fields, yearField), "", nil
 	}
-	var d describer
-	day, short, dayName := p.describeDays(&d, fields[3], fields[5])
-	d.named, d.dayName = day != "", dayName
-	parts := []string{d.describeTime(fields)}
-	for _, clause := range []string{day, d.describeMonths(fields[4]), d.describeYears(yearField)} {
+	if p.dayMissing(sch, fields) {
+		return "never runs", "", nil
+	}
+	var h [3]hashField
+	for i, r := range []bounds{seconds, minutes, hours} {
+		h[i] = splitHash(fields[i], r)
+	}
+	hd, dates, ok := p.splitDates(fields)
+	units := hashUnits(append(h[:], hd[:]...), []string{unitSecond, unitMinute, unitHour, unitDay, unitDay, unitMonth})
+	d := p.dayDescriber(sch, fields)
+	day, month, short, dok := p.describeDates(&d, hd, dates)
+	if !ok || !dok {
+		return p.describeLiteral(spec, fields, yearField), p.hashNote(&d, h, hd, dates), nil
+	}
+	d.named = day != ""
+	var timeText string
+	if !slices.ContainsFunc(h[:], hashField.hashes) {
+		timeText = d.describeTime([]string{h[0].plain, h[1].plain, h[2].plain})
+	} else if t, ok := d.describeHashTime(h); ok {
+		timeText = t
+	} else {
+		return p.describeLiteral(spec, fields, yearField), p.hashNote(&d, h, hd, dates), nil
+	}
+	parts := []string{timeText}
+	for _, clause := range []string{day, month, d.describeYears(yearField)} {
 		if clause != "" {
 			parts = append(parts, clause)
 		}
 	}
-	return strings.Join(parts, " ") + d.noteText() + short, nil
+	desc = placeAlternatives(strings.Join(parts, " ")+d.noteText()+short) + hashKeyClause(units)
+	return desc, p.hashNote(&d, h, hd, dates), nil
+}
+
+// descriptorFields holds the fields, second to day of week, that each
+// calendar descriptor runs as (parseDescriptor).
+var descriptorFields = map[string][]string{
+	descriptorYearly:   {"0", "0", "0", "1", "1", "*"},
+	descriptorAnnually: {"0", "0", "0", "1", "1", "*"},
+	descriptorMonthly:  {"0", "0", "0", "1", "*", "*"},
+	descriptorWeekly:   {"0", "0", "0", "*", "*", "0"},
+	descriptorDaily:    {"0", "0", "0", "*", "*", "*"},
+	descriptorMidnight: {"0", "0", "0", "*", "*", "*"},
+	descriptorHourly:   {"0", "0", "*", "*", "*", "*"},
+}
+
+// expandDescriptor returns the fields a calendar descriptor runs as, or the
+// whole description of any other descriptor: "only when triggered" for a
+// trigger, the interval for "@every". Without a descriptor it returns fields.
+func (p Parser) expandDescriptor(descriptor string, fields []string) (expanded []string, text string) {
+	switch descriptor {
+	case "":
+		return fields, ""
+	case descriptorTriggered, descriptorManual, descriptorNone:
+		return nil, "only when triggered"
+	}
+	if f, ok := descriptorFields[descriptor]; ok {
+		return f, ""
+	}
+	return nil, p.describeInterval(descriptor)
+}
+
+// describeInterval describes a parsed "@every" descriptor as it runs (P3):
+// the interval after the parser's minimum and truncation, from the start or
+// the Unix epoch, and how the written duration changed.
+func (p Parser) describeInterval(descriptor string) string {
+	sch, _ := p.intervalSchedule(descriptor) // the spec parsed
+	from := "when scheduling started"
+	var every time.Duration
+	switch s := sch.(type) {
+	case ConstantDelaySchedule:
+		every = s.Delay
+	case AlignedSchedule:
+		every, from = s.Interval, "Unix epoch"
+	}
+	if every <= 0 {
+		every, from = time.Second, "when scheduling started" // Next adds 1s
+	}
+	_, writtenText, _ := strings.Cut(descriptor, " ")
+	written, _ := time.ParseDuration(writtenText)
+	text := "every " + durationText(every) + " from " + from
+	var how string
+	switch {
+	case every == written:
+		return text
+	case p.minEveryInterval > 0 && written < p.minEveryInterval:
+		how = "rounded up to the " + durationText(p.minEveryInterval) + " minimum"
+	case every > written:
+		how = "rounded up to whole seconds"
+	default:
+		how = "cut to whole seconds"
+	}
+	return text + " (written as " + writtenText + ", " + how + ")"
+}
+
+// durationText is d as Go writes it, without zero minutes and seconds after
+// a larger unit: "1h30m", "1h", "1m", "500ms".
+func durationText(d time.Duration) string {
+	s := d.String()
+	if strings.HasSuffix(s, "m0s") {
+		s = strings.TrimSuffix(s, "0s")
+	}
+	if strings.HasSuffix(s, "h0m") {
+		s = strings.TrimSuffix(s, "0m")
+	}
+	return s
 }
 
 // describer builds one description: whether it names a day, and the notes
 // of the fields it cuts short.
 type describer struct {
-	named     bool     // a day clause follows the time (J1)
-	dayName   bool     // the day clause names a day of the week (R2, D7)
-	notes     []string // the time fields' notes
-	dateNotes []string // the date fields' notes, after the time's (G7)
+	named      bool              // a day clause follows the time (J1)
+	dayName    bool              // the day clause names a day of the week (R2, D7)
+	notes      []string          // the time fields' notes
+	dateNotes  []string          // the date fields' notes, after the time's (G7)
+	monthDays  []uint            // the month lengths a hashed day step can run in (H19)
+	dayPairs   map[uint64]uint64 // a hashed day step's days and a hashed month's lengths (H19)
+	monthNamed bool              // a month clause follows the day clause (H19)
 }
 
-// dayMissing reports a day of the month that none of the written months and
-// years has (G11): "0 0 30 2 *", "0 0 29 2 * 2027".
-func (p Parser) dayMissing(sch Schedule) bool {
+// dayMissing reports a schedule whose days the calendar never has (G11): a
+// day none of the written months and years has ("0 0 30 2 *", "0 0 29 2 *
+// 2027", "0 0 31W 4 *"), or a day that cannot be the counted day of the week
+// ("0 0 1 * MON#2"). With H in a date field it asks this of every set of values
+// a key can pick, up to maxHashWalk: "0 0 H(30-31) 2 *" never runs for any key,
+// while "0 0 H(29-31) 2 *" runs for some. It reads the calendar, not Next, which looks only some
+// years ahead: "0 0 * 2 MON#5" next runs in 2044.
+func (p Parser) dayMissing(sch Schedule, fields []string) bool {
 	s, ok := sch.(*SpecSchedule)
-	if !ok {
-		return false
+	if !ok || len(s.Year)+len(s.DomConstraints)+len(s.DowConstraints) == 0 {
+		return p.noKeyFindsDay(sch, fields)
 	}
-	or := p.options&DowOrDom != 0
-	if dayNeverMatches(s.Dom, s.Month, s.Dow, s.DomConstraints, or) {
-		return true
-	}
-	if len(s.Year) == 0 || len(s.DomConstraints) > 0 || or && s.Dom&starBit == 0 && s.Dow&starBit == 0 {
-		return false
-	}
-	for y := range s.Year {
-		for m := time.January; m <= time.December; m++ {
-			if s.Month&(1<<uint(m)) != 0 && monthHasDay(s.Dom, y, m) {
-				return false
-			}
-		}
-	}
-	return true
+	years := calendarYears(s.Year)
+	return !p.anyPick(s, fields, func(pick *SpecSchedule) bool { return dayInYears(pick, years) })
 }
 
-// monthHasDay reports a day in the dom set that month m of year y has.
-func monthHasDay(dom uint64, y int, m time.Month) bool {
-	last := time.Date(y, m+1, 0, 0, 0, 0, 0, time.UTC).Day()
-	for d := 1; d <= last; d++ {
-		if dom&(1<<uint(d)) != 0 {
-			return true
+// dayInYears reports whether s matches a day in any of years.
+func dayInYears(s *SpecSchedule, years []int) bool {
+	for _, y := range years {
+		for t := time.Date(y, time.January, 1, 0, 0, 0, 0, time.UTC); t.Year() == y; t = t.AddDate(0, 0, 1) {
+			if s.Month&(1<<uint(t.Month())) != 0 && dayMatches(s, t) { // #nosec G115 -- a month, 1 to 12
+				return true
+			}
 		}
 	}
 	return false
 }
 
+// calendarYears returns one year of each kind among the written years, or
+// among 28 years when none is written, which hold all 14 kinds: a year's days
+// depend only on its first day of the week and whether it is a leap year.
+func calendarYears(written map[int]struct{}) []int {
+	if len(written) == 0 {
+		written = make(map[int]struct{}, 28)
+		for y := 2001; y <= 2028; y++ {
+			written[y] = struct{}{}
+		}
+	}
+	var years []int
+	seen := map[[2]int]bool{}
+	for y := range written {
+		kind := [2]int{int(time.Date(y, time.January, 1, 0, 0, 0, 0, time.UTC).Weekday()), time.Date(y, time.March, 0, 0, 0, 0, 0, time.UTC).Day()}
+		if !seen[kind] {
+			seen[kind] = true
+			years = append(years, y)
+		}
+	}
+	return years
+}
+
+// strictDaysError returns the parser's error when strict was dropped for the
+// placeholder key and no key finds the day: every key picks a missing day, so
+// the parser rejects any of them.
+func (p Parser) strictDaysError(spec string, strict bool, sch Schedule, fields []string) error {
+	if !strict || p.options&StrictDays != 0 || !p.noKeyFindsDay(sch, fields) {
+		return nil
+	}
+	p.options |= StrictDays
+	_, err := p.Parse(spec)
+	return err
+}
+
+// noKeyFindsDay reports a day of the month that none of the written months
+// has, whatever values a key picks; the parser's check, without the year.
+func (p Parser) noKeyFindsDay(sch Schedule, fields []string) bool {
+	s, ok := sch.(*SpecSchedule)
+	if !ok {
+		return false
+	}
+	return !p.anyPick(s, fields, func(pick *SpecSchedule) bool {
+		return !dayNeverMatches(pick.Dom, pick.Month, pick.Dow, pick.DomConstraints, p.options&DowOrDom != 0)
+	})
+}
+
 // describeDays describes the day of month and day of week, "" when neither
-// is restricted (D2, D4, D5). short names the days above the 28th that the
-// day of month fires on: "; the 31st runs only in months that have one" (D3).
-// dayName reports a day of the week in the clause (D7).
-func (p Parser) describeDays(d *describer, domField, dowField string) (day, short string, named bool) {
-	md := newTimeField(domField, "day", "month", dom)
-	md.word, md.limit = ordinal, 12
-	wd := newTimeField(dowField, "day", "week", p.dowBounds())
-	wd.word = func(v uint) string { return time.Weekday(v).String() }
-	domSet := !isWildcard(domField)
-	dowSet := !isWildcard(dowField)
-	or := domSet && dowSet && p.dowOrDom(domField, dowField)
-	domAll, dowAll := len(md.vals) == 31, len(wd.vals) == 7
+// is restricted (D2, D4, D5, X1–X4), with each field's H items in hd and hw
+// (H18). short names the days above the 28th that the day of month fires on:
+// "; the 31st runs only in months that have one" (D3, X5), then the days
+// before the last day that short months lack (X6). ok is false for H without
+// a form (H20).
+func (p Parser) describeDays(d *describer, domField, dowField string, hd, hw hashField) (day, short string, ok bool) {
+	domPlain, domSpecial := splitItems(domField, domSpecialItem)
+	dowPlain, dowNth := splitItems(dowField, dowNthItem)
+	md := newDomField(strings.Join(domPlain, ","))
+	wd := p.newDowField(strings.Join(dowPlain, ","))
+	domSet, dowSet := restricted(domField, hd), restricted(dowField, hw)
+	or := domSet && dowSet && p.dowOrDom(hd.writtenOr(domField), hw.writtenOr(dowField))
+	domAll, dowAll := md.every(), wd.every()
 	if or && (domAll || dowAll) {
-		return "", "", false // T3: one side of the OR is every day
+		return "", "", !hd.hashes() && !hw.hashes() // T3: one side of the OR is every day
 	}
 	// T3 comes first: a field that covers its range drops out on its own.
 	domSet = domSet && !domAll
 	dowSet = dowSet && !dowAll
 
+	ok = true
 	var domText string
-	if domSet {
-		domText, short = d.describeDom(md)
+	switch {
+	case hd.hashes():
+		domText, short, ok = d.hashDom(hd, md, !dowSet)
+	case domSet:
+		domText, short = d.describeDom(md, domSpecial, !or)
 	}
-	var dowWords []string
+	var days, nth []string
 	if dowSet {
-		dowWords = wd.runWords(wd.vals)
+		days, nth = wd.runWords(wd.vals), nthDays(dowNth)
 	}
-	return dayClause(domText, dowWords, or), short, dowWords != nil
+	d.dayName = len(days)+len(nth) > 0 // a fixed day is not a named day (D7)
+	dowWords := dowItems(days, nth, or)
+	if hw.hashes() {
+		w, wok := p.hashDow(hw, wd, !domSet, or)
+		dowWords, ok = []string{w}, ok && wok
+	}
+	return dayClause(domText, dowWords, or), short, ok
 }
 
-// dayClause joins the day of month and the days of the week, either of which
-// may be missing: "and" (D5 AND) or "or on any" (D5 OR).
+// newDomField is the day of month: ordinals, up to 12 listed (D2).
+func newDomField(text string) timeField {
+	md := newTimeField(text, unitDay, unitMonth, dom)
+	md.word, md.limit = ordinal, 12
+	return md
+}
+
+// newDowField is the day of week: names, 7 read as Sunday (D4).
+func (p Parser) newDowField(text string) timeField {
+	wd := newTimeField(text, unitDay, "week", p.dowBounds())
+	wd.word = func(v uint) string { return time.Weekday(v % 7).String() }
+	return wd
+}
+
+// newMonthField is the month: names, up to 12 listed (D6).
+func newMonthField(text string) timeField {
+	m := newTimeField(text, unitMonth, "year", months)
+	m.word, m.limit = func(v uint) string { return time.Month(v).String() }, 12
+	return m
+}
+
+// restricted reports a day field that names days: H items, or plain items
+// that are not the star.
+func restricted(field string, h hashField) bool {
+	return h.hashes() || !isWildcard(field)
+}
+
+// dayClause joins the day of month, a clause with its own "on" or none
+// (X2), and the days of the week, either of which may be missing: "when it
+// falls on" (D5 AND) or "or on any" (D5 OR).
 func dayClause(domText string, dowWords []string, or bool) string {
 	switch {
 	case or:
-		for i, w := range dowWords {
-			dowWords[i] = "any " + w
-		}
-		return "on " + domText + " or on " + andList(dowWords)
+		return domText + " or on " + andList(dowWords)
 	case domText != "" && dowWords != nil:
-		return "on " + domText + " when it falls on " + andList(dowWords)
+		return domText + " when it falls on " + andList(dowWords)
 	case domText != "":
-		return "on " + domText
+		return domText
 	case dowWords != nil:
 		return "on " + andList(dowWords)
 	}
 	return ""
 }
 
-// describeDom describes the day of month, "the 1st and 15th of the month"
-// (D2), and the clause naming its days above the 28th (D3).
-func (d *describer) describeDom(md timeField) (text, short string) {
-	text = d.dateNums(md)
+// dowItems names the days of the week for their place in the clause:
+// "Monday and the third Friday", or each with "any" when ORed (X4).
+func dowItems(days, nth []string, or bool) []string {
+	out := make([]string, 0, len(days)+len(nth))
+	for _, w := range days {
+		if or {
+			w = "any " + w
+		}
+		out = append(out, w)
+	}
+	for _, w := range nth {
+		if or {
+			w = "any " + w
+		} else {
+			w = "the " + w
+		}
+		out = append(out, w)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// domSpecialItem is the day-of-month syntax of DomL and DomW: L, LW, L-n and
+// nW. dowNthItem is the day-of-week syntax of DowNth and DowLast: a day with
+// "#" and its occurrence, or "#L" for the last. Numbers read as strconv.Atoi
+// reads them, as the parser does, so "-0" is Sunday.
+var (
+	domSpecialItem = regexp.MustCompile(`^(?i:L|LW|L-\+?\d+|\+?\d+W)$`)
+	dowNthItem     = regexp.MustCompile(`^(?:[+-]?\d+|[A-Za-z]{3})#(?:\+?\d+|[Ll])$`)
+)
+
+// splitItems splits field into its plain items and those that special
+// matches, each in written order.
+func splitItems(field string, special *regexp.Regexp) (plain, matched []string) {
+	for _, it := range strings.FieldsFunc(field, func(r rune) bool { return r == ',' }) {
+		if special.MatchString(it) {
+			matched = append(matched, it)
+		} else {
+			plain = append(plain, it)
+		}
+	}
+	return plain, matched
+}
+
+var nthNames = []string{"", "first", "second", "third", "fourth", "fifth"}
+
+// nthDays names "#" items, "third Friday" or "last Friday", once each, in
+// written order (X1).
+func nthDays(items []string) []string {
+	var out []string
+	for _, it := range items {
+		day, n, _ := strings.Cut(it, "#")
+		// The spec parsed, so the day and the occurrence are valid.
+		v, _ := parseIntOrName(day, dow.names)
+		word := "last"
+		if !strings.EqualFold(n, "L") {
+			i, _ := mustParseInt(n)
+			word = nthNames[i]
+		}
+		if w := word + " " + time.Weekday(v%7).String(); !slices.Contains(out, w) {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+// domPart is one element of a day-of-month list and the day it sorts by.
+type domPart struct {
+	key    uint
+	text   string
+	before bool // "N days before the last day" (X2)
+}
+
+// describeDom describes the day of month as a clause: "on the 1st and 15th
+// of the month" (D2), "on the last day of the month", "3 days before the
+// last day of the month" (X1–X3); and the short-month clauses (D3, X5, X6).
+// whole is false when the day of week is ORed with it.
+func (d *describer) describeDom(md timeField, special []string, whole bool) (text, short string) {
+	if len(special) == 0 {
+		text = d.dateNums(md)
+		of := ofTheMonth
+		if _, even := md.gap(); even && !d.monthNamed && !slices.ContainsFunc(md.vals, func(v uint) bool { return v > 28 }) {
+			of = " of every month"
+		}
+		return "on the " + text + of, lateClause(md.vals)
+	}
+	parts, lacking, late := d.domParts(md, special)
+	words := make([]string, len(parts))
+	for i, p := range parts {
+		words[i] = p.text
+	}
+	switch {
+	case len(parts) == 1 && strings.HasPrefix(parts[0].text, "the weekday nearest"):
+		text = "on " + parts[0].text
+	case parts[0].before:
+		text = andList(words) + ofTheMonth
+	default:
+		text = "on " + andList(words) + ofTheMonth
+	}
+	clauses := []string{lateClause(late)}
+	for _, p := range lacking {
+		subject := p.text
+		if whole && len(parts) == 1 {
+			subject = "it"
+		}
+		clauses = append(clauses, "; "+subject+" runs only in "+monthsOf(p.key))
+	}
+	return text, strings.Join(clauses, "")
+}
+
+// domParts lists the day-of-month items in the order of the days they name,
+// once each (X3), the L-n items short months lack, keyed by the fewest days
+// they need (X6), and the days the items name, for the short-month clause
+// (D3, X5).
+func (d *describer) domParts(md timeField, special []string) (parts, lacking []domPart, late []uint) {
+	late = slices.Clone(md.vals)
+	var last bool
+	for _, it := range special {
+		u := strings.ToUpper(it)
+		// The spec parsed, so the numbers are valid.
+		switch {
+		case u == "L":
+			last = true
+		case u == "LW":
+			parts = append(parts, domPart{key: 32, text: "the last weekday"})
+		case strings.HasPrefix(u, "L-"):
+			n, _ := mustParseInt(u[2:])
+			text := count(n, unitDay) + " before the last day"
+			parts = append(parts, domPart{key: 33 + n, text: text, before: true})
+			if n >= 28 {
+				lacking = append(lacking, domPart{key: n + 1, text: text})
+			}
+		default:
+			n, _ := mustParseInt(strings.TrimSuffix(u, "W"))
+			parts = append(parts, domPart{key: n, text: "the weekday nearest the " + ordinal(n)})
+			late = append(late, n)
+		}
+	}
+	// X3: the ordinals, with the last day, share one "the".
+	if len(md.vals) > 0 {
+		words := md.runWords(md.vals)
+		if t, note := md.nums(); note != "" {
+			// T1: cut short, so the last day keeps its own "the".
+			words = []string{t}
+			d.dateNotes = append(d.dateNotes, note)
+		} else if last {
+			words, last = append(words, "last day"), false
+		}
+		parts = append(parts, domPart{key: slices.Min(md.vals), text: "the " + andList(words)})
+	}
+	if last {
+		parts = append(parts, domPart{key: 32, text: "the last day"})
+	}
+	// Sorted, a repeated item sits next to itself.
+	byKey := func(a, b domPart) int { return cmp.Compare(a.key, b.key) }
+	sameText := func(a, b domPart) bool { return a.text == b.text }
+	slices.SortStableFunc(parts, byKey)
+	slices.SortStableFunc(lacking, byKey)
+	return slices.CompactFunc(parts, sameText), slices.CompactFunc(lacking, sameText), late
+}
+
+// lateClause names the days above the 28th: "; the 31st runs only in months
+// that have one" (D3, X5).
+func lateClause(days []uint) string {
+	return lateClauseAfter(days, 28)
+}
+
+// lateClauseAfter names the days past shortest, the most days every month in
+// question has (D3, N5).
+func lateClauseAfter(days []uint, shortest uint) string {
 	var late []string
-	for _, v := range slices.Sorted(slices.Values(md.vals)) {
-		if v > 28 {
+	for _, v := range slices.Compact(slices.Sorted(slices.Values(days))) {
+		if v > shortest {
 			late = append(late, ordinal(v))
 		}
 	}
-	of := " of the month"
-	if _, even := md.gap(); even && len(late) == 0 {
-		of = " of every month"
-	}
 	switch len(late) {
 	case 0:
+		return ""
 	case 1:
-		short = "; the " + late[0] + " runs only in months that have one"
-	default:
-		short = "; the " + andList(late) + " run only in months that have them"
+		return "; the " + late[0] + " runs only in months that have one"
 	}
-	return "the " + text + of, short
+	return "; the " + andList(late) + " run only in months that have them"
+}
+
+// monthsOf names the months of at least days days: "months of 29 days or
+// more", "months of 31 days" (X6).
+func monthsOf(days uint) string {
+	if days == 31 {
+		return "months of 31 days"
+	}
+	return fmt.Sprintf("months of %d days or more", days)
 }
 
 // dowOrDom reports a spec whose restricted day fields are ORed, as the parser
@@ -227,11 +620,10 @@ func (p Parser) dowOrDom(domField, dowField string) bool {
 
 // describeMonths describes the month field: "in January thru March" (D6).
 func (d *describer) describeMonths(field string) string {
-	m := newTimeField(field, "month", "year", months)
+	m := newMonthField(field)
 	if isWildcard(field) || m.every() {
 		return ""
 	}
-	m.word, m.limit = func(v uint) string { return time.Month(v).String() }, 12
 	return "in " + d.dateNums(m)
 }
 
@@ -294,15 +686,34 @@ func isWildcard(field string) bool {
 // name, or a range of them, each with an optional step. Any other item renders the spec field by field (G10).
 var describableItem = regexp.MustCompile(`^(?:[*?]|(?:\+?[0-9]+|[A-Za-z]{3})(?:-(?:\+?[0-9]+|[A-Za-z]{3}))?)(?:/\+?[0-9]+)?$`)
 
-// describable reports a field whose items all have the covered syntax.
-func describable(field string) bool {
+// describable reports a field whose items all have the covered syntax, or
+// one of the field's own (special): H, L and W in the day of month, # in the
+// day of week.
+func describable(field string, special ...*regexp.Regexp) bool {
 	items := strings.FieldsFunc(field, func(r rune) bool { return r == ',' })
-	return !slices.ContainsFunc(items, func(it string) bool { return !describableItem.MatchString(it) })
+	return !slices.ContainsFunc(items, func(it string) bool {
+		return !describableItem.MatchString(it) && !slices.ContainsFunc(special, func(re *regexp.Regexp) bool {
+			return re.MatchString(it)
+		})
+	})
 }
 
-// allDescribable reports fields that are all describable.
+// allDescribable reports fields, second to day of week, that are all
+// describable.
 func allDescribable(fields []string) bool {
-	return !slices.ContainsFunc(fields, func(f string) bool { return !describable(f) })
+	for i, f := range fields {
+		special := []*regexp.Regexp{hashItemSyntax}
+		switch i {
+		case 3:
+			special = append(special, domSpecialItem)
+		case 5:
+			special = append(special, dowNthItem)
+		}
+		if !describable(f, special...) {
+			return false
+		}
+	}
+	return true
 }
 
 var literalNames = []string{seconds.name, minutes.name, hours.name, dom.name, months.name, dow.name}
@@ -334,11 +745,19 @@ func (p Parser) describeLiteral(spec string, fields []string, yearField string) 
 
 // Phrases the descriptions repeat.
 const (
-	thruSep          = " thru "
-	everyDaySuffix   = " every day"
-	inEveryDaySuffix = " in every day"
-	everyHourFrom    = " every hour from "
-	inEveryHourFrom  = " in every hour from "
+	unitSecond        = "second"
+	unitMinute        = "minute"
+	unitDay           = "day"
+	unitHour          = "hour"
+	unitMonth         = "month"
+	thruSep           = " thru "
+	everyDaySuffix    = " every day"
+	inEveryDaySuffix  = " in every day"
+	inEveryHourSuffix = " in every hour"
+	duringSep         = " during "
+	betweenSep        = " between "
+	everyHourFrom     = " every hour from "
+	inEveryHourFrom   = " in every hour from "
 )
 
 // valueLimit is how many values are listed before a step is cut short,
@@ -475,6 +894,13 @@ func uniq(vals []uint) []uint {
 
 // every reports a field that fires on every value ("*", "*/1", "0-59").
 func (f timeField) every() bool {
+	if isDowBounds(f.r) { // 7 is Sunday: seven days, not eight values
+		var days uint
+		for _, v := range f.vals {
+			days |= 1 << (v % 7)
+		}
+		return days == 1<<7-1
+	}
 	return len(f.vals) == int(f.r.max-f.r.min+1)
 }
 
@@ -578,28 +1004,28 @@ func (f timeField) rangeWords(lo, hi uint) []string {
 	return []string{l + thruSep + h}
 }
 
-// named reports hours that read by name ("the 9 am and 5 pm hours"): one
+// named reports hours that read by name ("the 9 am hour and the 5 pm hour"): one
 // hour, hours written as a list, or a range of up to 6 hours (R3, T4).
 func (f timeField) named() bool {
 	return f.single() || !f.star() && (len(f.items) > 1 || len(f.vals) <= valueLimit)
 }
 
-// hourNames names the hours: "the 9 am hour", "the 9 am and 5 pm hours", and
-// with no article before a list that starts with midnight, "midnight, 6 am,
-// noon, and 6 pm hours" (R3). On a named day midnight is "12 am" and keeps
-// the article.
+// hourNames names the hours: "the 9 am hour", two as "the 9 am hour and the
+// 5 pm hour", which does not read as a span, and for three or more, the unit
+// first, "the hours of midnight, 6 am, noon, and 6 pm" (R3). On a named day
+// midnight is "12 am".
 func (d *describer) hourNames(f timeField) string {
 	clocks := make([]string, len(f.vals))
 	for i, h := range f.vals {
 		clocks[i] = d.onHour(h)
 	}
-	switch {
-	case len(clocks) == 1:
-		return "the " + clocks[0] + " hour"
-	case clocks[0] == "midnight":
-		return andList(clocks) + " hours"
+	if len(clocks) > 2 {
+		return "the hours of " + andList(clocks)
 	}
-	return "the " + andList(clocks) + " hours"
+	for i, c := range clocks {
+		clocks[i] = "the " + c + " hour"
+	}
+	return andList(clocks)
 }
 
 // count writes a number with its unit, singular for 1: "1 minute", "5 seconds".
@@ -699,9 +1125,9 @@ func (d *describer) clock(h, m, s uint) string {
 // describeTime describes the second, minute and hour fields: what leads, the
 // minutes joined to it, then the hours (C1).
 func (d *describer) describeTime(fields []string) string {
-	sec := newTimeField(fields[0], "second", "minute", seconds)
-	minute := newTimeField(fields[1], "minute", "hour", minutes)
-	hour := newTimeField(fields[2], "hour", "day", hours)
+	sec := newTimeField(fields[0], unitSecond, unitMinute, seconds)
+	minute := newTimeField(fields[1], unitMinute, unitHour, minutes)
+	hour := newTimeField(fields[2], unitHour, unitDay, hours)
 	if sec.single() {
 		if out, ok := d.clockTimes(sec.vals[0], minute, hour); ok {
 			return out
@@ -731,23 +1157,30 @@ func (d *describer) bySeconds(sec, minute, hour timeField) string {
 		}
 		return d.joinHours("every second for "+d.values(minute), "in every hour", sec, minute, hour)
 	}
-	secs := "at " + count(sec.vals[0], "second")
-	if !sec.single() {
+	secs := "at " + count(sec.vals[0], unitSecond)
+	var at func(h uint) string
+	if sec.single() {
+		at = func(h uint) string { return d.clock(h, 0, sec.vals[0]) }
+	} else {
 		secs = "at seconds " + d.nums(sec)
 	}
+	return d.joinSeconds(secs, at, sec, minute, hour)
+}
+
+// joinSeconds joins the minutes and hours to lead, which names the seconds
+// (C1): "within a minute", "within minute 30 in every hour", "past the top
+// of every hour". at writes the run in hour h for one second at minute 0, as
+// onTheHour takes it; otherwise it is nil.
+func (d *describer) joinSeconds(lead string, at func(h uint) string, sec, minute, hour timeField) string {
 	switch {
 	case minute.every() && hour.every():
-		return secs + " within a minute"
+		return lead + " within a minute"
 	case minute.every():
-		return d.joinHours(secs+" within every minute", "", sec, minute, hour)
+		return d.joinHours(lead+" within every minute", "", sec, minute, hour)
 	case minute.single() && minute.vals[0] == 0:
-		var at func(h uint) string
-		if sec.single() {
-			at = func(h uint) string { return d.clock(h, 0, sec.vals[0]) }
-		}
-		return d.onTheHour(secs+" past the top of", hour, at)
+		return d.onTheHour(lead+" past the top of", hour, at)
 	}
-	return d.joinHours(secs+" within "+d.values(minute), "in every hour", sec, minute, hour)
+	return d.joinHours(lead+" within "+d.values(minute), "in every hour", sec, minute, hour)
 }
 
 // minuteAt opens one minute on the hour forms: "at the top of" (R4), "at 30
@@ -756,7 +1189,7 @@ func minuteAt(m uint) string {
 	if m == 0 {
 		return "at the top of"
 	}
-	return "at " + count(m, "minute") + " past"
+	return "at " + count(m, unitMinute) + " past"
 }
 
 // onTheHour joins the hours to one minute, any minute, as lead opens it
@@ -788,20 +1221,31 @@ func (d *describer) onTheHour(lead string, hour timeField, at func(h uint) strin
 			return lead + everyHourFrom + d.partRange(p[0]) + " and at " + at(p[1][0]) + d.everyDay()
 		case p[0][0] == p[0][1] && at != nil:
 			return "at " + at(p[0][0]) + " and " + lead + everyHourFrom + d.partRange(p[1]) + d.everyDay()
-		case p[1][0] == p[1][1]:
-			return lead + everyHourFrom + d.partRange(p[0]) + " and the " + d.onHour(p[1][0]) + " hour" + d.everyDay()
-		case p[0][0] == p[0][1]:
-			return lead + " the " + d.onHour(p[0][0]) + " hour and every hour from " + d.partRange(p[1]) + d.everyDay()
 		}
 	}
-	return lead + " every hour " + fromThru(it, d.onHour, d.onHour) + d.everyDay()
+	return lead + " " + d.everyHourParts(it) + d.everyDay()
+}
+
+// everyHourParts names a long hour range: "every hour from 9 am thru 5 pm";
+// a part of one hour of a wrapped range reads as that hour (T9): "every hour
+// from midnight thru 5 am and the 11 pm hour", "the midnight hour and every
+// hour from 6 pm thru 11 pm".
+func (d *describer) everyHourParts(it timeItem) string {
+	if p := it.parts(hours); len(p) == 2 {
+		switch {
+		case p[1][0] == p[1][1]:
+			return "every hour from " + d.partRange(p[0]) + " and the " + d.onHour(p[1][0]) + " hour"
+		case p[0][0] == p[0][1]:
+			return "the " + d.onHour(p[0][0]) + " hour and every hour from " + d.partRange(p[1])
+		}
+	}
+	return "every hour " + fromThru(it, d.onHour, d.onHour)
 }
 
 // joinHours joins the hours to inner, the seconds and minutes (R6, R9–R12,
 // T5). every is the join for every hour.
 func (d *describer) joinHours(inner, every string, sec, minute, hour timeField) string {
-	if it, ok := hour.span(); ok && !hour.every() && len(minute.vals) > 1 && !minute.every() &&
-		(it.lo < it.hi || hour.kind() == longRange) {
+	if it, ok := spanForm(minute, hour); ok {
 		// T5: the first and last run of the day lead.
 		first := func(h uint) string { return d.clock(h, minute.vals[0], sec.vals[0]) }
 		last := func(h uint) string {
@@ -816,9 +1260,9 @@ func (d *describer) joinHours(inner, every string, sec, minute, hour timeField) 
 		}
 		return inner + " " + every
 	case namedHours:
-		return inner + " during " + d.hourNames(hour)
+		return inner + duringSep + d.hourNames(hour)
 	case stepHours:
-		return inner + " during " + d.hourNames(hour) + d.inEveryDay()
+		return inner + duringSep + d.hourNames(hour) + d.inEveryDay()
 	case longStep:
 		return inner + " " + d.stepClause(hour)
 	}
@@ -846,12 +1290,11 @@ func (d *describer) wrappedPart(inner string, sec, minute timeField, it timeItem
 	if len(p) != 2 {
 		return "", false
 	}
-	m := minute.vals[0]
 	switch {
-	case p[1][0] == p[1][1] && sec.single():
-		return inner + inEveryHourFrom + d.partRange(p[0]) + " and at " + d.clock(p[1][0], m, sec.vals[0]) + d.everyDay(), true
+	case p[1][0] == p[1][1] && sec.single(): // a hashed minute has no sec
+		return inner + inEveryHourFrom + d.partRange(p[0]) + " and at " + d.clock(p[1][0], minute.vals[0], sec.vals[0]) + d.everyDay(), true
 	case p[0][0] == p[0][1] && sec.single():
-		return "at " + d.clock(p[0][0], m, sec.vals[0]) + " and " + inner + inEveryHourFrom + d.partRange(p[1]) + d.everyDay(), true
+		return "at " + d.clock(p[0][0], minute.vals[0], sec.vals[0]) + " and " + inner + inEveryHourFrom + d.partRange(p[1]) + d.everyDay(), true
 	case p[1][0] == p[1][1]:
 		return inner + inEveryHourFrom + d.partRange(p[0]) + " and during the " + d.onHour(p[1][0]) + " hour" + d.everyDay(), true
 	case p[0][0] == p[0][1]:
@@ -863,6 +1306,14 @@ func (d *describer) wrappedPart(inner string, sec, minute timeField, it timeItem
 // partRange names a part of an hour range: "midnight thru 5 am".
 func (d *describer) partRange(p [2]uint) string {
 	return d.onHour(p[0]) + thruSep + d.onHour(p[1])
+}
+
+// spanForm reports the span form (T5), whose first and last runs need the
+// minutes and seconds as clock times: several minutes on an hour range.
+func spanForm(minute, hour timeField) (timeItem, bool) {
+	it, ok := hour.span()
+	return it, ok && !hour.every() && len(minute.vals) > 1 && !minute.every() &&
+		(it.lo < it.hi || hour.kind() == longRange)
 }
 
 // wholeDay reports an hour step over the whole day that divides 24 (R8, R11).

@@ -1,0 +1,543 @@
+// Copyright (c) 2025-2026 Netresearch DTT GmbH
+// SPDX-License-Identifier: MIT.
+
+package cron
+
+import (
+	"fmt"
+	"slices"
+	"strings"
+	"time"
+)
+
+// noteVars are the variables of a note's values, taken in field order (N6).
+var noteVars = []string{"h", "k", "j", "m", "n", "p"}
+
+// dateLimit is how many days or months a note lists before it cuts the
+// list short (T1).
+const dateLimit = 12
+
+// Where a note's days fall when it names no month (N5).
+const (
+	ofTheMonth   = " of the month"
+	ofEveryMonth = " of every month"
+)
+
+// noter builds a note: the description's state and the variables taken.
+type noter struct {
+	d    *describer
+	vars int
+	// The written month, for a day of the month (N5).
+	of       string // after the days: " of the month in January", " of every month"
+	shortest uint   // the most days every written month has
+}
+
+// monthPlace places a note's days of the month in the written month as the
+// description does (N5, D2): "of the month in March". A month that is not
+// written, or is hashed, names none: "of every month", or "of the month" as
+// the key picks it.
+func monthPlace(f hashField, field string) (of string, shortest uint) {
+	shortest = 28 // February, outside a leap year
+	if f.hashes() {
+		return ofTheMonth, shortest
+	}
+	var d describer
+	in := d.describeMonths(field)
+	if in == "" {
+		return ofEveryMonth, shortest
+	}
+	shortest = dom.max
+	for _, m := range newMonthField(field).vals {
+		if m == uint(time.February) {
+			shortest = min(shortest, 28)
+		} else {
+			shortest = min(shortest, maxDaysInMonth[m])
+		}
+	}
+	return ofTheMonth + " " + in, shortest
+}
+
+// monthWritten reports a note placed in written months (N5).
+func (n *noter) monthWritten() bool {
+	return n.of != ofEveryMonth && n.of != ofTheMonth
+}
+
+// next takes the next variable.
+func (n *noter) next() string {
+	v := noteVars[n.vars]
+	n.vars++
+	return v
+}
+
+// hashNote spells out the values the hash key picks, one clause per field
+// with a hashed step or a fixed day of the month, in field order and
+// joined with ", " (N1, N6). It is "" when there is none, and when a field
+// has no form.
+func (p Parser) hashNote(d *describer, h, hd [3]hashField, dates [3]string) string {
+	n := noter{d: d}
+	n.of, n.shortest = monthPlace(hd[2], dates[2])
+	sec := newTimeField(h[0].plain, unitSecond, unitMinute, seconds)
+	minute := newTimeField(h[1].plain, unitMinute, unitHour, minutes)
+	hour := newTimeField(h[2].plain, unitHour, unitDay, hours)
+	secPlace, secOK := n.secondPlace(minute, hour, h[1].hashes() || h[2].hashes())
+	minPlace, minOK := n.minutePlace(hour, h[2])
+	minOK = minOK && sec.single() && sec.vals[0] == 0 && !h[0].hashes()
+	var clauses []string
+	for _, c := range []func() (string, bool){
+		func() (string, bool) { return n.stepNote(h[0], unitSecond, seconds, secPlace, secOK) },
+		func() (string, bool) { return n.stepNote(h[1], unitMinute, minutes, minPlace, minOK) },
+		func() (string, bool) { return n.hourNote(h[2], sec, minute, h[0], h[1]) },
+		func() (string, bool) { return n.domNote(hd[0], newDomField(dates[0])) },
+		func() (string, bool) { return n.outcomeNote(hd[1], p.dowBounds(), p.newDowField(dates[1])) },
+		func() (string, bool) { return n.outcomeNote(hd[2], months, newMonthField(dates[2])) },
+	} {
+		text, ok := c()
+		if !ok {
+			return ""
+		}
+		if text != "" {
+			clauses = append(clauses, text)
+		}
+	}
+	return strings.Join(clauses, ", ")
+}
+
+// secondPlace is where a hashed second step falls, by the written minutes
+// and hours (C1, R12): " within a minute", " within every minute during the
+// 9 am hour", " within every minute from 9 am thru 5:59 pm", " within minute
+// 5 in every hour", " past the top of every hour", " within minutes 0 thru
+// 10 and 50 thru 59 in every hour". ok is false for other fields.
+func (n *noter) secondPlace(minute, hour timeField, hashed bool) (string, bool) {
+	switch {
+	case hashed:
+		return "", false
+	case minute.every() && hour.every():
+		return " within a minute", true
+	case minute.every():
+		switch hour.kind() {
+		case namedHours, stepHours:
+			return " within every minute during " + n.d.hourNames(hour), true
+		case longRange:
+			last := func(h uint) string { return n.d.clock(h, 59, 0) } // R12: the last run is minute 59
+			return " within every minute " + fromThru(hour.items[0], n.d.onHour, last), true
+		}
+	case !hour.every():
+	case minute.single() && minute.vals[0] == 0:
+		return " past the top of every hour", true
+	case minute.single():
+		return fmt.Sprintf(" within minute %d in every hour", minute.vals[0]), true
+	default:
+		text, step := minute.nums()
+		return " within minutes " + text + inEveryHourSuffix + parenthesized(step), true
+	}
+	return "", false
+}
+
+// minutePlace is where a hashed minute step falls, by the hours (R6, R9,
+// R11): " past the hour", " during the 9 am hour", " past every hour from
+// 9 am thru 5 pm", " every 2 hours starting with the midnight hour". ok is
+// false for other hours, and for a step with a part of one run.
+func (n *noter) minutePlace(hour timeField, hh hashField) (string, bool) {
+	if hh.hashes() {
+		return "", false
+	}
+	switch hour.kind() {
+	case everyHour:
+		return " past the hour", true
+	case namedHours, stepHours:
+		return duringSep + n.d.hourNames(hour), true
+	case longRange:
+		return " past " + n.d.everyHourParts(hour.items[0]), true
+	case longStep:
+		for _, part := range stepParts(hour.items[0], hours) {
+			if part[0] == part[1] && !wholeDay(hour.items[0]) {
+				return "", false
+			}
+		}
+		return " " + strings.TrimSuffix(n.d.stepClause(hour), inEveryDaySuffix), true
+	}
+	return "", false
+}
+
+// whole returns x over its field's range when it covers every value, so a
+// wrapped range of every value counts from the range's start (H10). A step
+// that does not divide the range keeps its written start: the parser walks
+// from there, so the start decides the values (N4).
+func whole(x hashed, r bounds) hashed {
+	if !x.whole {
+		return x
+	}
+	_, _, cr := dowCycle(r.min, r.max, r)
+	if x.step > 1 && (cr.max-cr.min+1)%x.step != 0 {
+		return x
+	}
+	x.lo, x.hi = cr.min, cr.max
+	return x
+}
+
+// startsElsewhere reports a step over the whole range kept at a written
+// start other than the field's first value (whole).
+func startsElsewhere(x hashed, r bounds) bool {
+	return x.whole && x.lo != r.min
+}
+
+// oneStep returns f's one hashed step, alone in its field. ok is false when
+// the field has other items beside it, which have no note form.
+func oneStep(f hashField) (x hashed, ok bool) {
+	if len(f.steps) != 1 || len(f.fixed) > 0 || f.plain != "" {
+		return x, false
+	}
+	return f.steps[0], true
+}
+
+// stepNote is the clause of a hashed step in the second or minute field
+// (N2, N3): "at minutes h, h+15, h+30, and h+45 past the hour, where h is a
+// fixed minute from 0 to 14". place is where the values fall, and placeOK
+// whether there is a form for it.
+func (n *noter) stepNote(f hashField, unit string, r bounds, place string, placeOK bool) (string, bool) {
+	if len(f.steps) == 0 {
+		return "", true
+	}
+	x, ok := oneStep(f)
+	x = whole(x, r)
+	if !ok || !placeOK || startsElsewhere(x, r) {
+		return "", false // N4: no list that long, and no plain form is true
+	}
+	if x.lo > x.hi {
+		return "at " + unit + "s " + timeOutcomes(x, r) + place + ", depending on the hash key", true
+	}
+	v := n.next()
+	vals, top, tail := stepValues(v, x, valueLimit)
+	where := fmt.Sprintf(", where %s is a fixed %s from %d to %d", v, unit, x.lo, top)
+	return "at " + unit + "s " + vals + place + where + tail, true
+}
+
+// hourNote is the clause of a hashed hour step (N7, N8): the minutes as the
+// description names them, then the fixed hour's range and the step: "at the
+// top of a fixed hour between midnight and 5 am and every 6 hours after it",
+// with "thru" the range's last hour when the range is not the whole day. A
+// wrapped range reads in clock order from its start: "between 10 pm and 11
+// pm and every 2 hours after it thru 4 am".
+func (n *noter) hourNote(f hashField, sec, minute timeField, hs, hm hashField) (string, bool) {
+	if len(f.steps) == 0 {
+		return "", true
+	}
+	x, ok := oneStep(f)
+	x = whole(x, hours)
+	lead, leadOK := hourLead(minute, hm)
+	if !ok || !leadOK || hs.hashes() || !sec.single() || sec.vals[0] != 0 {
+		return "", false
+	}
+	span := hours.max - hours.min + 1
+	top := (x.lo + min(x.step, cyclicRangeSize(x.lo, x.hi, hours)) - 1) % span
+	text := fmt.Sprintf("%s a fixed hour between %s and %s and every %d hours after it",
+		lead, n.d.onHour(x.lo), n.d.onHour(top), x.step)
+	if !x.whole || startsElsewhere(x, hours) {
+		text += " thru " + n.d.onHour(x.hi)
+	}
+	if !hm.hashes() && !minute.every() && !minute.single() {
+		_, step := minute.nums()
+		text += parenthesized(step) // T1
+	}
+	return text, true
+}
+
+// hourLead names the minutes before a hashed hour step as the description
+// does (R4, R5, H14, H22, N8): "at the top of", "at 30 minutes past", "every
+// minute during", "at minutes 0 and 30 during", "at a fixed minute between
+// minutes 0 and 29 during". ok is false for a hashed minute step, or a
+// hashed minute beside other items or over a wrapped range.
+func hourLead(minute timeField, hm hashField) (string, bool) {
+	switch {
+	case len(hm.steps) > 0:
+		return "", false
+	case len(hm.fixed) > 0:
+		x := hm.fixed[0]
+		if len(hm.fixed) > 1 || hm.plain != "" || x.lo > x.hi {
+			return "", false
+		}
+		if x.whole {
+			return "at a fixed minute during", true
+		}
+		return fmt.Sprintf("at a fixed minute between minutes %d and %d during", x.lo, x.hi), true
+	case minute.every():
+		return "every minute during", true
+	case minute.single():
+		return minuteAt(minute.vals[0]), true
+	}
+	text, _ := minute.nums()
+	return "at minutes " + text + " during", true
+}
+
+// parenthesized is an interval note in its parentheses (T1), "" without one.
+func parenthesized(note string) string {
+	if note == "" {
+		return ""
+	}
+	return " (" + note + ")"
+}
+
+// stepValues writes the values of a hashed step with the variable v (N2,
+// N3), cut short past limit (T1), and a tail for the last value when only
+// some starts have it: "h and h+40", "; h+40 runs only when h is below 20".
+// top is the largest start.
+func stepValues(v string, x hashed, limit int) (vals string, top uint, tail string) {
+	top = x.lo + min(x.step, x.hi-x.lo+1) - 1
+	sure, all := (x.hi-top)/x.step+1, (x.hi-x.lo)/x.step+1
+	terms := make([]string, all)
+	for k := range all {
+		terms[k] = v
+		if k > 0 {
+			terms[k] = fmt.Sprintf("%s+%d", v, k*x.step)
+		}
+	}
+	vals = andList(terms)
+	if int(all) > limit {
+		vals = strings.Join(terms[:3], ", ") + ", … " + terms[all-1]
+	}
+	if all > sure {
+		k := sure * x.step
+		tail = fmt.Sprintf("; %s+%d runs only when %s is below %d", v, k, v, x.hi-k+1)
+	}
+	return vals, top, tail
+}
+
+// shortMonthTail names the values of a hashed day step that a written month
+// lacks for some h (N3): "; h+30 runs only in months that have one".
+func shortMonthTail(v string, x hashed, top, shortest uint) string {
+	var late []string
+	for k := uint(0); k*x.step <= x.hi-x.lo; k++ {
+		if min(top+k*x.step, x.hi) <= shortest {
+			continue
+		}
+		term := v
+		if k > 0 {
+			term = fmt.Sprintf("%s+%d", v, k*x.step)
+		}
+		late = append(late, term)
+	}
+	if len(late) == 1 {
+		return "; " + late[0] + " runs only in months that have one"
+	}
+	return "; " + andList(late) + " run only in months that have them"
+}
+
+// domNote is the clause of a fixed day of the month (N4, N5): its step as
+// the other date fields', or a fixed day: "on day h of every month, where h
+// is a fixed day from 1 to 31; a month without day h is skipped". A range the
+// spec writes keeps "between": "where h is a fixed day between 1 and 15".
+func (n *noter) domNote(f hashField, plain timeField) (string, bool) {
+	switch f.shape(plain) {
+	case hashNone:
+		return "", true
+	case hashStep:
+		return n.outcomeNote(f, dom, plain)
+	case hashFixed:
+		x := f.fixed[0]
+		v := n.next()
+		from, ok := " from 1 to 31", true
+		if !x.whole {
+			from, ok = rangeParts(x, dom, number, "", unitDay)
+		}
+		if !ok {
+			return "", false
+		}
+		text := fmt.Sprintf("on day %s%s, where %s is a fixed day%s", v, n.of, v, placeAlternatives(from))
+		if (x.lo > x.hi && n.shortest < dom.max) || x.hi > n.shortest {
+			text += fmt.Sprintf("; a month without day %s is skipped", v)
+		}
+		return text, true
+	case hashFixedPlus:
+		first := ordinal(plain.vals[0])
+		v := n.next()
+		text := fmt.Sprintf("on the %s and day %s%s, where %s is a fixed day from 1 to 31", first, v, n.of, v)
+		if n.shortest < dom.max {
+			text += fmt.Sprintf("; a month without day %s %s", v, n.plainDayTail(plain.vals[0]))
+		}
+		return text, true
+	}
+	return "", false
+}
+
+// plainDayTail says what a month without day h does when a plain day stands
+// beside h (N5). A month with the 31st has every h, so a month without h has
+// no 31st either.
+func (n *noter) plainDayTail(day uint) string {
+	switch {
+	case day == dom.max:
+		return "is skipped"
+	case day > n.shortest:
+		return fmt.Sprintf("runs only on the %s, if it has one", ordinal(day))
+	}
+	return fmt.Sprintf("runs on the %s only", ordinal(day))
+}
+
+// outcomeNote is the clause of a hashed step in a date field (N4): the
+// day of the week always lists its outcomes; the day of the month and the
+// month list up to 3, and a wrapped range, otherwise the variable form. A
+// field without a hashed step has no clause.
+func (n *noter) outcomeNote(f hashField, r bounds, plain timeField) (string, bool) {
+	if len(f.steps) == 0 {
+		return "", true
+	}
+	x, ok := oneStep(f)
+	if !ok {
+		return "", false
+	}
+	x = whole(x, r)
+	outs := stepOutcomes(x, r)
+	paired := plain.container == unitMonth && n.d.dayPairs != nil
+	in, of := "on ", ""
+	switch {
+	case plain.container == unitMonth:
+		of = n.of
+	case plain.unit == unitMonth:
+		in = "in "
+	}
+	if isDowBounds(r) || x.lo > x.hi || len(outs) <= 3 {
+		if paired {
+			outs = n.d.pairedOutcomes(outs)
+		}
+		return n.outcomeList(x, outs, plain, in, of), true
+	}
+	return n.outcomeVars(x, plain, in, of, paired), true
+}
+
+// outcomeVars writes a hashed step in the variable form (N3, N4).
+func (n *noter) outcomeVars(x hashed, plain timeField, in, of string, paired bool) string {
+	v := n.next()
+	vals, top, tail := stepValues(v, x, dateLimit)
+	if plain.container == unitMonth && x.hi > n.shortest {
+		short := shortMonthTail(v, x, top, n.shortest)
+		if n.monthWritten() {
+			tail = short
+		} else {
+			tail += short // every month: the last value's limit, then the short months
+		}
+	}
+	unit, bound := plain.unit, number
+	if unit == unitMonth {
+		bound = func(m uint) string { return fmt.Sprintf("%d (%s)", m, time.Month(m)) } // #nosec G115 -- a month, 1 to 12
+	}
+	plural := "s"
+	if paired {
+		x.hi = min(x.hi, n.d.lastPairedDay())
+		vals, _, tail = stepValues(v, x, dateLimit)
+		if x.hi-x.lo < x.step {
+			plural = ""
+		}
+		tail += pairedTail(v, x, n.d.pairedLate())
+	}
+	return fmt.Sprintf("%s%s%s %s%s, where %s is a fixed %s from %s to %s%s",
+		in, unit, plural, vals, of, v, unit, bound(x.lo), bound(top), tail)
+}
+
+// pairedTail names the values of a hashed day step that a month its hash
+// picks with them lacks (N3): "; h+20 runs only in months that have one".
+func pairedTail(v string, x hashed, late []uint) string {
+	var terms []string
+	for k := uint(0); k*x.step <= x.hi-x.lo; k++ {
+		if !slices.ContainsFunc(late, func(d uint) bool { return d >= x.lo && (d-x.lo)/x.step == k }) {
+			continue
+		}
+		term := v
+		if k > 0 {
+			term = fmt.Sprintf("%s+%d", v, k*x.step)
+		}
+		terms = append(terms, term)
+	}
+	switch {
+	case len(terms) == 0:
+		return ""
+	case x.hi-x.lo < x.step: // one day: as a fixed day (N5)
+		return fmt.Sprintf("; a month without day %s is skipped", v)
+	case len(terms) == 1:
+		return "; " + terms[0] + " runs only in months that have one"
+	}
+	return "; " + andList(terms) + " run only in months that have them"
+}
+
+// outcomeList writes outcomes in the listed form (N4). One outcome left, as
+// dayPairs can leave, is not up to the hash.
+func (n *noter) outcomeList(x hashed, outs [][]uint, plain timeField, in, of string) string {
+	words := make([]string, len(outs))
+	for i, o := range outs {
+		words[i] = outcomeWords(o, plain)
+	}
+	last := len(words) - 1
+	if last == 0 {
+		return in + words[0] + of
+	}
+	text := in + strings.Join(words[:last], "; ") + "; or " + words[last] + of + ", depending on the hash key"
+	if plain.container == unitMonth {
+		text += n.outcomeTail(x, outs)
+	}
+	return text
+}
+
+// outcomeTail is what a short month changes in listed days of the month (N3,
+// N4): a wrapped range's last step, or the days a written month lacks.
+func (n *noter) outcomeTail(x hashed, outs [][]uint) string {
+	switch {
+	case x.lo > x.hi && n.shortest < dom.max:
+		return "; a short month skips the days it lacks and changes the last step"
+	case x.lo <= x.hi && n.of != ofTheMonth:
+		return lateClauseAfter(slices.Concat(outs...), n.shortest)
+	case x.lo <= x.hi: // a hashed month: the days some month it pairs with lacks
+		return lateClauseAfter(n.d.pairedLate(), 0)
+	}
+	return ""
+}
+
+// timeOutcomes lists the values a wrapped hashed step in the second or
+// minute field selects for each start, ordered by the start, each in the
+// order the parser walks them (N2, N4): "50, 55, 0, 5, and 10; 51, 56, 1,
+// and 6; 52, 57, 2, and 7; 53, 58, 3, and 8; or 54, 59, 4, and 9".
+func timeOutcomes(x hashed, r bounds) string {
+	outs := stepOutcomes(x, r)
+	words := make([]string, len(outs))
+	for i, o := range outs {
+		nums := make([]string, len(o))
+		for j, v := range o {
+			nums[j] = number(v)
+		}
+		words[i] = andList(nums)
+	}
+	last := len(words) - 1
+	return strings.Join(words[:last], "; ") + "; or " + words[last]
+}
+
+// stepOutcomes returns the values a hashed step selects for each start the
+// hash can pick, ordered by the start, each in the order the parser walks
+// the field (the day of week on its seven-day cycle).
+func stepOutcomes(x hashed, r bounds) [][]uint {
+	lo, hi, cr := dowCycle(x.lo, x.hi, r)
+	size, span := cyclicRangeSize(lo, hi, cr), cr.max-cr.min+1
+	out := make([][]uint, 0, min(x.step, size))
+	for o := range min(x.step, size) {
+		start := (lo+o-cr.min)%span + cr.min
+		out = append(out, timeItem{lo: start, hi: hi, step: x.step}.runs(cr))
+	}
+	return out
+}
+
+// outcomeWords names one outcome in the order it runs: days of the month
+// with one "the", cut short past dateLimit (T1): "the 1st, 3rd, 5th, … 31st";
+// days of the week and months by name.
+func outcomeWords(vals []uint, plain timeField) string {
+	if plain.container != unitMonth {
+		words := make([]string, len(vals))
+		for i, v := range vals {
+			words[i] = plain.w(v)
+		}
+		return andList(words)
+	}
+	words := make([]string, len(vals))
+	for i, v := range vals {
+		words[i] = ordinal(v)
+	}
+	if len(words) > dateLimit {
+		return "the " + strings.Join(words[:3], ", ") + ", … " + words[len(words)-1]
+	}
+	return "the " + andList(words)
+}

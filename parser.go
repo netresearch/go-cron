@@ -1472,34 +1472,41 @@ func getRangeWithHash(expr string, r bounds, hashKey string, hashEnabled bool) (
 		return 0, errors.New("h expressions require hash option to be enabled")
 	}
 
+	return hashExprBits(expr, r, computeHash(hashKey))
+}
+
+// hashExprRange returns the range of hashPart, H or H(min-max), in expr.
+func hashExprRange(hashPart, expr string, r bounds) (start, end uint, err error) {
+	if hashPart == "H" {
+		return r.min, r.max, nil
+	}
+	if !strings.HasPrefix(hashPart, "H(") || !strings.HasSuffix(hashPart, ")") {
+		return 0, 0, fmt.Errorf("invalid H expression syntax: %q", expr)
+	}
+	rangeParts := strings.Split(hashPart[2:len(hashPart)-1], "-")
+	if len(rangeParts) != 2 {
+		return 0, 0, fmt.Errorf("invalid H range syntax: %q", expr)
+	}
+	start, err = mustParseInt(rangeParts[0])
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid range start in %q: %w", expr, err)
+	}
+	end, err = mustParseInt(rangeParts[1])
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid range end in %q: %w", expr, err)
+	}
+	return start, end, nil
+}
+
+// hashExprBits returns the bits an H expression selects under hashValue.
+func hashExprBits(expr string, r bounds, hashValue uint64) (uint64, error) {
 	// Parse H expression: H, H/N, H(min-max), H(min-max)/N
 	rangeAndStep := strings.Split(expr, "/")
 	hashPart := rangeAndStep[0]
 
-	// Parse range bounds from H or H(min-max)
-	var start, end uint
-	switch {
-	case hashPart == "H":
-		// Use field bounds
-		start, end = r.min, r.max
-	case strings.HasPrefix(hashPart, "H(") && strings.HasSuffix(hashPart, ")"):
-		// Parse explicit range H(min-max)
-		rangeSpec := hashPart[2 : len(hashPart)-1]
-		rangeParts := strings.Split(rangeSpec, "-")
-		if len(rangeParts) != 2 {
-			return 0, fmt.Errorf("invalid H range syntax: %q", expr)
-		}
-		var err error
-		start, err = mustParseInt(rangeParts[0])
-		if err != nil {
-			return 0, fmt.Errorf("invalid range start in %q: %w", expr, err)
-		}
-		end, err = mustParseInt(rangeParts[1])
-		if err != nil {
-			return 0, fmt.Errorf("invalid range end in %q: %w", expr, err)
-		}
-	default:
-		return 0, fmt.Errorf("invalid H expression syntax: %q", expr)
+	start, end, err := hashExprRange(hashPart, expr, r)
+	if err != nil {
+		return 0, err
 	}
 
 	if err := validateRangeBounds(start, end, r, expr); err != nil {
@@ -1521,9 +1528,6 @@ func getRangeWithHash(expr string, r bounds, hashKey string, hashEnabled bool) (
 	} else if len(rangeAndStep) > 2 {
 		return 0, fmt.Errorf("too many slashes: %q", expr)
 	}
-
-	// Compute hash-based offset
-	hashValue := computeHash(hashKey)
 
 	// Any written step selects values, H/1 included: like */1 it means every
 	// value of the range.
