@@ -176,12 +176,17 @@ var dateNames = func() map[string]int {
 type runDates struct{ doms, months, dows, years map[int]bool }
 
 // dateRuns walks Next() from 2026 thru 2030, in the schedule's zone, one
-// call per day with a run.
+// call per day with a run. A schedule with no run in those years, as one for
+// a later year or the fifth Monday in February, is walked over the year of
+// its first run instead.
 func dateRuns(sch Schedule) runDates {
 	r := runDates{map[int]bool{}, map[int]bool{}, map[int]bool{}, map[int]bool{}}
 	loc := scheduleZone(sch)
 	end := time.Date(2031, time.January, 1, 0, 0, 0, 0, loc)
 	t := sch.Next(time.Date(2026, time.January, 1, 0, 0, 0, 0, loc).Add(-time.Second))
+	if !t.IsZero() && !t.Before(end) {
+		end = time.Date(t.Year()+1, time.January, 1, 0, 0, 0, 0, loc)
+	}
 	for ; !t.IsZero() && t.Before(end); t = sch.Next(time.Date(t.Year(), t.Month(), t.Day(), 23, 59, 59, 0, loc)) {
 		r.doms[t.Day()], r.months[int(t.Month())], r.dows[int(t.Weekday())], r.years[t.Year()] = true, true, true, true
 	}
@@ -229,7 +234,8 @@ func namesDate(desc string) bool {
 // anyDay returns the schedule of spec with its day of the month (dom), its
 // day of the week (dow), or both as "*", or sch when it can't. It reads the
 // fields as the parser fills them in, second thru day of the week, so
-// optional fields don't move the day fields, and parses them all written.
+// optional fields don't move the day fields, and parses them all written,
+// with Next() searching 30 years ahead for a run that dateRuns needs.
 func anyDay(p Parser, spec string, sch Schedule, dom, dow bool) Schedule {
 	_, _, f, year, err := p.specFields(spec)
 	if err != nil || f == nil { // a descriptor has no fields
@@ -245,7 +251,7 @@ func anyDay(p Parser, spec string, sch Schedule, dom, dow bool) Schedule {
 	if w := strings.Fields(spec)[0]; strings.HasPrefix(w, "CRON_TZ=") || strings.HasPrefix(w, "TZ=") {
 		zone = w + " "
 	}
-	q := p
+	q := p.WithMaxSearchYears(30)
 	q.options = (q.options | Second | Minute | Hour | Dom | Month | Dow) &^ (SecondOptional | DowOptional)
 	if s, err := q.Parse(strings.TrimSpace(zone + strings.Join(f, " ") + " " + year)); err == nil {
 		return s
@@ -412,10 +418,12 @@ func TestDescribeSpecNamesRuns(t *testing.T) {
 // TestDescribeSpecNamesRunsCases checks specs the check once misread.
 func TestDescribeSpecNamesRunsCases(t *testing.T) {
 	five := NewParser(Minute | Hour | Dom | Month | Dow | Descriptor)
+	years := NewParser(Minute | Hour | Dom | Month | Dow | Year)
 	for _, tt := range []struct {
 		p    Parser
 		spec string
 	}{
+		{years, "0 0 1 1 * 2035"},                    // a year after 2026 thru 2030
 		{five, "0 0 29 2 1"},                         // February 29 on a Monday: no run for years
 		{five, "CRON_TZ=America/New_York 0 9 * * *"}, // 9 am in New York, 13:00 or 14:00 in UTC
 		{five, "CRON_TZ=Asia/Tokyo 0 3 5 * *"},       // the 5th in Tokyo, the 4th in UTC
