@@ -30,6 +30,9 @@ type noter struct {
 	// The written month, for a day of the month (N5).
 	of       string // after the days: " of the month in January", " of every month"
 	shortest uint   // the most days every written month has
+	// The day fields are ORed (D5): a month without day h still runs on its
+	// days of the week, so the note says nothing of that month.
+	or bool
 }
 
 // monthPlace places a note's days of the month in the written month as the
@@ -76,6 +79,8 @@ func (n *noter) next() string {
 func (p Parser) hashNote(d *describer, h, hd [3]hashField, dates [3]string) string {
 	n := noter{d: d}
 	n.of, n.shortest = monthPlace(hd[2], dates[2])
+	n.or = restricted(dates[0], hd[0]) && restricted(dates[1], hd[1]) &&
+		p.dowOrDom(hd[0].writtenOr(dates[0]), hd[1].writtenOr(dates[1]))
 	sec := newTimeField(h[0].plain, unitSecond, unitMinute, seconds)
 	minute := newTimeField(h[1].plain, unitMinute, unitHour, minutes)
 	hour := newTimeField(h[2].plain, unitHour, unitDay, hours)
@@ -326,6 +331,7 @@ func shortMonthTail(v string, x hashed, top, shortest uint) string {
 // the other date fields', or a fixed day: "on day h of every month, where h
 // is a fixed day from 1 to 31; a month without day h is skipped". A range the
 // spec writes keeps "between": "where h is a fixed day between 1 and 15".
+// Under DowOrDom with a day of the week, no month is skipped.
 func (n *noter) domNote(f hashField, plain timeField) (string, bool) {
 	switch f.shape(plain) {
 	case hashNone:
@@ -343,7 +349,7 @@ func (n *noter) domNote(f hashField, plain timeField) (string, bool) {
 			return "", false
 		}
 		text := fmt.Sprintf("on day %s%s, where %s is a fixed day%s", v, n.of, v, placeAlternatives(from))
-		if (x.lo > x.hi && n.shortest < dom.max) || x.hi > n.shortest {
+		if !n.or && ((x.lo > x.hi && n.shortest < dom.max) || x.hi > n.shortest) {
 			text += fmt.Sprintf("; a month without day %s is skipped", v)
 		}
 		return text, true
@@ -351,7 +357,7 @@ func (n *noter) domNote(f hashField, plain timeField) (string, bool) {
 		first := ordinal(plain.vals[0])
 		v := n.next()
 		text := fmt.Sprintf("on the %s and day %s%s, where %s is a fixed day from 1 to 31", first, v, n.of, v)
-		if n.shortest < dom.max {
+		if !n.or && n.shortest < dom.max {
 			text += fmt.Sprintf("; a month without day %s %s", v, n.plainDayTail(plain.vals[0]))
 		}
 		return text, true

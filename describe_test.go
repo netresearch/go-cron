@@ -765,7 +765,39 @@ var describeNoteGoldens = []struct {
 	{spec: "0 0 * H(9-5)/7 *", opts: []DescribeOption{withHash}, want: "in September and April; October and May; November; December; January; February; or March, depending on the hash key"},
 	{spec: "0 0 H(4-26)/2 * *", opts: []DescribeOption{withHash}, want: "on the 4th, 6th, 8th, 10th, 12th, 14th, 16th, 18th, 20th, 22nd, 24th, and 26th; or the 5th, 7th, 9th, 11th, 13th, 15th, 17th, 19th, 21st, 23rd, and 25th of every month, depending on the hash key"},
 	{spec: "0 0 H/7 H(11-12) *", opts: []DescribeOption{withHash}, want: "on days h, h+7, h+14, h+21, and h+28 of the month, where h is a fixed day from 1 to 7; h+28 runs only when h is below 4; h+28 runs only in months that have one"},
+	// N5 under DowOrDom: a month without day h still runs on its weekdays, so
+	// the note says nothing of it
+	{spec: "0 0 H * MON", opts: []DescribeOption{withHashOr}, want: "on day h of every month, where h is a fixed day from 1 to 31"},
+	{spec: "0 0 1,H * MON", opts: []DescribeOption{withHashOr}, want: "on the 1st and day h of every month, where h is a fixed day from 1 to 31"},
+	{spec: "0 0 31,H * MON", opts: []DescribeOption{withHashOr}, want: "on the 31st and day h of every month, where h is a fixed day from 1 to 31"},
+	{spec: "0 0 H(25-5) * 1-5", opts: []DescribeOption{withHashOr}, want: "on day h of every month, where h is a fixed day between 1 and 5 or 25 and 31"},
+	{spec: "0 0 H * H", opts: []DescribeOption{withHashOr}, want: "on day h of every month, where h is a fixed day from 1 to 31"},
+	{spec: "0 0 H * MON#2", opts: []DescribeOption{WithParseOptions(Minute | Hour | Dom | Month | Dow | Extended | Hash | DowOrDom)}, want: "on day h of every month, where h is a fixed day from 1 to 31"},
+	{spec: "0 0 H * MON", opts: []DescribeOption{withHash}, want: "on day h of every month, where h is a fixed day from 1 to 31; a month without day h is skipped"},
 	{spec: "0 0 H/10,H * H/3", opts: []DescribeOption{withHash}, want: ""},
+}
+
+// TestDayNoteOrRunsShortMonths binds the note of a fixed day under DowOrDom
+// to the scheduler: February runs on its Mondays for every key, also one
+// whose day February lacks, so the note names no skipped month (N5).
+func TestDayNoteOrRunsShortMonths(t *testing.T) {
+	const spec = "0 0 H * MON"
+	opts := Minute | Hour | Dom | Month | Dow | Hash | DowOrDom
+	note, err := DescribeSpecNote(spec, WithParseOptions(opts))
+	if err != nil || strings.Contains(note, "without day") {
+		t.Errorf("DescribeSpecNote(%q) = %q, %v; want no month without day h", spec, note, err)
+	}
+	p := MustNewParser(opts)
+	feb := time.Date(2026, time.February, 1, 0, 0, 0, 0, time.UTC)
+	for _, key := range hashedDateKeys(t) {
+		s, err := p.ParseWithHashKey(spec, key)
+		if err != nil {
+			t.Fatalf("ParseWithHashKey(%q, %q): %v", spec, key, err)
+		}
+		if next := s.Next(feb); next.Month() != time.February || next.Weekday() != time.Monday {
+			t.Errorf("key %q: next run after %s is %s; want a Monday in February", key, feb.Format(time.DateOnly), next.Format(time.DateOnly))
+		}
+	}
 }
 
 func TestDescribeSpecNote(t *testing.T) {
