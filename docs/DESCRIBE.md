@@ -51,7 +51,7 @@ which form a spec gets. Each has an ID, which the grammar cites.
 
 | ID | Rule |
 |---|---|
-| G1 | A description says what the scheduler runs: each golden in `describe_test.go` was checked against the runs `Next()` computes. `TestDescribeSpecNamesRuns` keeps the times and dates in check: every clock time, minute, second, day of the month, day of the week, month and year a description names must be one `Next()` runs at, for the goldens and for random specs. Each day field is checked alone, and a day that D3 says runs only in months that have it needs no run. The check is one-sided: it does not find a run the description leaves out |
+| G1 | A description says what the scheduler runs: each golden in `describe_test.go` was checked against the runs `Next()` computes, and `TestDescribeSpecNamesRuns` checks the times and dates a description names against those runs (see the Grammar section) |
 | G2 | A parser oddity is described as it runs |
 | G3 | The description is built from the spec text as the parser splits it, and its values follow the parser's options |
 | G6 | Wording is for people |
@@ -116,6 +116,13 @@ form (G10) and descriptors are outside the grammar.
 
 What a context-free grammar can't check is kept by the goldens: the value
 limits (T1, T4, R8–R12), the hour order (T6) and the values themselves (G1).
+`TestDescribeSpecNamesRuns` also checks the values, for the goldens and for
+random specs: every clock time, minute and second a description names must be
+a run on the first day that has one, from 2026 on, and every day of the month, day
+of the week, month and year must have a run from 2026 thru 2030, in the spec's
+zone. Each day field is checked alone, a day that D3 says runs only in months
+that have it needs no run, and "never runs" must have none. The check is
+one-sided: it does not find a run a description leaves out.
 
 ```ebnf
 // "x" literal, [x] optional, (x)* repeat, a | b choice.
