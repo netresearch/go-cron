@@ -466,17 +466,18 @@ func yearKind(y int) int {
 
 // runsSomeYear reports whether sch runs in a year it allows, or, when it
 // allows any, in a year from firstYear on. Whether a year has a run depends
-// only on its yearKind, so it asks Next() in the first year of each kind: at
-// most 14 calls, each from the start of its year, however far apart the
-// years are.
+// only on its yearKind, so it asks Next() from the first year of each kind:
+// at most 14 calls, each from the start of its year, however far apart the
+// years are. Any run Next() returns counts, in that year or a later one.
 // NOTE: with DSTSkip, a run in an hour that daylight saving skips does not
 // happen, so a year can lose runs that another year of its kind keeps, where
 // the zone's transition dates differ (its rules changed, or tzdata lists
-// each year's dates); a wrong "never runs" can then pass.
+// each year's dates). Each search ends 30 years after the year it starts in
+// (anyDay), so a wrong "never runs" can pass when every run is later.
 func runsSomeYear(sch Schedule) bool {
 	loc := scheduleZone(sch)
 	for _, y := range firstOfEachKindList(sch) {
-		if t := sch.Next(yearStart(y, loc)); !t.IsZero() && t.Year() == y {
+		if !sch.Next(yearStart(y, loc)).IsZero() {
 			return true
 		}
 	}
@@ -680,6 +681,7 @@ func TestAnyDayMatchesParse(t *testing.T) {
 func TestNamesNotRun(t *testing.T) {
 	five := NewParser(Minute | Hour | Dom | Month | Dow | Descriptor)
 	years := NewParser(Minute | Hour | Dom | Month | Dow | Year)
+	skip := NewParser(Minute | Hour | Dom | Month | Dow | Year | DSTSkip)
 	for _, tt := range []struct {
 		p          Parser
 		spec, desc string
@@ -698,6 +700,10 @@ func TestNamesNotRun(t *testing.T) {
 		{years, "0 0 1 1 * 2025", "never runs", "never runs"},       // before 2026
 		{five, "0 0 29 2 1", "never runs", "never runs"},            // February 29 on a Monday: first in 2044
 		{years, "0 0 29 2 1 2026-2060", "never runs", "never runs"}, // the same, in a year field
+		// 2:30 am is skipped on April 30, 1972, but not in 2000, a year of the same kind
+		{skip, "CRON_TZ=America/Chicago 30 2 30 4 * 1972,2000", "never runs", "never runs"},
+		// 2028 runs too, but is more than 30 years after 1972: the check's limit
+		{skip, "CRON_TZ=America/Chicago 30 2 30 4 * 1972,2028", "never runs", ""},
 		{years, "0 0 1 1 * 2035,2037", "at midnight on the 1st of the month in January in years 2035 and 2036", "2036"},
 		{years, "0 0 1 1 * 2026-2030", "at midnight on the 1st of the month in January in years 2026 thru 2031", "2026 thru 2031"},
 		{years, "0 0 1 1 * 2035", "at midnight on the 1st of the month in January in year 1", "1"}, // the zero time is in year 1

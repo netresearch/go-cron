@@ -131,9 +131,10 @@ correct time or date can read as not run: a run in an hour that daylight
 saving skips moves forward by the gap's length, several such runs becoming
 one, or with `DSTSkip` does not happen. With `DSTSkip`, two years of one
 calendar can also differ where the zone's transition dates differ (its rules
-changed, or tzdata lists each year's dates), which one year per calendar does
-not see. The check is one-sided: it does not find a run a description leaves
-out.
+changed, or tzdata lists each year's dates), so a wrong "never runs" can pass:
+the check looks for a run only from the first year of each calendar through 30
+years after it. The check is one-sided: it does not find a run a description
+leaves out.
 
 ```ebnf
 // "x" literal, [x] optional, (x)* repeat, a | b choice.
