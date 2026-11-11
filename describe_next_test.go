@@ -22,14 +22,24 @@ var (
 	digits      = regexp.MustCompile(`\d+`)
 )
 
-// dayRuns walks Next() over the day of the first run from 2026 on and
-// returns the hours, the minutes and the seconds that run, and every time of
-// day as h*3600+m*60+s. A spec that never runs has none; Next() returns the
-// zero time for it.
+// scheduleZone returns the zone sch runs in, as a description names its
+// times: the spec's zone, or the scheduler's.
+func scheduleZone(sch Schedule) *time.Location {
+	if s, ok := sch.(*SpecSchedule); ok && s.Location != nil {
+		return s.Location
+	}
+	return time.UTC
+}
+
+// dayRuns walks Next() over the day of the first run from 2026 on, in the
+// schedule's zone, and returns the hours, the minutes and the seconds that
+// run, and every time of day as h*3600+m*60+s. A spec that never runs has
+// none; Next() returns the zero time for it.
 func dayRuns(sch Schedule) (hours, minutes, seconds, times map[int]bool) {
 	hours, minutes, seconds, times = map[int]bool{}, map[int]bool{}, map[int]bool{}, map[int]bool{}
-	first := sch.Next(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC).Add(-time.Second))
-	start := time.Date(first.Year(), first.Month(), first.Day(), 0, 0, 0, 0, time.UTC)
+	loc := scheduleZone(sch)
+	first := sch.Next(time.Date(2026, time.January, 1, 0, 0, 0, 0, loc).Add(-time.Second))
+	start := time.Date(first.Year(), first.Month(), first.Day(), 0, 0, 0, 0, loc)
 	for t := first; !t.IsZero() && t.Before(start.AddDate(0, 0, 1)); t = sch.Next(t) {
 		hours[t.Hour()], minutes[t.Minute()], seconds[t.Second()] = true, true, true
 		times[t.Hour()*3600+t.Minute()*60+t.Second()] = true
@@ -147,12 +157,14 @@ var dateNames = func() map[string]int {
 // and the years that have a run.
 type runDates struct{ doms, months, dows, years map[int]bool }
 
-// dateRuns walks Next() from 2026 thru 2030, one call per day with a run.
+// dateRuns walks Next() from 2026 thru 2030, in the schedule's zone, one
+// call per day with a run.
 func dateRuns(sch Schedule) runDates {
 	r := runDates{map[int]bool{}, map[int]bool{}, map[int]bool{}, map[int]bool{}}
-	end := time.Date(2031, time.January, 1, 0, 0, 0, 0, time.UTC)
-	t := sch.Next(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC).Add(-time.Second))
-	for ; !t.IsZero() && t.Before(end); t = sch.Next(time.Date(t.Year(), t.Month(), t.Day(), 23, 59, 59, 0, time.UTC)) {
+	loc := scheduleZone(sch)
+	end := time.Date(2031, time.January, 1, 0, 0, 0, 0, loc)
+	t := sch.Next(time.Date(2026, time.January, 1, 0, 0, 0, 0, loc).Add(-time.Second))
+	for ; !t.IsZero() && t.Before(end); t = sch.Next(time.Date(t.Year(), t.Month(), t.Day(), 23, 59, 59, 0, loc)) {
 		r.doms[t.Day()], r.months[int(t.Month())], r.dows[int(t.Weekday())], r.years[t.Year()] = true, true, true, true
 	}
 	return r
@@ -360,7 +372,9 @@ func TestDescribeSpecNamesRunsCases(t *testing.T) {
 		p    Parser
 		spec string
 	}{
-		{five, "0 0 29 2 1"}, // February 29 on a Monday: no run for years
+		{five, "0 0 29 2 1"},                         // February 29 on a Monday: no run for years
+		{five, "CRON_TZ=America/New_York 0 9 * * *"}, // 9 am in New York, 13:00 or 14:00 in UTC
+		{five, "CRON_TZ=Asia/Tokyo 0 3 5 * *"},       // the 5th in Tokyo, the 4th in UTC
 	} {
 		if !checkSpecNamesRuns(t, tt.p, tt.spec) {
 			t.Errorf("%q was not checked", tt.spec)
