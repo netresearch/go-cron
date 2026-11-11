@@ -1478,7 +1478,7 @@ func describeGrammars() (descRe, noteRe *regexp.Regexp) {
 
 	hashkey := "; the hash key fixes " + list(alt("the "+unit, "both "+units)) // H1, H6
 	// Z1, Z2: a written zone and its shift from UTC
-	plain := `[A-Za-z0-9][A-Za-z0-9 +/:-]*` // Z1: the name as derived
+	plain := `[A-Za-z0-9][A-Za-z0-9 +/:_-]*` // Z1: the name as derived, or as written
 	offset := alt(num+" hours?", num+" hours? "+num+" minutes?", num+" minutes?")
 	shiftTo := func(other string) string {
 		return alt(offset+" "+alt("behind", "ahead of")+" "+other, "the same as "+other)
@@ -1783,6 +1783,7 @@ func FuzzDescribeSpec(f *testing.F) {
 	f.Add("+0 0 1 1 0")
 	f.Add("0 0 1 1 0 22-99")
 	f.Add("0 13 * * *")
+	f.Add("TZ=AmeriCA/Buenos_Aires 0 0 1 1 0") // a case-blind file system loads it; Z1 writes it as is
 
 	g, ng := describeGrammars()
 	parsers := []Parser{
