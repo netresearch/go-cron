@@ -132,6 +132,9 @@ func (p Parser) describe(spec string) (desc, note string, err error) {
 	if err := p.strictDaysError(spec, strict, sch, fields); err != nil {
 		return "", "", err
 	}
+	// No spec reaches this today: every item the parser takes matches
+	// describableItem or one of the special forms. It keeps an item syntax the
+	// parser adds later from being described as something else.
 	if !allDescribable(fields) || !describable(yearField) {
 		return p.describeLiteral(spec, fields, yearField), "", nil
 	}
@@ -320,6 +323,8 @@ func (p Parser) strictDaysError(spec string, strict bool, sch Schedule, fields [
 // has, whatever values a key picks; the parser's check, without the year.
 func (p Parser) noKeyFindsDay(sch Schedule, fields []string) bool {
 	s, ok := sch.(*SpecSchedule)
+	// Not reached: every spec that gets here parses to a *SpecSchedule;
+	// intervals and "only when triggered" return before the day checks.
 	if !ok {
 		return false
 	}

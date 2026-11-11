@@ -908,6 +908,8 @@ func dateBetween(x hashed, f timeField, the string) (string, bool) {
 // hashed month can pick.
 func monthDays(sch Schedule, hashedMonths uint64) []uint {
 	s, ok := sch.(*SpecSchedule)
+	// Not reached: every spec that gets here parses to a *SpecSchedule;
+	// intervals and "only when triggered" return before the day checks.
 	if !ok {
 		return []uint{28, 29, 30, 31}
 	}

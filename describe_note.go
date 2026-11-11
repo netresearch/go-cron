@@ -161,7 +161,7 @@ func (n *noter) minutePlace(hour timeField, hh hashField) (string, bool) {
 		}
 		return " " + strings.TrimSuffix(n.d.stepClause(hour), inEveryDaySuffix), true
 	}
-	return "", false
+	return "", false // not reached: the cases above cover every hourKind
 }
 
 // whole returns x over its field's range when it covers every value, so a
@@ -255,6 +255,9 @@ func (n *noter) hourNote(f hashField, sec, minute timeField, hs, hm hashField) (
 func hourLead(minute timeField, hm hashField) (string, bool) {
 	switch {
 	case len(hm.steps) > 0:
+		// Not reached today: a hashed minute step beside a hashed hour step
+		// already fails in the minute's clause (minutePlace), which ends the
+		// note before hourNote asks for its lead.
 		return "", false
 	case len(hm.fixed) > 0:
 		x := hm.fixed[0]
