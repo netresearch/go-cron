@@ -535,12 +535,23 @@ func TestDescribeSpecNamesRuns(t *testing.T) {
 	days := func() string {
 		return fmt.Sprintf("%d %d %s %s %s", r.IntN(60), r.IntN(24), field(1, 31), field(1, 12), field(0, 6))
 	}
-	year := func() string { // a year or a range: the year field takes no wrapped range
-		y := 2026 + r.IntN(5)
-		if r.IntN(2) == 0 {
-			return strconv.Itoa(y)
+	year := func() string { // a year, a range, a step or a list: the year field takes no wrapped range
+		y := firstYear + r.IntN(5)
+		switch r.IntN(8) {
+		case 0:
+			y = 1900 + r.IntN(firstYear-1900) // before firstYear
+		case 1:
+			y = firstYear + 31 + r.IntN(1000) // past a 30-year search from firstYear
 		}
-		return fmt.Sprintf("%d-%d", y, y+r.IntN(2031-y))
+		switch r.IntN(4) {
+		case 0:
+			return strconv.Itoa(y)
+		case 1:
+			return fmt.Sprintf("%d-%d", y, y+r.IntN(5))
+		case 2:
+			return fmt.Sprintf("%d-%d/%d", y, y+2+r.IntN(20), 2+r.IntN(5))
+		}
+		return fmt.Sprintf("%d,%d", y, y+1+r.IntN(40)) // two years, up to 40 apart
 	}
 	for _, c := range []struct {
 		name     string
