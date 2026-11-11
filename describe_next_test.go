@@ -281,7 +281,9 @@ func checkSpecNamesRuns(t *testing.T, p Parser, spec string) bool {
 	if literalForm.MatchString(desc) {
 		return false
 	}
-	if bad := append(checkNamedTimes(desc, sch), checkNamedDates(desc, p, spec, sch)...); len(bad) > 0 {
+	// The times are read with both day fields as "*": the time fields run the
+	// same on every day, and a day the day fields allow may be years away.
+	if bad := append(checkNamedTimes(desc, anyDay(p, spec, sch, true, true)), checkNamedDates(desc, p, spec, sch)...); len(bad) > 0 {
 		t.Errorf("DescribeSpec(%q) = %q: names %s, which Next() does not run at", spec, desc, strings.Join(bad, ", "))
 	}
 	return true
@@ -347,6 +349,21 @@ func TestDescribeSpecNamesRuns(t *testing.T) {
 		}
 		if checked < c.least {
 			t.Errorf("%s: checked %d random specs, want at least %d", c.name, checked, c.least)
+		}
+	}
+}
+
+// TestDescribeSpecNamesRunsCases checks specs the check once misread.
+func TestDescribeSpecNamesRunsCases(t *testing.T) {
+	five := NewParser(Minute | Hour | Dom | Month | Dow | Descriptor)
+	for _, tt := range []struct {
+		p    Parser
+		spec string
+	}{
+		{five, "0 0 29 2 1"}, // February 29 on a Monday: no run for years
+	} {
+		if !checkSpecNamesRuns(t, tt.p, tt.spec) {
+			t.Errorf("%q was not checked", tt.spec)
 		}
 	}
 }
