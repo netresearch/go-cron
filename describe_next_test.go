@@ -196,26 +196,27 @@ func checkNamedDates(desc string, p Parser, spec string, sch Schedule) []string 
 }
 
 // anyDay returns the schedule of spec with its day of the month (dom), its
-// day of the week (dow), or both as "*", or sch when it can't.
+// day of the week (dow), or both as "*", or sch when it can't. It reads the
+// fields as the parser fills them in, second thru day of the week, so
+// optional fields don't move the day fields, and parses them all written.
 func anyDay(p Parser, spec string, sch Schedule, dom, dow bool) Schedule {
-	f := strings.Fields(spec)
-	i := 2 // the day of the month follows the minute and the hour
-	if strings.HasPrefix(f[0], "CRON_TZ=") || strings.HasPrefix(f[0], "TZ=") {
-		i++
-	}
-	if p.options&Second != 0 {
-		i++
-	}
-	if i+2 >= len(f) {
+	_, _, f, year, err := p.specFields(spec)
+	if err != nil || f == nil { // a descriptor has no fields
 		return sch
 	}
 	if dom {
-		f[i] = "*"
+		f[3] = "*"
 	}
 	if dow {
-		f[i+2] = "*"
+		f[5] = "*"
 	}
-	if s, err := p.Parse(strings.Join(f, " ")); err == nil {
+	var zone string
+	if w := strings.Fields(spec)[0]; strings.HasPrefix(w, "CRON_TZ=") || strings.HasPrefix(w, "TZ=") {
+		zone = w + " "
+	}
+	q := p
+	q.options = (q.options | Second | Minute | Hour | Dom | Month | Dow) &^ (SecondOptional | DowOptional)
+	if s, err := q.Parse(strings.TrimSpace(zone + strings.Join(f, " ") + " " + year)); err == nil {
 		return s
 	}
 	return sch
@@ -376,6 +377,7 @@ func TestDescribeSpecNamesRunsCases(t *testing.T) {
 		{five, "CRON_TZ=America/New_York 0 9 * * *"}, // 9 am in New York, 13:00 or 14:00 in UTC
 		{five, "CRON_TZ=Asia/Tokyo 0 3 5 * *"},       // the 5th in Tokyo, the 4th in UTC
 		{five, "3-59/7 * 31 * *"},                    // the note "(every 7 minutes, …)" before the D3 clause
+		{NewParser(Minute | Hour | Dom | Month | Dow | SecondOptional), "0 0 0 29 2 1"}, // an optional second written
 	} {
 		if !checkSpecNamesRuns(t, tt.p, tt.spec) {
 			t.Errorf("%q was not checked", tt.spec)
