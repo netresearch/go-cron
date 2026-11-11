@@ -411,7 +411,7 @@ schedname: zonename "time" | "the" "scheduler's" "time"                   // Z3,
 offset: INT ("hour" | "hours") [INT ("minute" | "minutes")]               // Z2
       | INT ("minute" | "minutes")
 zonename: ZONEWORD+                                                       // Z1: "New York", "Etc/GMT+5", "US/Eastern"
-ZONEWORD: /[A-Za-z0-9][A-Za-z0-9+\/:-]*/
+ZONEWORD: /[A-Za-z0-9][A-Za-z0-9+\/:_-]*/
 
 interval: "every" DURATION ("from" "when" "scheduling" "started"         // P3
                            | "from" "Unix" "epoch") [ivnote]
