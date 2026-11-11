@@ -227,16 +227,16 @@ var dateNames = func() map[string]int {
 	return m
 }()
 
-// runDates holds the days of the month, the months, the days of the week
-// and the years that have a run.
-type runDates struct{ doms, months, dows, years map[int]bool }
+// runDates holds the days of the month, the months and the days of the
+// week that have a run.
+type runDates struct{ doms, months, dows map[int]bool }
 
 // dateRuns walks Next() over the five years from startYear, in the
 // schedule's zone, one call per day with a run. A schedule with no run in
 // those years, as one for the fifth Monday in February, is walked over the
 // year of its first run instead.
 func dateRuns(sch Schedule) runDates {
-	r := runDates{map[int]bool{}, map[int]bool{}, map[int]bool{}, map[int]bool{}}
+	r := runDates{map[int]bool{}, map[int]bool{}, map[int]bool{}}
 	loc := scheduleZone(sch)
 	start := startYear(sch)
 	end := time.Date(start+5, time.January, 1, 0, 0, 0, 0, loc)
@@ -245,7 +245,7 @@ func dateRuns(sch Schedule) runDates {
 		end = time.Date(t.Year()+1, time.January, 1, 0, 0, 0, 0, loc)
 	}
 	for ; !t.IsZero() && t.Before(end); t = sch.Next(time.Date(t.Year(), t.Month(), t.Day(), 23, 59, 59, 0, loc)) {
-		r.doms[t.Day()], r.months[int(t.Month())], r.dows[int(t.Weekday())], r.years[t.Year()] = true, true, true, true
+		r.doms[t.Day()], r.months[int(t.Month())], r.dows[int(t.Weekday())] = true, true, true
 	}
 	return r
 }
@@ -263,7 +263,8 @@ func checkNamedDates(desc string, p Parser, spec string, sch Schedule) []string 
 	}
 	doms := dateRuns(anyDay(p, spec, sch, false, true)).doms
 	dows := dateRuns(anyDay(p, spec, sch, true, false)).dows
-	both := dateRuns(anyDay(p, spec, sch, true, true))
+	bothSch := anyDay(p, spec, sch, true, true)
+	both := dateRuns(bothSch)
 	for _, m := range shortMonths.FindAllStringSubmatch(desc, -1) {
 		for _, d := range digits.FindAllString(m[1], -1) {
 			doms[dateValue(d)] = true
@@ -273,7 +274,39 @@ func checkNamedDates(desc string, p Parser, spec string, sch Schedule) []string 
 	bad = append(bad, namedMisses(desc, namedDays, dows, 0, 6)...)
 	bad = append(bad, namedMisses(desc, namedMonths, both.months, 1, 12)...)
 	for _, m := range namedYears.FindAllStringSubmatch(desc, -1) {
-		bad = append(bad, namedMisses(m[1], valueItem, both.years, 0, 9999)...)
+		bad = append(bad, yearMisses(bothSch, m[1])...)
+	}
+	return bad
+}
+
+// yearMisses returns each year and each range of years in list that the
+// year field of sch does not allow in full. With both day fields as "*", sch
+// runs in every year it allows, so the field answers for Next() however far
+// off the year is, and a range costs one pass over the field.
+func yearMisses(sch Schedule, list string) []string {
+	s, ok := sch.(*SpecSchedule)
+	if !ok || s.Year == nil {
+		return nil // any year has a run
+	}
+	var bad []string
+	for _, m := range valueItem.FindAllStringSubmatch(list, -1) {
+		from, to := dateValue(m[1]), dateValue(m[1])
+		if m[2] != "" {
+			to = dateValue(m[2])
+		}
+		if from > to { // a range written backwards
+			bad = append(bad, m[0])
+			continue
+		}
+		allowed := 0
+		for y := range s.Year {
+			if y >= from && y <= to {
+				allowed++
+			}
+		}
+		if allowed != to-from+1 {
+			bad = append(bad, m[0])
+		}
 	}
 	return bad
 }
@@ -489,6 +522,9 @@ func TestDescribeSpecNamesRunsCases(t *testing.T) {
 		{years, "0 0 1 1 * 2035"},                    // a single year past the 5-year search: the check starts in it, not in 2026
 		{years, "0 0 1 1 * 2025"},                    // a year before 2026
 		{years, "0 0 1 1 * 2060"},                    // a year past a 30-year search from 2026
+		{years, "0 0 1 1 * 2035,2037"},               // two years apart
+		{years, "0 0 1 1 * 2027,2035"},               // a year after the five years walked
+		{years, "0 0 1 1 * 2026-102025"},             // 100,000 years, the most a year field takes
 		{five, "0 0 29 2 1"},                         // February 29 on a Monday: no run for years
 		{five, "CRON_TZ=America/New_York 0 9 * * *"}, // 9 am in New York, 13:00 or 14:00 in UTC
 		{five, "CRON_TZ=Asia/Tokyo 0 3 5 * *"},       // the 5th in Tokyo, the 4th in UTC
@@ -520,6 +556,10 @@ func TestNamesNotRun(t *testing.T) {
 		{years, "0 0 1 1 * 2027", "at midnight on the 1st of the month in January in year 2028", "2028"},
 		{five, "0 0 1 1 *", "never runs", "never runs"},
 		{years, "0 0 1 1 * 2035", "never runs", "never runs"}, // past the parser's default search span
+		{years, "0 0 1 1 * 2035,2037", "at midnight on the 1st of the month in January in years 2035 and 2036", "2036"},
+		{years, "0 0 1 1 * 2026-2030", "at midnight on the 1st of the month in January in years 2026 thru 2031", "2026 thru 2031"},
+		{years, "0 0 1 1 * 2035", "at midnight on the 1st of the month in January in year 1", "1"}, // the zero time is in year 1
+		{years, "0 0 1 1 * 2026-2027", "at midnight on the 1st of the month in January in years 2027 thru 2026", "2027 thru 2026"},
 		{five, "0 9,17 * * *", "at the top of every hour from 9 am thru 5 pm every day", "9 am thru 5 pm"},
 		{five, "0,10 * * * *", "at minutes 0 thru 10 past the hour", "minute 0 thru 10"},
 		{five, "* * * * *", "at minutes 0 thru 60 past the hour", "minute 0 thru 60"}, // an end past 59
