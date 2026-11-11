@@ -117,12 +117,14 @@ form (G10) and descriptors are outside the grammar.
 What a context-free grammar can't check is kept by the goldens: the value
 limits (T1, T4, R8–R12), the hour order (T6) and the values themselves (G1).
 `TestDescribeSpecNamesRuns` also checks the values, for the goldens and for
-random specs: every clock time, minute and second a description names must be
-a run on the first day that has one, from 2026 on, and every day of the month, day
-of the week, month and year must have a run from 2026 thru 2030, or in the
-year of the first run after them, in the spec's zone. Each day field is checked alone, a day that D3 says runs only in months
-that have it needs no run, and "never runs" must have none. The check is
-one-sided: it does not find a run a description leaves out.
+random specs, from the first year the spec allows, or from 2026 when it allows
+any. Every clock time, minute and second a description names must be a run on
+the first day that has one, and every day of the month, day of the week, month
+and year must have a run in the five years from there, or in the year of the
+first run after them, in the spec's zone. Each day field is checked alone, a
+day that D3 says runs only in months that have it needs no run, and "never
+runs" must have none. The check is one-sided: it does not find a run a
+description leaves out.
 
 ```ebnf
 // "x" literal, [x] optional, (x)* repeat, a | b choice.

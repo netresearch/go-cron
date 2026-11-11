@@ -43,14 +43,41 @@ func scheduleZone(sch Schedule) *time.Location {
 	return time.UTC
 }
 
-// dayRuns walks Next() over the day of the first run from 2026 on, in the
-// schedule's zone, and returns the hours, the minutes and the seconds that
-// run, and every time of day as h*3600+m*60+s. A spec that never runs has
-// none; Next() returns the zero time for it.
+// firstYear is the year the check starts in for a spec that allows any year.
+const firstYear = 2026
+
+// startYear returns the year the check starts in: the first year sch
+// allows, or firstYear when it allows any. A spec for years before
+// firstYear, or after a 30-year search from it, is read in its own years.
+func startYear(sch Schedule) int {
+	s, ok := sch.(*SpecSchedule)
+	if !ok || s.Year == nil {
+		return firstYear
+	}
+	start := YearMax
+	for y := range s.Year {
+		start = min(start, y)
+	}
+	return start
+}
+
+// yearStart returns the second before January 1 of year y in loc, so that
+// Next() from it can return a run at the start of the year.
+func yearStart(y int, loc *time.Location) time.Time {
+	return time.Date(y, time.January, 1, 0, 0, 0, 0, loc).Add(-time.Second)
+}
+
+// dayRuns walks Next() over the day of the first run from startYear on, in
+// the schedule's zone, and returns the hours, the minutes and the seconds
+// that run, and every time of day as h*3600+m*60+s. A spec that never runs
+// has none; Next() returns the zero time for it.
 func dayRuns(sch Schedule) (hours, minutes, seconds, times map[int]bool) {
 	hours, minutes, seconds, times = map[int]bool{}, map[int]bool{}, map[int]bool{}, map[int]bool{}
 	loc := scheduleZone(sch)
-	first := sch.Next(time.Date(2026, time.January, 1, 0, 0, 0, 0, loc).Add(-time.Second))
+	first := sch.Next(yearStart(startYear(sch), loc))
+	if first.IsZero() {
+		return hours, minutes, seconds, times
+	}
 	day := time.Date(first.Year(), first.Month(), first.Day(), 0, 0, 0, 0, loc)
 	for _, t := range Between(sch, first.Add(-time.Second), day.AddDate(0, 0, 1)) {
 		hours[t.Hour()], minutes[t.Minute()], seconds[t.Second()] = true, true, true
@@ -204,15 +231,16 @@ var dateNames = func() map[string]int {
 // and the years that have a run.
 type runDates struct{ doms, months, dows, years map[int]bool }
 
-// dateRuns walks Next() from 2026 thru 2030, in the schedule's zone, one
-// call per day with a run. A schedule with no run in those years, as one for
-// a later year or the fifth Monday in February, is walked over the year of
-// its first run instead.
+// dateRuns walks Next() over the five years from startYear, in the
+// schedule's zone, one call per day with a run. A schedule with no run in
+// those years, as one for the fifth Monday in February, is walked over the
+// year of its first run instead.
 func dateRuns(sch Schedule) runDates {
 	r := runDates{map[int]bool{}, map[int]bool{}, map[int]bool{}, map[int]bool{}}
 	loc := scheduleZone(sch)
-	end := time.Date(2031, time.January, 1, 0, 0, 0, 0, loc)
-	t := sch.Next(time.Date(2026, time.January, 1, 0, 0, 0, 0, loc).Add(-time.Second))
+	start := startYear(sch)
+	end := time.Date(start+5, time.January, 1, 0, 0, 0, 0, loc)
+	t := sch.Next(yearStart(start, loc))
 	if !t.IsZero() && !t.Before(end) {
 		end = time.Date(t.Year()+1, time.January, 1, 0, 0, 0, 0, loc)
 	}
@@ -458,7 +486,9 @@ func TestDescribeSpecNamesRunsCases(t *testing.T) {
 		p    Parser
 		spec string
 	}{
-		{years, "0 0 1 1 * 2035"},                    // a year after 2026 thru 2030
+		{years, "0 0 1 1 * 2035"},                    // a single year past the 5-year search: the check starts in it, not in 2026
+		{years, "0 0 1 1 * 2025"},                    // a year before 2026
+		{years, "0 0 1 1 * 2060"},                    // a year past a 30-year search from 2026
 		{five, "0 0 29 2 1"},                         // February 29 on a Monday: no run for years
 		{five, "CRON_TZ=America/New_York 0 9 * * *"}, // 9 am in New York, 13:00 or 14:00 in UTC
 		{five, "CRON_TZ=Asia/Tokyo 0 3 5 * *"},       // the 5th in Tokyo, the 4th in UTC
