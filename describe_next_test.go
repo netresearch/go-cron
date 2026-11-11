@@ -294,12 +294,24 @@ func checkSpecNamesRuns(t *testing.T, p Parser, spec string) bool {
 	if literalForm.MatchString(desc) {
 		return false
 	}
-	// The times are read with both day fields as "*": the time fields run the
-	// same on every day, and a day the day fields allow may be years away.
-	if bad := append(checkNamedTimes(desc, anyDay(p, spec, sch, true, true)), checkNamedDates(desc, p, spec, sch)...); len(bad) > 0 {
+	if bad := namesNotRun(desc, p, spec, sch); len(bad) > 0 {
 		t.Errorf("DescribeSpec(%q) = %q: names %s, which Next() does not run at", spec, desc, strings.Join(bad, ", "))
 	}
 	return true
+}
+
+// namesNotRun returns each time and date desc names that Next() does not
+// run at, and "never runs" when the spec runs. The times are read with both
+// day fields as "*": the time fields run the same on every day, and a day
+// the day fields allow may be years away.
+func namesNotRun(desc string, p Parser, spec string, sch Schedule) []string {
+	if desc == "never runs" {
+		if sch.Next(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)).IsZero() {
+			return nil
+		}
+		return []string{desc}
+	}
+	return append(checkNamedTimes(desc, anyDay(p, spec, sch, true, true)), checkNamedDates(desc, p, spec, sch)...)
 }
 
 // checkGoldensNameRuns runs checkSpecNamesRuns on each golden, with the
@@ -381,6 +393,35 @@ func TestDescribeSpecNamesRunsCases(t *testing.T) {
 	} {
 		if !checkSpecNamesRuns(t, tt.p, tt.spec) {
 			t.Errorf("%q was not checked", tt.spec)
+		}
+	}
+}
+
+// TestNamesNotRun checks that the check finds what a wrong description
+// names: each case pairs a spec with a description it does not run as.
+func TestNamesNotRun(t *testing.T) {
+	five := NewParser(Minute | Hour | Dom | Month | Dow | Descriptor)
+	years := NewParser(Minute | Hour | Dom | Month | Dow | Year)
+	for _, tt := range []struct {
+		p          Parser
+		spec, desc string
+		want       string
+	}{
+		{five, "0 9 * * *", "at 10 am every day", "10 am"},
+		{five, "30 9 * * *", "at 9:45 am every day", "9:45 am"},
+		{five, "0,30 * * * *", "at minutes 0 and 15 past the hour", "minute 15"},
+		{five, "0 0 1 * *", "at midnight on the 2nd of the month", "2nd"},
+		{five, "0 0 * * 1-5", "at 12 am on Monday thru Saturday", "Monday thru Saturday"},
+		{five, "0 0 1 3 *", "at midnight on the 1st of the month in April", "April"},
+		{years, "0 0 1 1 * 2027", "at midnight on the 1st of the month in January in year 2028", "2028"},
+		{five, "0 0 1 1 *", "never runs", "never runs"},
+	} {
+		sch, err := tt.p.Parse(tt.spec)
+		if err != nil {
+			t.Fatalf("Parse(%q): %v", tt.spec, err)
+		}
+		if got := strings.Join(namesNotRun(tt.desc, tt.p, tt.spec, sch), ", "); got != tt.want {
+			t.Errorf("namesNotRun(%q, %q) = %q, want %q", tt.desc, tt.spec, got, tt.want)
 		}
 	}
 }
