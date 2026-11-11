@@ -17,11 +17,19 @@ import (
 // 6", "1 thru 5", "0, 7, 14, … 56".
 const listSep = `(?:, and |, … |, | and | thru )`
 
-// The times a description names (G1): a clock time, and the values after
-// "minute(s)" and "second(s)" or before them ("30 minutes past").
+// clockPattern is a clock time as a description writes it: "midnight", "noon",
+// "9 am", "5:56 pm", "2:30:15 am".
+const clockPattern = `(?:midnight|noon|\d+(?::\d\d){0,2} [ap]m)`
+
+// The times a description names (G1): a clock time, the values after
+// "minute(s)" and "second(s)" or before them ("30 minutes past"), and the
+// hours of a clock range ("9 am thru 5 pm", "the 1 am hour thru the 4 am
+// hour") that no hour step thins out.
 var (
 	namedClock   = regexp.MustCompile(`\b(midnight|noon|(\d+)(?::(\d\d))?(?::(\d\d))? ([ap])m)\b`)
 	namedValues  = regexp.MustCompile(`\b(second|minute)s? (\d+(?:` + listSep + `\d+)*)|\b(\d+) (second|minute)s?\b`)
+	clockRange   = regexp.MustCompile(`\b(` + clockPattern + `)(?: hour)? thru (?:the )?(` + clockPattern + `)`)
+	hourStep     = regexp.MustCompile(`\bevery \d+ hours\b`)
 	intervalNote = regexp.MustCompile(` \(every [^)]*\)`)
 	digits       = regexp.MustCompile(`\d+`)
 )
@@ -54,8 +62,10 @@ func dayRuns(sch Schedule) (hours, minutes, seconds, times map[int]bool) {
 // checkNamedTimes reports every time desc names that sch does not run at: a
 // clock time with seconds must be a run, one with minutes the minute of a
 // run, and a bare one ("9 am", "noon") an hour with a run; a named minute or
-// second must be the minute or second of a run. The check is one-sided: it
-// does not find a run that the description leaves out.
+// second, and each value of a range of them, must be the minute or second of
+// a run; each hour of a clock range must have a run, unless an hour step
+// ("every 2 hours") names only some of them. The check is one-sided: it does
+// not find a run that the description leaves out.
 func checkNamedTimes(desc string, sch Schedule) []string {
 	hours, minutes, seconds, times := dayRuns(sch)
 	desc = intervalNote.ReplaceAllString(desc, "") // "(every 7 minutes, …)" names an interval, not a value
@@ -67,6 +77,26 @@ func checkNamedTimes(desc string, sch Schedule) []string {
 	}
 	for _, m := range namedValues.FindAllStringSubmatch(desc, -1) {
 		bad = append(bad, namedValueMisses(m, minutes, seconds)...)
+	}
+	if !hourStep.MatchString(desc) {
+		bad = append(bad, clockRangeMisses(desc, hours)...)
+	}
+	return bad
+}
+
+// clockRangeMisses returns each clock range in desc with an hour before its
+// last that has no run; the last hour is checked as a clock time.
+func clockRangeMisses(desc string, hours map[int]bool) []string {
+	var bad []string
+	for _, m := range clockRange.FindAllStringSubmatch(desc, -1) {
+		from, _, _ := namedClockTime(namedClock.FindStringSubmatch(m[1]))
+		to, _, _ := namedClockTime(namedClock.FindStringSubmatch(m[2]))
+		for h := from; h != to; h = (h + 1) % 24 {
+			if !hours[h] {
+				bad = append(bad, m[0])
+				break
+			}
+		}
 	}
 	return bad
 }
@@ -114,7 +144,8 @@ func clockRuns(h, minute, sec int, hours, times map[int]bool) bool {
 }
 
 // namedValueMisses returns "minute 5" or "second 5" for each value that
-// namedValues matched and no run has.
+// namedValues matched and no run has, and "minute 0 thru 10" for a range
+// with a value that none has.
 func namedValueMisses(m []string, minutes, seconds map[int]bool) []string {
 	unit, list := m[1], m[2]
 	if unit == "" {
@@ -125,10 +156,8 @@ func namedValueMisses(m []string, minutes, seconds map[int]bool) []string {
 		runs = seconds
 	}
 	var bad []string
-	for _, d := range digits.FindAllString(list, -1) {
-		if v, _ := strconv.Atoi(d); !runs[v] {
-			bad = append(bad, unit+" "+d)
-		}
+	for _, item := range namedMisses(list, valueItem, runs, 0, 59) {
+		bad = append(bad, unit+" "+item)
 	}
 	return bad
 }
@@ -141,7 +170,7 @@ var (
 	namedMonths   = nameRange(time.January, time.December)
 	namedYears    = regexp.MustCompile(`\bin years? (\d+(?:` + listSep + `\d+)*)`)
 	shortMonths   = regexp.MustCompile(`; the (.*) runs? only in months that have`)
-	yearItem      = regexp.MustCompile(`(\d+)(?: thru (\d+))?`)
+	valueItem     = regexp.MustCompile(`(\d+)(?: thru (\d+))?`)
 )
 
 // nameRange matches a name from first thru last, or a range of two of them,
@@ -216,7 +245,7 @@ func checkNamedDates(desc string, p Parser, spec string, sch Schedule) []string 
 	bad = append(bad, namedMisses(desc, namedDays, dows, 0, 6)...)
 	bad = append(bad, namedMisses(desc, namedMonths, both.months, 1, 12)...)
 	for _, m := range namedYears.FindAllStringSubmatch(desc, -1) {
-		bad = append(bad, namedMisses(m[1], yearItem, both.years, 0, 9999)...)
+		bad = append(bad, namedMisses(m[1], valueItem, both.years, 0, 9999)...)
 	}
 	return bad
 }
@@ -456,6 +485,8 @@ func TestNamesNotRun(t *testing.T) {
 		{years, "0 0 1 1 * 2027", "at midnight on the 1st of the month in January in year 2028", "2028"},
 		{five, "0 0 1 1 *", "never runs", "never runs"},
 		{years, "0 0 1 1 * 2035", "never runs", "never runs"}, // past the parser's default search span
+		{five, "0 9,17 * * *", "at the top of every hour from 9 am thru 5 pm every day", "9 am thru 5 pm"},
+		{five, "0,10 * * * *", "at minutes 0 thru 10 past the hour", "minute 0 thru 10"},
 	} {
 		sch, err := tt.p.Parse(tt.spec)
 		if err != nil {
