@@ -4,6 +4,8 @@
 package cron
 
 import (
+	"cmp"
+	"maps"
 	"runtime"
 	"strings"
 	"testing"
@@ -616,5 +618,51 @@ func TestSecondOptionalWithYear(t *testing.T) {
 				t.Errorf("Next(%v).Second() = %d, want %d", tt.from, next.Second(), tt.wantSecond)
 			}
 		})
+	}
+}
+
+// TestSpecFieldsYearWritten checks that specFields returns no year field
+// for a spec that wrote none, and a written one as written, "*" and "?"
+// included: a caller that writes the fields back must not add a year the
+// spec left out. It also checks the years Parse reads for each: any year
+// for one not written or written as "*" or "?".
+func TestSpecFieldsYearWritten(t *testing.T) {
+	five := Minute | Hour | Dom | Month | Dow
+	for _, tt := range []struct {
+		opts ParseOption
+		spec string
+		want string
+	}{
+		{five | YearOptional, "0 0 * * *", ""},
+		{five | YearOptional, "0 0 * * * 2030", "2030"},
+		{five | SecondOptional | YearOptional, "0 0 * * *", ""},
+		{five | SecondOptional | YearOptional, "0 0 0 * * * 2030", "2030"},
+		{five | DowOptional | YearOptional, "0 0 * *", ""},
+		{five | Year, "0 0 * * * *", "*"},
+		{five | Year, "0 0 * * * ?", "?"},
+		{five | Year | YearOptional, "0 0 * * * *", "*"},
+		{five | Year | SecondOptional, "0 0 0 * * *", ""}, // six fields: a second, not a year
+		{five | Year | SecondOptional, "0 0 0 * * * 2030", "2030"},
+		{five, "0 0 * * *", ""},
+	} {
+		p := NewParser(tt.opts)
+		_, _, _, got, err := p.specFields(tt.spec)
+		if err != nil {
+			t.Errorf("specFields(%q): %v", tt.spec, err)
+			continue
+		}
+		if got != tt.want {
+			t.Errorf("specFields(%q) year = %q, want %q", tt.spec, got, tt.want)
+		}
+		want, _ := getYearField(cmp.Or(tt.want, "*")) // nil: any year
+		sch, err := p.Parse(tt.spec)
+		s, ok := sch.(*SpecSchedule)
+		if err != nil || !ok {
+			t.Errorf("Parse(%q) = %T, %v", tt.spec, sch, err)
+			continue
+		}
+		if (s.Year == nil) != (want == nil) || !maps.Equal(s.Year, want) {
+			t.Errorf("Parse(%q).Year = %v, want %v", tt.spec, s.Year, want)
+		}
 	}
 }
