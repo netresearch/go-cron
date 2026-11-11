@@ -43,8 +43,8 @@ func dayRuns(sch Schedule) (hours, minutes, seconds, times map[int]bool) {
 	hours, minutes, seconds, times = map[int]bool{}, map[int]bool{}, map[int]bool{}, map[int]bool{}
 	loc := scheduleZone(sch)
 	first := sch.Next(time.Date(2026, time.January, 1, 0, 0, 0, 0, loc).Add(-time.Second))
-	start := time.Date(first.Year(), first.Month(), first.Day(), 0, 0, 0, 0, loc)
-	for t := first; !t.IsZero() && t.Before(start.AddDate(0, 0, 1)); t = sch.Next(t) {
+	day := time.Date(first.Year(), first.Month(), first.Day(), 0, 0, 0, 0, loc)
+	for _, t := range Between(sch, first.Add(-time.Second), day.AddDate(0, 0, 1)) {
 		hours[t.Hour()], minutes[t.Minute()], seconds[t.Second()] = true, true, true
 		times[t.Hour()*3600+t.Minute()*60+t.Second()] = true
 	}
