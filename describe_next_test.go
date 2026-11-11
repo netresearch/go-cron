@@ -178,6 +178,9 @@ func dateRuns(sch Schedule) runDates {
 // runs only in months that have it needs none. Like checkNamedTimes, it is
 // one-sided.
 func checkNamedDates(desc string, p Parser, spec string, sch Schedule) []string {
+	if !namesDate(desc) {
+		return nil // the walks below cost three five-year walks
+	}
 	doms := dateRuns(anyDay(p, spec, sch, false, true)).doms
 	dows := dateRuns(anyDay(p, spec, sch, true, false)).dows
 	both := dateRuns(anyDay(p, spec, sch, true, true))
@@ -193,6 +196,16 @@ func checkNamedDates(desc string, p Parser, spec string, sch Schedule) []string 
 		bad = append(bad, namedMisses(m[1], yearItem, both.years, 0, 9999)...)
 	}
 	return bad
+}
+
+// namesDate reports whether desc names a day, a month or a year.
+func namesDate(desc string) bool {
+	for _, re := range []*regexp.Regexp{namedOrdinals, namedDays, namedMonths, namedYears} {
+		if re.MatchString(desc) {
+			return true
+		}
+	}
+	return false
 }
 
 // anyDay returns the schedule of spec with its day of the month (dom), its
