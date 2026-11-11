@@ -172,7 +172,8 @@ func dateWords(t time.Time, sameMonth bool) string {
 // shift the description states (Z4), by the dates, in loc, of each window's
 // first and last instant: "Berlin is 5 hours ahead of New York from March 14
 // to 28 and from October 31 to November 7". Each shift gets one sentence. A
-// window under a day is left out. tail says that the windows lie between two
+// window under a day is left out (Z4), although a run inside it is off the
+// stated shift. tail says that the windows lie between two
 // zones' clock changes.
 func windowNote(subject, object string, spans []zoneSpan, steady time.Duration, loc *time.Location, tail bool) string {
 	var order []time.Duration
