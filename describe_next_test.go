@@ -16,10 +16,10 @@ import (
 // The times a description names (G1): a clock time, and the values after
 // "minute(s)" and "second(s)" or before them ("30 minutes past").
 var (
-	namedClock  = regexp.MustCompile(`\b(midnight|noon|(\d+)(?::(\d\d))?(?::(\d\d))? ([ap])m)\b`)
-	namedValues = regexp.MustCompile(`\b(second|minute)s? (\d+(?:(?:, and |, … |, | and | thru )\d+)*)|\b(\d+) (second|minute)s?\b`)
-	trailingIvl = regexp.MustCompile(` \(every .*\)$`)
-	digits      = regexp.MustCompile(`\d+`)
+	namedClock   = regexp.MustCompile(`\b(midnight|noon|(\d+)(?::(\d\d))?(?::(\d\d))? ([ap])m)\b`)
+	namedValues  = regexp.MustCompile(`\b(second|minute)s? (\d+(?:(?:, and |, … |, | and | thru )\d+)*)|\b(\d+) (second|minute)s?\b`)
+	intervalNote = regexp.MustCompile(` \(every [^)]*\)`)
+	digits       = regexp.MustCompile(`\d+`)
 )
 
 // scheduleZone returns the zone sch runs in, as a description names its
@@ -54,7 +54,7 @@ func dayRuns(sch Schedule) (hours, minutes, seconds, times map[int]bool) {
 // does not find a run that the description leaves out.
 func checkNamedTimes(desc string, sch Schedule) []string {
 	hours, minutes, seconds, times := dayRuns(sch)
-	desc = trailingIvl.ReplaceAllString(desc, "") // "(every 7 minutes, …)" names an interval, not a value
+	desc = intervalNote.ReplaceAllString(desc, "") // "(every 7 minutes, …)" names an interval, not a value
 	var bad []string
 	for _, m := range namedClock.FindAllStringSubmatch(desc, -1) {
 		if h, minute, sec := namedClockTime(m); !clockRuns(h, minute, sec, hours, times) {
@@ -375,6 +375,7 @@ func TestDescribeSpecNamesRunsCases(t *testing.T) {
 		{five, "0 0 29 2 1"},                         // February 29 on a Monday: no run for years
 		{five, "CRON_TZ=America/New_York 0 9 * * *"}, // 9 am in New York, 13:00 or 14:00 in UTC
 		{five, "CRON_TZ=Asia/Tokyo 0 3 5 * *"},       // the 5th in Tokyo, the 4th in UTC
+		{five, "3-59/7 * 31 * *"},                    // the note "(every 7 minutes, …)" before the D3 clause
 	} {
 		if !checkSpecNamesRuns(t, tt.p, tt.spec) {
 			t.Errorf("%q was not checked", tt.spec)
