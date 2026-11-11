@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"maps"
 	"math/rand/v2"
+	"reflect"
 	"regexp"
 	"slices"
 	"strconv"
@@ -259,13 +260,13 @@ func dateRuns(sch Schedule) runDates {
 // a 13th and on a Friday, not on a Friday the 13th), and a day that D3 says
 // runs only in months that have it needs none. Like checkNamedTimes, it is
 // one-sided.
-func checkNamedDates(desc string, p Parser, spec string, sch Schedule) []string {
+func checkNamedDates(desc string, sch Schedule) []string {
 	if !namesDate(desc) {
 		return nil // the walks below cost three five-year walks
 	}
-	doms := dateRuns(anyDay(p, spec, sch, false, true)).doms
-	dows := dateRuns(anyDay(p, spec, sch, true, false)).dows
-	bothSch := anyDay(p, spec, sch, true, true)
+	doms := dateRuns(anyDay(sch, false, true)).doms
+	dows := dateRuns(anyDay(sch, true, false)).dows
+	bothSch := anyDay(sch, true, true)
 	both := dateRuns(bothSch)
 	for _, m := range shortMonths.FindAllStringSubmatch(desc, -1) {
 		for _, d := range digits.FindAllString(m[1], -1) {
@@ -323,32 +324,36 @@ func namesDate(desc string) bool {
 	return false
 }
 
-// anyDay returns the schedule of spec with its day of the month (dom), its
-// day of the week (dow), or both as "*", or sch when it can't. It reads the
-// fields as the parser fills them in, second thru day of the week, so
-// optional fields don't move the day fields, and parses them all written,
-// with Next() searching 30 years ahead for a run that dateRuns needs.
-func anyDay(p Parser, spec string, sch Schedule, dom, dow bool) Schedule {
-	_, _, f, year, err := p.specFields(spec)
-	if err != nil || f == nil { // a descriptor has no fields
+// starDays holds the day fields as the parser sets them for "*".
+var starDays = func() *SpecSchedule {
+	s, err := NewParser(Minute | Hour | Dom | Month | Dow).Parse("* * * * *")
+	if err != nil {
+		panic(err)
+	}
+	return s.(*SpecSchedule)
+}()
+
+// anyDay returns a copy of sch with its day of the month (dom), its day of
+// the week (dow), or both as "*", and with Next() searching 30 years ahead,
+// a safeguard for a first run that dateRuns walks to past the parser's
+// default span. It sets the fields on the copy, so no parser option can
+// reject the result. A descriptor such as "@weekly" is a
+// SpecSchedule too and gets the same; one that is not, as "@every 1h",
+// comes back as it is.
+func anyDay(sch Schedule, dom, dow bool) Schedule {
+	s, ok := sch.(*SpecSchedule)
+	if !ok {
 		return sch
 	}
+	c := *s
+	c.MaxSearchYears = 30
 	if dom {
-		f[3] = "*"
+		c.Dom, c.DomConstraints = starDays.Dom, nil
 	}
 	if dow {
-		f[5] = "*"
+		c.Dow, c.DowConstraints = starDays.Dow, nil
 	}
-	var zone string
-	if w := strings.Fields(spec)[0]; strings.HasPrefix(w, "CRON_TZ=") || strings.HasPrefix(w, "TZ=") {
-		zone = w + " "
-	}
-	q := p.WithMaxSearchYears(30)
-	q.options = (q.options | Second | Minute | Hour | Dom | Month | Dow) &^ (SecondOptional | DowOptional)
-	if s, err := q.Parse(strings.TrimSpace(zone + strings.Join(f, " ") + " " + year)); err == nil {
-		return s
-	}
-	return sch
+	return &c
 }
 
 // namedMisses returns each item of re in s, a value in group 1 or a range
@@ -428,7 +433,7 @@ func checkSpecNamesRuns(t *testing.T, p Parser, spec string) bool {
 	if literalForm.MatchString(desc) {
 		return false
 	}
-	if bad := namesNotRun(desc, p, spec, sch); len(bad) > 0 {
+	if bad := namesNotRun(desc, sch); len(bad) > 0 {
 		t.Errorf("DescribeSpec(%q) = %q: names %s, which Next() does not run at", spec, desc, strings.Join(bad, ", "))
 	}
 	return true
@@ -438,14 +443,14 @@ func checkSpecNamesRuns(t *testing.T, p Parser, spec string) bool {
 // run at, and "never runs" when the spec runs in a year it allows. The
 // times are read with both day fields as "*": the time fields run the same
 // on every day, and a day the day fields allow may be years away.
-func namesNotRun(desc string, p Parser, spec string, sch Schedule) []string {
+func namesNotRun(desc string, sch Schedule) []string {
 	if desc == "never runs" {
-		if runsSomeYear(anyDay(p, spec, sch, false, false)) {
+		if runsSomeYear(anyDay(sch, false, false)) {
 			return []string{desc}
 		}
 		return nil
 	}
-	return append(checkNamedTimes(desc, anyDay(p, spec, sch, true, true)), checkNamedDates(desc, p, spec, sch)...)
+	return append(checkNamedTimes(desc, anyDay(sch, true, true)), checkNamedDates(desc, sch)...)
 }
 
 // yearKind returns which of the 14 calendars year y follows: the day of the
@@ -566,6 +571,12 @@ func TestDescribeSpecNamesRuns(t *testing.T) {
 		{"date fields", NewParser(Minute | Hour | Dom | Month | Dow), 400, 240, days},
 		{"DowOrDom", NewParser(Minute | Hour | Dom | Month | Dow | DowOrDom), 200, 100, days},
 		{"years", NewParser(Minute | Hour | Dom | Month | Dow | Year), 100, 60, func() string { return days() + " " + year() }},
+		{"optional year", NewParser(Minute | Hour | Dom | Month | Dow | YearOptional), 200, 120, func() string {
+			if r.IntN(2) == 0 {
+				return days() // no year written
+			}
+			return days() + " " + year()
+		}},
 	} {
 		checked := 0
 		for range c.n {
@@ -598,10 +609,68 @@ func TestDescribeSpecNamesRunsCases(t *testing.T) {
 		{five, "CRON_TZ=America/New_York 0 9 * * *"}, // 9 am in New York, 13:00 or 14:00 in UTC
 		{five, "CRON_TZ=Asia/Tokyo 0 3 5 * *"},       // the 5th in Tokyo, the 4th in UTC
 		{five, "3-59/7 * 31 * *"},                    // the note "(every 7 minutes, …)" before the D3 clause
-		{NewParser(Minute | Hour | Dom | Month | Dow | SecondOptional), "0 0 0 29 2 1"}, // an optional second written
+		{NewParser(Minute | Hour | Dom | Month | Dow | SecondOptional), "0 0 0 29 2 1"},             // an optional second written
+		{NewParser(Minute | Hour | Dom | Month | Dow | YearOptional), "* 5 2,12,24-5 4 0"},          // an optional year not written
+		{NewParser(Minute | Hour | Dom | Month | Dow | Year | YearOptional), "* 5 2,12,24-5 4 0 *"}, // a year "*" written
+		{NewParser(Minute | Hour | Dom | Month | Dow | Year | SecondOptional), "0 0 0 29 2 1"},      // six fields with Year: a second, no year
+		{NewParser(Minute | Hour | Dom | Month | Dow | StrictDays | DowOrDom), "0 0 31 2 1"},        // valid while the day of the week stands in
 	} {
 		if !checkSpecNamesRuns(t, tt.p, tt.spec) {
 			t.Errorf("%q was not checked", tt.spec)
+		}
+	}
+}
+
+// TestAnyDayMatchesParse checks that anyDay's copy is the schedule the
+// parser builds, with a 30-year search, from the day fields written as "*",
+// for options that keep state beside the day fields: constraints, hashes,
+// zones, years, flags and descriptors.
+func TestAnyDayMatchesParse(t *testing.T) {
+	five := Minute | Hour | Dom | Month | Dow
+	hash := NewParser(five | Hash).WithHashKey("job")
+	desc := NewParser(five | Descriptor)
+	for _, tt := range []struct {
+		p          Parser
+		spec, star string // star is spec with the starred day fields written as "*"
+		dom, dow   bool
+	}{
+		{NewParser(five | DowOrDom), "0 9 13 * 5", "0 9 * * 5", true, false},
+		{NewParser(five | DowOrDom), "0 9 13 * 5", "0 9 13 * *", false, true},
+		{NewParser(five | Extended), "0 0 L * *", "0 0 * * *", true, false},
+		{NewParser(five | Extended), "0 0 15W * 5#3", "0 0 * * *", true, true},
+		{hash, "H H H * *", "H H * * *", true, false},
+		{hash, "H H * * H", "H H * * *", false, true},
+		{NewParser(five | DSTSkip), "CRON_TZ=America/New_York 30 2 * 3 0", "CRON_TZ=America/New_York 30 2 * 3 *", false, true},
+		{NewParser(five | Year), "0 0 29 2 1 2028,2032", "0 0 * 2 * 2028,2032", true, true},
+		{desc, "@weekly", "@daily", false, true},
+		{desc, "@monthly", "@daily", true, false},
+		{desc, "CRON_TZ=Asia/Tokyo @weekly", "CRON_TZ=Asia/Tokyo @daily", false, true},
+	} {
+		sch, err := tt.p.Parse(tt.spec)
+		if err != nil {
+			t.Errorf("Parse(%q): %v", tt.spec, err)
+			continue
+		}
+		want, err := tt.p.WithMaxSearchYears(30).Parse(tt.star)
+		if err != nil {
+			t.Errorf("Parse(%q): %v", tt.star, err)
+			continue
+		}
+		a := anyDay(sch, tt.dom, tt.dow)
+		g, gok := a.(*SpecSchedule)
+		wp, wok := want.(*SpecSchedule)
+		if !gok || !wok {
+			t.Errorf("anyDay(%q) = %T, Parse(%q) = %T: want two *SpecSchedule", tt.spec, a, tt.star, want)
+			continue
+		}
+		got, w := *g, *wp
+		// Each Parse loads its zone anew, with its own cache: compare names.
+		if got.Location.String() != w.Location.String() {
+			t.Errorf("anyDay(%q).Location = %v, want %v", tt.spec, got.Location, w.Location)
+		}
+		got.Location, w.Location = nil, nil
+		if !reflect.DeepEqual(got, w) {
+			t.Errorf("anyDay(%q, %v, %v) = %+v, want %+v, as %q parses", tt.spec, tt.dom, tt.dow, got, w, tt.star)
 		}
 	}
 }
@@ -642,7 +711,7 @@ func TestNamesNotRun(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Parse(%q): %v", tt.spec, err)
 		}
-		if got := strings.Join(namesNotRun(tt.desc, tt.p, tt.spec, sch), ", "); got != tt.want {
+		if got := strings.Join(namesNotRun(tt.desc, sch), ", "); got != tt.want {
 			t.Errorf("namesNotRun(%q, %q) = %q, want %q", tt.desc, tt.spec, got, tt.want)
 		}
 	}
