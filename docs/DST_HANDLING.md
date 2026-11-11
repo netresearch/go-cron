@@ -184,7 +184,9 @@ complete set: a zone missing there is read from the next source, which can be
 older. Go reads the variable once, at the first lookup.
 
 A running entry keeps the `Location` it was parsed with until it is parsed
-again or the process restarts. `DescribeSpec` and `Next` read the same data.
+again or the process restarts. A parser made with `WithCache` returns the
+schedule it parsed before, `Location` included, for the same spec, so parse
+again with a parser that has a new cache, or none. `DescribeSpec` and `Next` read the same data.
 
 ### Interaction with SpecSchedule.Location
 
