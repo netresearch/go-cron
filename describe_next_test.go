@@ -13,11 +13,15 @@ import (
 	"time"
 )
 
+// listSep joins the values of a list or a range: "0, 15, and 30", "5 and
+// 6", "1 thru 5", "0, 7, 14, … 56".
+const listSep = `(?:, and |, … |, | and | thru )`
+
 // The times a description names (G1): a clock time, and the values after
 // "minute(s)" and "second(s)" or before them ("30 minutes past").
 var (
 	namedClock   = regexp.MustCompile(`\b(midnight|noon|(\d+)(?::(\d\d))?(?::(\d\d))? ([ap])m)\b`)
-	namedValues  = regexp.MustCompile(`\b(second|minute)s? (\d+(?:(?:, and |, … |, | and | thru )\d+)*)|\b(\d+) (second|minute)s?\b`)
+	namedValues  = regexp.MustCompile(`\b(second|minute)s? (\d+(?:` + listSep + `\d+)*)|\b(\d+) (second|minute)s?\b`)
 	intervalNote = regexp.MustCompile(` \(every [^)]*\)`)
 	digits       = regexp.MustCompile(`\d+`)
 )
@@ -133,12 +137,26 @@ func namedValueMisses(m []string, minutes, seconds map[int]bool) []string {
 // and months, each a value or a range, and the years after "in year(s)".
 var (
 	namedOrdinals = regexp.MustCompile(`\b(\d+)(?:st|nd|rd|th)(?: thru (\d+)(?:st|nd|rd|th))?\b`)
-	namedDays     = regexp.MustCompile(`\b(Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday)(?: thru (Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday))?\b`)
-	namedMonths   = regexp.MustCompile(`\b(January|February|March|April|May|June|July|August|September|October|November|December)(?: thru (January|February|March|April|May|June|July|August|September|October|November|December))?\b`)
-	namedYears    = regexp.MustCompile(`\bin years? (\d+(?:(?:, and |, … |, | and | thru )\d+)*)`)
+	namedDays     = nameRange(time.Sunday, time.Saturday)
+	namedMonths   = nameRange(time.January, time.December)
+	namedYears    = regexp.MustCompile(`\bin years? (\d+(?:` + listSep + `\d+)*)`)
 	shortMonths   = regexp.MustCompile(`; the (.*) runs? only in months that have`)
 	yearItem      = regexp.MustCompile(`(\d+)(?: thru (\d+))?`)
 )
+
+// nameRange matches a name from first thru last, or a range of two of them,
+// "Monday thru Friday", as time.Weekday or time.Month spells them.
+func nameRange[T interface {
+	time.Weekday | time.Month
+	String() string
+}](first, last T) *regexp.Regexp {
+	var names []string
+	for v := first; v <= last; v++ {
+		names = append(names, v.String())
+	}
+	alt := strings.Join(names, "|")
+	return regexp.MustCompile(`\b(` + alt + `)(?: thru (` + alt + `))?\b`)
+}
 
 // dateNames maps the names of the days of the week and of the months to
 // their values, as time.Weekday and time.Month spell them.
