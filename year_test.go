@@ -666,3 +666,16 @@ func TestSpecFieldsYearWritten(t *testing.T) {
 		}
 	}
 }
+
+// TestYearFieldExtractionError checks that a last field that is no year
+// returns its error from Parse and from DescribeSpec.
+func TestYearFieldExtractionError(t *testing.T) {
+	parser := NewParser(Minute | Hour | Dom | Month | Dow | YearOptional)
+	const spec, want = "0 0 * * * abc", "does not appear to be a year"
+	if _, err := parser.Parse(spec); err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("Parse(%q) error = %v, want one containing %q", spec, err, want)
+	}
+	if _, err := parser.DescribeSpec(spec); err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("DescribeSpec(%q) error = %v, want one containing %q", spec, err, want)
+	}
+}

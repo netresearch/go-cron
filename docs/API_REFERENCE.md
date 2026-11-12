@@ -2006,9 +2006,9 @@ type DescribeOption func(*describeConfig)
 func WithParseOptions(o ParseOption) DescribeOption
 ```
 
-DescribeOption configures the package-level `DescribeSpec`. `WithParseOptions`
-sets its parse options; several calls OR together. The `Parser` method uses the
-parser's own settings and ignores it.
+DescribeOption configures the package-level `DescribeSpec` and `DescribeSpecNote`. `WithParseOptions`
+sets their parse options; several calls OR together. The `Parser` methods use the
+parser's own settings and ignore it.
 
 ---
 
@@ -2675,20 +2675,24 @@ c := cron.New(cron.WithObservability(hooks))
 
 ```go
 type SpecAnalysis struct {
-    Valid        bool
-    Error        error
-    NextRun      time.Time
-    Location     *time.Location
-    Fields       map[string]string
-    IsDescriptor bool
-    Interval     time.Duration
-    Schedule     Schedule
-    Warnings     []string
+    Valid           bool
+    Error           error
+    NextRun         time.Time
+    Location        *time.Location
+    Fields          map[string]string
+    IsDescriptor    bool
+    Interval        time.Duration
+    Schedule        Schedule
+    Description     string
+    DescriptionNote string
+    Warnings        []string
 }
 ```
 
 SpecAnalysis contains detailed information about a parsed cron specification.
-Returned by `AnalyzeSpec`.
+Returned by `AnalyzeSpec`. `Description` and `DescriptionNote` are what
+`DescribeSpec` and `DescribeSpecNote` give for the spec; both are empty when
+it is invalid.
 
 ---
 
@@ -3003,13 +3007,18 @@ DescribeSpec returns an English description of a cron expression, or the parse
 error. The package function parses as `AnalyzeSpec` does (the standard parser
 unless `WithParseOptions` is given; several calls OR together); the `Parser`
 method uses the parser's own settings and ignores `WithParseOptions`. Times are on the 12-hour clock. Descriptions carry no time zone. A
-valid spec always gets a description; one that never runs is "never runs".
-Specs outside the fields covered so far, and specs with `H`, get
-each written field by name ("minute 0, hour 0, day of month L, month *, day of
-week *"); a descriptor is returned as written. `H` needs no hash key. With
-no key, `StrictDays` does not check a spec with `H` in the day of the month
-or the month, as the value the key picks decides that check. The wording and
-its grammar are in [DESCRIBE.md](DESCRIBE.md).
+valid spec always gets a description; one that never runs is "never runs",
+but past 8,192 hash values each `H` is tested on its own, so a spec whose `H`
+values never fit together can read as running.
+Combinations of `H` without a form get each written field by name ("minute
+0, hour 0, day of month H/10, month *, day of week 1"). A descriptor reads as its cron equivalent, and
+`@triggered`, `@manual` and `@none` read "only when triggered". An interval
+reads as it runs, from its anchor ("every 1h30m from when scheduling started",
+"every 15m from Unix epoch"); the `Parser` method applies the parser's
+minimum `@every` interval. `H` needs no hash key. With no key, `StrictDays`
+does not check a spec with `H` in the day of the month or the month when the
+value the key picks decides that check; when no key finds the day, the parser's
+error returns. The wording and its grammar are in [DESCRIBE.md](DESCRIBE.md).
 
 **Example:**
 ```go
@@ -3019,6 +3028,29 @@ desc, err = cron.DescribeSpec("*/15 * * * *")
 // "at minutes 0, 15, 30, and 45 past the hour"
 desc, err = cron.DescribeSpec("0 9 13 * 5")
 // "at 9 am on the 13th of the month when it falls on Friday"
+desc, err = cron.DescribeSpec("@weekly")
+// "at 12 am on Sunday"
+```
+
+### DescribeSpecNote
+
+```go
+func DescribeSpecNote(spec string, opts ...DescribeOption) (string, error)
+func (p Parser) DescribeSpecNote(spec string, opts ...DescribeOption) (string, error)
+```
+
+DescribeSpecNote spells out the values the hash key picks, which the
+description of a hashed step or fixed day leaves as "a fixed …". It is "" unless a
+field has a hashed step or a fixed day of the month, and parses as
+`DescribeSpec` does. The note rules and grammar are in
+[DESCRIBE.md](DESCRIBE.md).
+
+**Example:**
+```go
+note, err := cron.DescribeSpecNote("H/15 * * * *", cron.WithParseOptions(cron.Minute|cron.Hour|cron.Dom|cron.Month|cron.Dow|cron.Hash))
+// "at minutes h, h+15, h+30, and h+45 past the hour, where h is a fixed minute from 0 to 14"
+note, err = cron.DescribeSpecNote("0 9 * * H/2", cron.WithParseOptions(cron.Minute|cron.Hour|cron.Dom|cron.Month|cron.Dow|cron.Hash))
+// "on Sunday, Tuesday, Thursday, and Saturday; or Monday, Wednesday, and Friday, depending on the hash key"
 ```
 
 ### WorkflowExecutionID

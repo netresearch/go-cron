@@ -134,8 +134,9 @@ import (
   extend in
   `describe_test.go`: `describeGoldens` (the expected descriptions) and
   `describeGrammar` (the EBNF as a regexp; every description except the literal
-  form and descriptors must match), and
-  update the EBNF in `docs/DESCRIBE.md` to match.
+  form must match), `describeNoteGoldens` and `describeNoteGrammar` for the
+  notes of `DescribeSpecNote`, and update the EBNF in `docs/DESCRIBE.md` to
+  match.
 
 ## Architecture overview
 
