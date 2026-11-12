@@ -43,6 +43,15 @@ type SpecAnalysis struct {
 	// Nil if the spec is invalid.
 	Schedule Schedule
 
+	// Description is the spec in English, as DescribeSpec gives it.
+	// Empty if the spec is invalid.
+	Description string
+
+	// DescriptionNote spells out the values the hash key picks, as
+	// DescribeSpecNote gives it. Empty unless a field has a hashed step or
+	// a hashed day of the month.
+	DescriptionNote string
+
 	// Warnings contains non-fatal warnings about the schedule.
 	// These don't prevent parsing but may indicate unexpected behavior.
 	// Example: "DOM and DOW both restricted - using AND logic (use DowOrDom for OR)"
@@ -172,6 +181,7 @@ func AnalyzeSpec(spec string, options ...ParseOption) SpecAnalysis {
 
 	result.Valid = true
 	result.Schedule = schedule
+	result.Description, result.DescriptionNote, _ = parser.describe(spec)
 
 	// Extract location and analyze the spec
 	result.analyzeSpec(spec)
@@ -216,6 +226,7 @@ func AnalyzeSpecWithHash(spec string, options ParseOption, hashSeed string) Spec
 
 	result.Valid = true
 	result.Schedule = schedule
+	result.Description, result.DescriptionNote, _ = parser.describe(spec)
 
 	result.analyzeSpec(spec)
 	result.checkDomDowWarning()
