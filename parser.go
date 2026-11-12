@@ -601,7 +601,8 @@ func (p Parser) parse(spec string) (Schedule, error) {
 // specFields splits spec the way parse reads it, so the parser and
 // DescribeSpec see the same fields. It strips the time zone, then returns a
 // descriptor ("@daily", "@every 1h") as written, or the six fields second to
-// day of week with omitted fields filled in, and the year field text.
+// day of week with omitted fields filled in, and the year field text, or ""
+// when spec wrote none.
 func (p Parser) specFields(spec string) (loc *time.Location, descriptor string, fields []string, yearField string, err error) {
 	loc, spec, err = parseTimezone(spec)
 	if err != nil {
@@ -806,7 +807,8 @@ func normalizeFields(fields []string, options ParseOption) ([]string, error) {
 
 // extractYearField extracts the year field from the fields slice when Year option is enabled.
 // Returns the remaining fields (without year), the year field string, and any error.
-// Handles SecondOptional + Year ambiguity by preferring seconds over year constraint.
+// Handles SecondOptional + Year ambiguity by preferring seconds over year constraint;
+// the year field string is then "", as no year was written.
 func extractYearField(fields []string, options ParseOption) (remainingFields []string, yearField string, err error) {
 	nonYearOptions := options &^ Year
 
@@ -842,8 +844,8 @@ func extractYearField(fields []string, options ParseOption) (remainingFields []s
 func extractYearFieldAmbiguous(fields []string) (remainingFields []string, yearField string, err error) {
 	lastField := fields[len(fields)-1]
 	if !looksLikeYear(lastField) {
-		// Treat as [sec min hour dom month dow] with no year constraint
-		return fields, "*", nil // wildcard year, keep all fields
+		// Treat as [sec min hour dom month dow] with no year written
+		return fields, "", nil // any year, keep all fields
 	}
 	// Last field looks like a year, extract it
 	return fields[:len(fields)-1], lastField, nil
@@ -901,8 +903,8 @@ func extractOptionalYearField(fields []string, options ParseOption) (remainingFi
 		}
 	}
 
-	// No year field detected, use wildcard
-	return fields, "*", nil
+	// No year field written: any year
+	return fields, "", nil
 }
 
 var standardParser = NewParser(
