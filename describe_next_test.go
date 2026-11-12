@@ -34,6 +34,7 @@ var (
 	clockRange   = regexp.MustCompile(`\b(` + clockPattern + `)(?: hour)? thru (?:the )?(` + clockPattern + `)`)
 	hourStep     = regexp.MustCompile(`\bevery \d+ hours\b`)
 	intervalNote = regexp.MustCompile(` \(every [^)]*\)`)
+	stepApart    = regexp.MustCompile(`\b\d+ (?:second|minute|hour|day|month)s? apart\b`)
 	digits       = regexp.MustCompile(`\d+`)
 )
 
@@ -99,6 +100,7 @@ func dayRuns(sch Schedule) (hours, minutes, seconds, times map[int]bool) {
 func checkNamedTimes(desc string, sch Schedule) []string {
 	hours, minutes, seconds, times := dayRuns(sch)
 	desc = intervalNote.ReplaceAllString(desc, "") // "(every 7 minutes, …)" names an interval, not a value
+	desc = stepApart.ReplaceAllString(desc, "")    // "15 seconds apart" names a step, not a value
 	var bad []string
 	for _, m := range namedClock.FindAllStringSubmatch(desc, -1) {
 		if h, minute, sec := namedClockTime(m); !clockRuns(h, minute, sec, hours, times) {
@@ -258,9 +260,9 @@ func dateRuns(sch Schedule) runDates {
 // of them. It checks each field alone, through the spec with the other day
 // field, or both, as "*" ("the 13th when it falls on Friday" needs runs on
 // a 13th and on a Friday, not on a Friday the 13th), and a day that D3 says
-// runs only in months that have it needs none. Like checkNamedTimes, it is
-// one-sided.
-func checkNamedDates(desc string, sch Schedule) []string {
+// runs only in months that have it needs none, nor does a day in pool. Like
+// checkNamedTimes, it is one-sided.
+func checkNamedDates(desc string, sch Schedule, pool uint64) []string {
 	if !namesDate(desc) {
 		return nil // the walks below cost three five-year walks
 	}
@@ -271,6 +273,11 @@ func checkNamedDates(desc string, sch Schedule) []string {
 	for _, m := range shortMonths.FindAllStringSubmatch(desc, -1) {
 		for _, d := range digits.FindAllString(m[1], -1) {
 			doms[dateValue(d)] = true
+		}
+	}
+	for d := 1; d <= 31; d++ {
+		if pool&(1<<d) != 0 {
+			doms[d] = true
 		}
 	}
 	bad := namedMisses(desc, namedOrdinals, doms, 1, 31)
@@ -421,8 +428,8 @@ func randomField(r *rand.Rand, lo, hi int) string {
 // none.
 func checkSpecNamesRuns(t *testing.T, p Parser, spec string) bool {
 	t.Helper()
-	sch, err := p.Parse(spec)
-	if err != nil {
+	p = withCheckKey(p)
+	if _, err := p.Parse(spec); err != nil {
 		return false
 	}
 	desc, err := p.DescribeSpec(spec)
@@ -433,24 +440,84 @@ func checkSpecNamesRuns(t *testing.T, p Parser, spec string) bool {
 	if literalForm.MatchString(desc) {
 		return false
 	}
-	if bad := namesNotRun(desc, sch); len(bad) > 0 {
+	if bad, _ := namesNotRunSpec(p, spec, desc); len(bad) > 0 { // spec parsed above
 		t.Errorf("DescribeSpec(%q) = %q: names %s, which Next() does not run at", spec, desc, strings.Join(bad, ", "))
 	}
 	return true
 }
 
+// withCheckKey gives a parser with no hash key one, so a spec with H parses.
+// The description does not depend on the key, and the check reads every
+// value a key can pick (hashReachSchedule).
+func withCheckKey(p Parser) Parser {
+	if p.hashKey == "" {
+		return p.WithHashKey("g1")
+	}
+	return p
+}
+
+// namesNotRunSpec returns namesNotRun for desc as a description of spec, as
+// p parses it, or the parse error. A spec with H is read for every key: a
+// value it names must be one some key runs at (hashReachSchedule), a day of
+// the month an H item can pick needs no run in the months that lack it, and
+// "never runs" must hold for every key, the picks moving together (G11).
+func namesNotRunSpec(p Parser, spec, desc string) ([]string, error) {
+	p = withCheckKey(p)
+	sch, err := p.Parse(spec)
+	if err != nil {
+		return nil, err
+	}
+	_, _, fields, _, _ := p.specFields(spec) //nolint:dogsled // only the fields matter
+	s, ok := sch.(*SpecSchedule)
+	if !ok || !containsHashExpr(fields) {
+		return namesNotRun(desc, sch, 0), nil
+	}
+	if desc == "never runs" {
+		if p.anyPick(s, fields, func(pick *SpecSchedule) bool { return runsSomeYear(anyDay(pick, false, false)) }) {
+			return []string{desc}, nil
+		}
+		return nil, nil
+	}
+	return namesNotRun(desc, hashReachSchedule(p, s, fields), hashReach(fields[3], p.fieldBounds(dom))), nil
+}
+
+// hashReachSchedule returns s with each field that has H items running at
+// every value those items can pick under any key, and its other items as
+// written.
+func hashReachSchedule(p Parser, s *SpecSchedule, fields []string) *SpecSchedule {
+	reach := *s
+	for _, f := range p.hashDateFields(&reach, s, fields) {
+		if len(f.items) > 0 {
+			*f.bits = f.plain | hashReach(f.field, f.r)
+		}
+	}
+	for i, f := range []struct {
+		bits *uint64
+		r    bounds
+	}{{&reach.Second, p.fieldBounds(seconds)}, {&reach.Minute, p.fieldBounds(minutes)}, {&reach.Hour, p.fieldBounds(hours)}} {
+		plain, items := splitItems(fields[i], hashItemSyntax)
+		if len(items) > 0 {
+			bits, _ := getField(strings.Join(plain, ","), f.r) // no plain items: no values
+			*f.bits = bits | hashReach(fields[i], f.r)
+		}
+	}
+	reach.Dow = NormalizeDOW(reach.Dow) // a reach ending in 7 is Sunday
+	return &reach
+}
+
 // namesNotRun returns each time and date desc names that Next() does not
 // run at, and "never runs" when the spec runs in a year it allows. The
 // times are read with both day fields as "*": the time fields run the same
-// on every day, and a day the day fields allow may be years away.
-func namesNotRun(desc string, sch Schedule) []string {
+// on every day, and a day the day fields allow may be years away. pool is
+// the days of the month that need no run (namesNotRunSpec).
+func namesNotRun(desc string, sch Schedule, pool uint64) []string {
 	if desc == "never runs" {
 		if runsSomeYear(anyDay(sch, false, false)) {
 			return []string{desc}
 		}
 		return nil
 	}
-	return append(checkNamedTimes(desc, anyDay(sch, true, true)), checkNamedDates(desc, sch)...)
+	return append(checkNamedTimes(desc, anyDay(sch, true, true)), checkNamedDates(desc, sch, pool)...)
 }
 
 // yearKind returns which of the 14 calendars year y follows: the day of the
@@ -530,10 +597,12 @@ func checkGoldensNameRuns(t *testing.T) int {
 // TestDescribeSpecNamesRuns enforces G1: every clock time, minute, second,
 // day of the month, day of the week, month and year that a description
 // names is one the scheduler runs at, for the goldens with their parse
-// options and for random specs.
+// options and for random specs. A golden with H is read for every key
+// (namesNotRunSpec); only the goldens given field by field (G10) and the
+// specs the parser rejects are not checked.
 func TestDescribeSpecNamesRuns(t *testing.T) {
-	if checked := checkGoldensNameRuns(t); checked < 180 {
-		t.Errorf("checked %d goldens, want at least 180", checked)
+	if checked := checkGoldensNameRuns(t); checked < 487 {
+		t.Errorf("checked %d goldens, want at least 487", checked)
 	}
 
 	r := rand.New(rand.NewPCG(1, 2)) // fixed seed: the same specs on every run
@@ -682,6 +751,9 @@ func TestNamesNotRun(t *testing.T) {
 	five := NewParser(Minute | Hour | Dom | Month | Dow | Descriptor)
 	years := NewParser(Minute | Hour | Dom | Month | Dow | Year)
 	skip := NewParser(Minute | Hour | Dom | Month | Dow | Year | DSTSkip)
+	hash := NewParser(Minute | Hour | Dom | Month | Dow | Hash)
+	hashSec := NewParser(Second | Minute | Hour | Dom | Month | Dow | Hash)
+	hashYears := NewParser(Minute | Hour | Dom | Month | Dow | Year | Hash)
 	for _, tt := range []struct {
 		p          Parser
 		spec, desc string
@@ -712,12 +784,24 @@ func TestNamesNotRun(t *testing.T) {
 		{five, "0,10 * * * *", "at minutes 0 thru 10 past the hour", "minute 0 thru 10"},
 		{five, "* * * * *", "at minutes 0 thru 60 past the hour", "minute 0 thru 60"}, // an end past 59
 		{five, "0 0 * * *", "at midnight on the 1st thru 32nd of the month", "1st thru 32nd"},
+		// H: a value is named right when some key runs at it
+		{hash, "0 H(9-17) * * *", "at the top of a fixed hour between the hours of 9 am and 6 pm every day; the hash key fixes the hour", "6 pm"},
+		{hash, "H(0-29) * * * *", "at a fixed minute between minutes 0 and 30 past the hour; the hash key fixes the minute", "minute 30"},
+		{hash, "0 0 H(1-15) * *", "at midnight on a fixed day of the month between the 1st and 16th; the hash key fixes the day", "16th"},
+		{hash, "0 9 * * H(1-5)", "at 9 am on a fixed day of the week between Monday and Saturday; the hash key fixes the day", "Saturday"},
+		{hash, "0 0 1 H(1-6) *", "at midnight on the 1st of the month in a fixed month between January and July; the hash key fixes the month", "July"},
+		{hash, "0 0 H(28-31) 2 *", "never runs", "never runs"}, // a key that picks the 28th runs
+		// right: the H day pool names days February lacks; the step is no second
+		{hash, "0 0 H(29-31) 2 *", "at midnight on a fixed day of the month between the 29th and 31st in February; the hash key fixes the day", ""},
+		{hashSec, "H(50-10)/15 * * * * *", "1 or 2 runs in every minute between seconds 50 and 10, 15 seconds apart, starting from a fixed second; the hash key fixes the second", ""},
+		// right: no one key finds a day, though each H alone could (G11)
+		{hashYears, "0 0 H(29-31) 1 H(1-3) 2028", "never runs", ""},
 	} {
-		sch, err := tt.p.Parse(tt.spec)
+		bad, err := namesNotRunSpec(tt.p, tt.spec, tt.desc)
 		if err != nil {
 			t.Fatalf("Parse(%q): %v", tt.spec, err)
 		}
-		if got := strings.Join(namesNotRun(tt.desc, sch), ", "); got != tt.want {
+		if got := strings.Join(bad, ", "); got != tt.want {
 			t.Errorf("namesNotRun(%q, %q) = %q, want %q", tt.desc, tt.spec, got, tt.want)
 		}
 	}
