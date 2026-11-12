@@ -27,12 +27,13 @@ const clockPattern = `(?:midnight|noon|\d+(?::\d\d){0,2} [ap]m)`
 // The times a description names (G1): a clock time, the values after
 // "minute(s)" and "second(s)" or before them ("30 minutes past"), and the
 // hours of a clock range ("9 am thru 5 pm", "the 1 am hour thru the 4 am
-// hour") that no hour step thins out.
+// hour"), or under an hour step ("every 2 hours") the hours it picks from
+// the range's first (T9).
 var (
 	namedClock   = regexp.MustCompile(`\b(midnight|noon|(\d+)(?::(\d\d))?(?::(\d\d))? ([ap])m)\b`)
 	namedValues  = regexp.MustCompile(`\b(second|minute)s? (\d+(?:` + listSep + `\d+)*)|\b(\d+) (second|minute)s?\b`)
 	clockRange   = regexp.MustCompile(`\b(` + clockPattern + `)(?: hour)? thru (?:the )?(` + clockPattern + `)`)
-	hourStep     = regexp.MustCompile(`\bevery \d+ hours\b`)
+	hourStep     = regexp.MustCompile(`\bevery (\d+) hours\b`)
 	intervalNote = regexp.MustCompile(` \(every [^)]*\)`)
 	stepApart    = regexp.MustCompile(`\b\d+ (?:second|minute|hour|day|month)s? apart\b`)
 	digits       = regexp.MustCompile(`\d+`)
@@ -94,9 +95,9 @@ func dayRuns(sch Schedule) (hours, minutes, seconds, times map[int]bool) {
 // clock time with seconds must be a run, one with minutes the minute of a
 // run, and a bare one ("9 am", "noon") an hour with a run; a named minute or
 // second, and each value of a range of them, must be the minute or second of
-// a run; each hour of a clock range must have a run, unless an hour step
-// ("every 2 hours") names only some of them. The check is one-sided: it does
-// not find a run that the description leaves out.
+// a run; each hour of a clock range must have a run, or under an hour step
+// ("every 2 hours") each hour the step picks from its first. The check is
+// one-sided: it does not find a run that the description leaves out.
 func checkNamedTimes(desc string, sch Schedule) []string {
 	hours, minutes, seconds, times := dayRuns(sch)
 	desc = intervalNote.ReplaceAllString(desc, "") // "(every 7 minutes, …)" names an interval, not a value
@@ -110,21 +111,23 @@ func checkNamedTimes(desc string, sch Schedule) []string {
 	for _, m := range namedValues.FindAllStringSubmatch(desc, -1) {
 		bad = append(bad, namedValueMisses(m, minutes, seconds)...)
 	}
-	if !hourStep.MatchString(desc) {
-		bad = append(bad, clockRangeMisses(desc, hours)...)
+	step := 1
+	if m := hourStep.FindStringSubmatch(desc); m != nil {
+		step, _ = strconv.Atoi(m[1])
 	}
-	return bad
+	return append(bad, clockRangeMisses(desc, hours, step)...)
 }
 
 // clockRangeMisses returns each clock range in desc with an hour before its
-// last that has no run; the last hour is checked as a clock time.
-func clockRangeMisses(desc string, hours map[int]bool) []string {
+// last that has no run, of every step-th hour from its first; the last hour
+// is checked as a clock time.
+func clockRangeMisses(desc string, hours map[int]bool, step int) []string {
 	var bad []string
 	for _, m := range clockRange.FindAllStringSubmatch(desc, -1) {
 		from, _, _ := namedClockTime(namedClock.FindStringSubmatch(m[1]))
 		to, _, _ := namedClockTime(namedClock.FindStringSubmatch(m[2]))
-		for h := from; h != to; h = (h + 1) % 24 {
-			if !hours[h] {
+		for k := 0; k < (to-from+24)%24; k += step {
+			if !hours[(from+k)%24] {
 				bad = append(bad, m[0])
 				break
 			}
@@ -795,6 +798,9 @@ func TestNamesNotRun(t *testing.T) {
 		{years, "0 0 1 1 * 2035", "at midnight on the 1st of the month in January in year 1", "1"}, // the zero time is in year 1
 		{years, "0 0 1 1 * 2026-2027", "at midnight on the 1st of the month in January in years 2027 thru 2026", "2027 thru 2026"},
 		{five, "0 9,17 * * *", "at the top of every hour from 9 am thru 5 pm every day", "9 am thru 5 pm"},
+		{five, "0 9,17 * * *", "every 2 hours from 9 am thru 5 pm in every day", "9 am thru 5 pm"}, // 11 am thru 3 pm: no runs
+		{five, "0 9-17/2 * * *", "every 2 hours from 9 am thru 5 pm in every day", ""},
+		{five, "0 0-10/2,20-22/2 * * *", "every 2 hours from midnight thru 10 am and 8 pm thru 10 pm in every day", ""},
 		{five, "0,10 * * * *", "at minutes 0 thru 10 past the hour", "minute 0 thru 10"},
 		{five, "* * * * *", "at minutes 0 thru 60 past the hour", "minute 0 thru 60"}, // an end past 59
 		{five, "0 0 * * *", "at midnight on the 1st thru 32nd of the month", "1st thru 32nd"},
