@@ -231,8 +231,12 @@ months that have it needs no run, and "never runs" must have no run in any
 year the spec allows. A spec with `H` is read for every key: a value its
 description names must be one that some key runs at, a day of the month an `H`
 item can pick needs no run in a month that lacks it, and "never runs" must have
-no run for any key, the picks moving together (G11). Only the goldens given
-field by field (G10) name no values to check. Years with the same calendar,
+no run for any key, the picks moving together (G11). For a spec with a written
+zone, the zone's name must be the one the description gives, and its shift
+from UTC, with the second value and the months it changes in for a zone that
+changes with the season, must be the offsets of a noon run in that zone on
+each day of the year the description is made in. Only the goldens given field
+by field (G10) name no values to check. Years with the same calendar,
 leap or not and starting on the same day of the week, have the same runs, so
 the check takes one year of each of the 14 calendars. The check does not model
 daylight saving, so a correct time or date can read as not run: a run in an

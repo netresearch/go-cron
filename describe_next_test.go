@@ -463,25 +463,150 @@ func withCheckKey(p Parser) Parser {
 // p parses it, or the parse error. A spec with H is read for every key: a
 // value it names must be one some key runs at (hashReachSchedule), a day of
 // the month an H item can pick needs no run in the months that lack it, and
-// "never runs" must hold for every key, the picks moving together (G11).
+// "never runs" must hold for every key, the picks moving together (G11). The
+// zone clause is checked by zoneMisses and taken out before the rest is read.
 func namesNotRunSpec(p Parser, spec, desc string) ([]string, error) {
 	p = withCheckKey(p)
 	sch, err := p.Parse(spec)
 	if err != nil {
 		return nil, err
 	}
-	_, _, fields, _, _ := p.specFields(spec) //nolint:dogsled // only the fields matter
+	loc, descriptor, fields, _, _ := p.specFields(spec) // the year field is in sch
+	if _, text := p.expandDescriptor(descriptor, fields); text != "" {
+		loc = nil // "only when triggered" and the interval texts name no zone
+	}
+	desc, bad := zoneMisses(loc, desc)
 	s, ok := sch.(*SpecSchedule)
 	if !ok || !containsHashExpr(fields) {
-		return namesNotRun(desc, sch, 0), nil
+		return append(bad, namesNotRun(desc, sch, 0)...), nil
 	}
 	if desc == "never runs" {
 		if p.anyPick(s, fields, func(pick *SpecSchedule) bool { return runsSomeYear(anyDay(pick, false, false)) }) {
-			return []string{desc}, nil
+			return append(bad, desc), nil
 		}
-		return nil, nil
+		return bad, nil
 	}
-	return namesNotRun(desc, hashReachSchedule(p, s, fields), hashReach(fields[3], p.fieldBounds(dom))), nil
+	return append(bad, namesNotRun(desc, hashReachSchedule(p, s, fields), hashReach(fields[3], p.fieldBounds(dom)))...), nil
+}
+
+// zoneShiftPattern is the shift a zone clause gives after "<name> time, "
+// (Z2): "5 hours behind UTC", "the same as UTC", and for a zone that changes
+// with the season a second value and its months, "…, 4 hours from March to
+// November", "…, 1 hour ahead from March to October".
+var (
+	zoneShiftPattern = regexp.MustCompile(`^(?:the same as UTC|(.+?) (ahead of|behind) UTC)(?:, (?:the same as UTC|(.+?)(?: (ahead|behind))?) from (\w+) to (\w+))?$`)
+	sizePart         = regexp.MustCompile(`(\d+) (hour|minute)s?`)
+)
+
+// zoneMisses checks the zone clause of desc for the written zone loc (Z1,
+// Z2) and returns desc without the clause and the clause's shift when it is
+// not what Next() gives in loc, or "no <name> time" when desc does not name
+// loc. It reads nothing for no zone, TZ=Local and "never runs", which name
+// no zone.
+func zoneMisses(loc *time.Location, desc string) (string, []string) {
+	if loc == nil || loc == time.Local || desc == "never runs" {
+		return desc, nil
+	}
+	name := zoneName(loc)
+	head := " " + name + " time, "
+	if name == "UTC" {
+		head = " UTC"
+	}
+	i := strings.Index(desc, head)
+	if i < 0 {
+		return desc, []string{"no " + strings.TrimSpace(strings.TrimSuffix(head, ", "))}
+	}
+	end := len(desc)
+	if j := strings.Index(desc[i:], ";"); j >= 0 {
+		end = i + j
+	}
+	shift := desc[i+len(head) : end]
+	desc = desc[:i] + desc[end:]
+	if name == "UTC" {
+		return desc, nil // UTC has no shift to give
+	}
+	if !shiftRuns(shift, loc) {
+		return desc, []string{shift}
+	}
+	return desc, nil
+}
+
+// shiftRuns reports whether shift, read as zoneShiftPattern, is the offset
+// from UTC of a noon run in loc on January 1 of the clause's year, and for a
+// zone whose offset leaves that value once and comes back, the offset it
+// changes to and the months of the two changes.
+func shiftRuns(shift string, loc *time.Location) bool {
+	m := zoneShiftPattern.FindStringSubmatch(shift)
+	if m == nil {
+		return false
+	}
+	side := m[4]
+	if side == "" {
+		side = m[2] // the second value is on the first one's side
+	}
+	base, changes := noonOffsets(loc, describeNow().In(loc).Year())
+	if sizeOf(m[1], m[2]) != base {
+		return false
+	}
+	if len(changes) != 2 || changes[1].off != base {
+		return m[5] == ""
+	}
+	return sizeOf(m[3], side) == changes[0].off &&
+		m[5] == changes[0].month.String() && m[6] == changes[1].month.String()
+}
+
+// sizeOf reads an offset as a description gives it, "5 hours 30 minutes",
+// on side "behind" or ahead; "" is no offset.
+func sizeOf(s, side string) time.Duration {
+	var d time.Duration
+	for _, m := range sizePart.FindAllStringSubmatch(s, -1) {
+		n, _ := strconv.Atoi(m[1])
+		unit := time.Hour
+		if m[2] == "minute" {
+			unit = time.Minute
+		}
+		d += time.Duration(n) * unit
+	}
+	if side == "behind" {
+		return -d
+	}
+	return d
+}
+
+// noonDaily is "0 12 * * *" as the parser sets it.
+var noonDaily = func() *SpecSchedule {
+	s, err := NewParser(Minute | Hour | Dom | Month | Dow).Parse("0 12 * * *")
+	if err != nil {
+		panic(err)
+	}
+	return s.(*SpecSchedule)
+}()
+
+// zoneChange is a month in which a zone's offset from UTC changes, and the
+// offset after it.
+type zoneChange struct {
+	month time.Month
+	off   time.Duration
+}
+
+// noonOffsets walks Next() over a noon run on each day of year in loc and
+// returns the offset of the first run and each change after it.
+// NOTE: a change after noon shows on the next day's run, so a change late on
+// a month's last day reads as the next month's; zones change at night.
+func noonOffsets(loc *time.Location, year int) (time.Duration, []zoneChange) {
+	noon := *noonDaily
+	noon.Location = loc
+	t := noon.Next(yearStart(year, loc))
+	base := offsetOf(t)
+	prev := base
+	var changes []zoneChange
+	for ; t.Year() == year; t = noon.Next(t) {
+		if off := offsetOf(t); off != prev {
+			changes = append(changes, zoneChange{t.Month(), off})
+			prev = off
+		}
+	}
+	return base, changes
 }
 
 // hashReachSchedule returns s with each field that has H items running at
@@ -599,8 +724,9 @@ func checkGoldensNameRuns(t *testing.T) int {
 
 // TestDescribeSpecNamesRuns enforces G1: every clock time, minute, second,
 // day of the month, day of the week, month and year that a description
-// names is one the scheduler runs at, for the goldens with their parse
-// options and for random specs. A golden with H is read for every key
+// names is one the scheduler runs at, and the shift a zone clause gives is the
+// zone's (zoneMisses), for the goldens with their parse options and for random
+// specs. A golden with H is read for every key
 // (namesNotRunSpec); only the goldens given field by field (G10) and the
 // specs the parser rejects are not checked.
 func TestDescribeSpecNamesRuns(t *testing.T) {
@@ -816,6 +942,22 @@ func TestNamesNotRun(t *testing.T) {
 		{hashSec, "H(50-10)/15 * * * * *", "1 or 2 runs in every minute between seconds 50 and 10, 15 seconds apart, starting from a fixed second; the hash key fixes the second", ""},
 		// right: no one key finds a day, though each H alone could (G11)
 		{hashYears, "0 0 H(29-31) 1 H(1-3) 2028", "never runs", ""},
+		// the zone clause: the shift and its months are read from Next() in the zone
+		{five, "TZ=Asia/Kolkata 0 9 * * *", "at 9 am every day Kolkata time, 5 hours 30 minutes ahead of UTC", ""},
+		{five, "TZ=Asia/Kolkata 0 9 * * *", "at 10 am every day Kolkata time, 5 hours 30 minutes ahead of UTC", "10 am"},
+		{five, "TZ=Asia/Kolkata 0 9 * * *", "at 9 am every day Kolkata time, 5 hours ahead of UTC", "5 hours ahead of UTC"},
+		{five, "TZ=Asia/Kolkata 0 9 * * *", "at 9 am every day Kolkata time, 5 hours 30 minutes behind UTC", "5 hours 30 minutes behind UTC"},
+		{five, "CRON_TZ=Europe/Berlin 0 0 * * *", "at midnight every day Berlin time, 1 hour ahead of UTC, 2 hours from March to October", ""},
+		{five, "CRON_TZ=Europe/Berlin 0 0 * * *", "at midnight every day Berlin time, 1 hour ahead of UTC, 2 hours from April to October", "1 hour ahead of UTC, 2 hours from April to October"},
+		{five, "CRON_TZ=Europe/Berlin 0 0 * * *", "at midnight every day Berlin time, 1 hour ahead of UTC, 3 hours from March to October", "1 hour ahead of UTC, 3 hours from March to October"},
+		{five, "CRON_TZ=Europe/Berlin 0 0 * * *", "at midnight every day Paris time, 1 hour ahead of UTC, 2 hours from March to October", "no Berlin time"},
+		{five, "CRON_TZ=America/New_York 0 9 * * *", "at 9 am every day New York time, 5 hours behind UTC", "5 hours behind UTC"},
+		{five, "CRON_TZ=Europe/London 0 12 * * *", "at noon every day London time, the same as UTC, 1 hour ahead from March to October", ""},
+		{five, "CRON_TZ=Europe/London 0 12 * * *", "at noon every day London time, the same as UTC, 1 hour behind from March to October", "the same as UTC, 1 hour behind from March to October"},
+		// the months are the zone's: Lord Howe's runs are all in January
+		{years, "CRON_TZ=Australia/Lord_Howe 0 0 1 1 * 2027", "at midnight on the 1st of the month in January in year 2027 Lord Howe time, 11 hours ahead of UTC, 10 hours 30 minutes from April to October", ""},
+		{five, "CRON_TZ=UTC 0 0 * * *", "at midnight every day UTC", ""},
+		{five, "CRON_TZ=America/New_York 0 0 30 2 *", "never runs", ""},
 	} {
 		bad, err := namesNotRunSpec(tt.p, tt.spec, tt.desc)
 		if err != nil {
