@@ -44,7 +44,11 @@ func WithParseOptions(o ParseOption) DescribeOption // package function only
 - The description is made from the spec text as the parser splits it, not
   from the parsed schedule, because the parsed bits have lost what was
   written (`*/15` and `0,15,30,45` parse the same, but only one has a step).
-- Descriptions carry no time zone; callers show the location beside them.
+- Time zone support starts with the zone a spec writes: a spec with a
+  `TZ=`/`CRON_TZ=` prefix names its zone and the zone's shift from UTC
+  ("Kolkata time, 5 hours 30 minutes ahead of UTC"). A spec without a
+  prefix, and `TZ=Local`, carries no time zone; callers show the location
+  beside it.
 - `DescribeSpecNote` spells out the values the hash key picks, which the
   description leaves as "a fixed …": "at minutes h, h+15, h+30, and h+45
   past the hour, where h is a fixed minute from 0 to 14". It is "" unless
