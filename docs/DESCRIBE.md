@@ -235,8 +235,9 @@ no run for any key, the picks moving together (G11). For a spec with a written
 zone, the zone's name must be the one the description gives, and its shift
 from UTC, with the second value and the months it changes in for a zone that
 changes with the season, must be the offsets of a noon run in that zone on
-each day of the year the description is made in. Only the goldens given field
-by field (G10) name no values to check. Years with the same calendar,
+each day of the year the description is made in. The goldens given field by
+field (G10) name no values to check, and the four `@every` goldens under 1s
+are not checked: the parser rejects them. Years with the same calendar,
 leap or not and starting on the same day of the week, have the same runs, so
 the check takes one year of each of the 14 calendars. The check does not model
 daylight saving, so a correct time or date can read as not run: a run in an
