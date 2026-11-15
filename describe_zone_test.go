@@ -8,32 +8,23 @@ import (
 	"time"
 )
 
-// mustZone loads a zone the tests name, or panics.
-func mustZone(name string) *time.Location {
-	loc, err := time.LoadLocation(name)
-	if err != nil {
-		panic(err)
-	}
-	return loc
-}
-
 func TestZoneName(t *testing.T) {
 	for _, tt := range []struct {
 		loc  *time.Location
 		want string
 	}{
-		{mustZone("America/New_York"), "New York"},
-		{mustZone("Europe/Berlin"), "Berlin"},
-		{mustZone("America/Argentina/Buenos_Aires"), "Buenos Aires"},
+		{loadLocation(t, "America/New_York"), "New York"},
+		{loadLocation(t, "Europe/Berlin"), "Berlin"},
+		{loadLocation(t, "America/Argentina/Buenos_Aires"), "Buenos Aires"},
 		{time.UTC, "UTC"},
-		{mustZone("Etc/UTC"), "Etc/UTC"},
-		{mustZone("Etc/GMT+5"), "Etc/GMT+5"},
-		{mustZone("EST5EDT"), "EST5EDT"},
+		{loadLocation(t, "Etc/UTC"), "Etc/UTC"},
+		{loadLocation(t, "Etc/GMT+5"), "Etc/GMT+5"},
+		{loadLocation(t, "EST5EDT"), "EST5EDT"},
 		// A name outside the tz areas is often one of several alike.
-		{mustZone("US/Eastern"), "US/Eastern"},
-		{mustZone("Canada/Central"), "Canada/Central"},
-		{mustZone("Australia/Sydney"), "Sydney"},
-		{mustZone("Pacific/Auckland"), "Auckland"},
+		{loadLocation(t, "US/Eastern"), "US/Eastern"},
+		{loadLocation(t, "Canada/Central"), "Canada/Central"},
+		{loadLocation(t, "Australia/Sydney"), "Sydney"},
+		{loadLocation(t, "Pacific/Auckland"), "Auckland"},
 	} {
 		if got := zoneName(tt.loc); got != tt.want {
 			t.Errorf("zoneName(%v) = %q, want %q", tt.loc, got, tt.want)
@@ -101,7 +92,7 @@ func TestZoneYearOf(t *testing.T) {
 		{"Asia/Kolkata", 5*time.Hour + 30*time.Minute, nil, false},
 		{"Australia/Lord_Howe", 11 * time.Hour, []zoneShift{{utc(4, 3, 15, 0), 10*time.Hour + 30*time.Minute}, {utc(10, 2, 15, 30), 11 * time.Hour}}, true},
 	} {
-		z := zoneYearOf(mustZone(tt.zone), 2027)
+		z := zoneYearOf(loadLocation(t, tt.zone), 2027)
 		if z.base != tt.base || len(z.shifts) != len(tt.shifts) || z.seasonal() != tt.seasonal {
 			t.Errorf("%s: base %v, %d shifts, seasonal %v; want %v, %d, %v", tt.zone, z.base, len(z.shifts), z.seasonal(), tt.base, len(tt.shifts), tt.seasonal)
 			continue
@@ -138,7 +129,7 @@ func TestUTCShift(t *testing.T) {
 		"Asia/Kolkata":        "5 hours 30 minutes ahead of UTC",
 		"Etc/UTC":             "the same as UTC",
 	} {
-		if got := utcShift(zoneYearOf(mustZone(zone), 2027)); got != want {
+		if got := utcShift(zoneYearOf(loadLocation(t, zone), 2027)); got != want {
 			t.Errorf("%s: utcShift = %q, want %q", zone, got, want)
 		}
 	}
