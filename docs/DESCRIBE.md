@@ -104,7 +104,7 @@ which form a spec gets. Each has an ID, which the grammar cites.
 | G2 | A parser oddity is described as it runs |
 | G3 | The description is built from the spec text as the parser splits it, and its values follow the parser's options |
 | G6 | Wording is for people |
-| G7 | Clause order: time, day, month, year, then the note, then the short-month clause |
+| G7 | Clause order: time, day, month, year, then the note, then the alternatives, then the zone, then the short-month clause, then the hash key clause |
 | G8 | No comma before a trailing clause such as "every day". A list of three or more takes the serial comma: "at minutes 0, 15, 30, and 45 past the hour" |
 | G10 | A combination of fields the grammar has no form for renders field by field |
 | G11 | A spec that never runs reads "never runs": a day that none of the written months and years has (`0 0 30 2 *`, `0 0 29 2 * 2027`, `0 0 31W 4 *`, `0 0 L-30 2 *`), a day that cannot be the counted day of the week (`0 0 1 * MON#2`), and an H day that no key can find in them (`0 0 H(30-31) 2 *`). Every `H` in a spec takes its value from one hash, so the test covers the combinations the parser can produce: `0 0 H(29-31) 1 H(1-3) 2028` never runs, as none of its three pairs of a day and a day of the week occurs in January 2028. Past 8,192 hash values, each `H` is tested on its own. It reads the calendar, not `Next`, which looks 5 years ahead: `0 0 * 2 MON#5` is described, as it runs in 2044 |
@@ -264,7 +264,7 @@ start: schedule
      | "only" "when" "triggered"                                          // P2
      | interval                                                           // P3
 
-schedule: time [day] [month] [year] [note] [alts | domalts] short* [hashkey]               // G7, H1
+schedule: time [day] [month] [year] [note] [alts | domalts] [zone] short* [hashkey]        // G7, H1
 
 time: clocktime | span | hourstep | parts | hashed | counted
 
@@ -403,6 +403,18 @@ dapart: "," INT "days" "apart" "," "starting" "from" "a" "fixed" "day"
 year: "in" "year" INT | "in" "years" vlist                                // D6
 short: ";" "the" list{ORD} ("runs" | "run") "only" "in" "months" "that" "have" ("one" | "them")   // D3, X5
      | ";" ("it" | beforeitem) "runs" "only" "in" "months" "of" INT "days" ["or" "more"]           // X6
+
+// a written zone and its shift from UTC (zoneClause)
+zone: "UTC"                                                               // zoneName
+    | zonename "time" "," utcshift                                        // zoneName, utcShift
+utcshift: offset ("behind" | "ahead" "of") "UTC" ["," second months]      // utcShift
+        | "the" "same" "as" "UTC" ["," second months]
+second: offset ["behind" | "ahead"] | "the" "same" "as" "UTC"             // utcShift
+months: "from" MONTHNAME "to" MONTHNAME                                   // utcShift
+offset: INT ("hour" | "hours") [INT ("minute" | "minutes")]               // utcShift
+      | INT ("minute" | "minutes")
+zonename: ZONEWORD+                                                       // zoneName: "New York", "Etc/GMT+5", "US/Eastern"
+ZONEWORD: /[A-Za-z0-9][A-Za-z0-9+\/:_-]*/
 
 interval: "every" DURATION ("from" "when" "scheduling" "started"         // P3
                            | "from" "Unix" "epoch") [ivnote]
