@@ -237,9 +237,11 @@ description names must be one that some key runs at, a day of the month an `H`
 item can pick needs no run in a month that lacks it, and "never runs" must have
 no run for any key, the picks moving together (G11). For a spec with a written
 zone, the zone's name must be the one the description gives, and its shift
-from UTC, with the second value and the months it changes in for a zone that
-changes with the season, must be the offsets of a noon run in that zone on
-each day of the year the description is made in. The goldens given field by
+from UTC must be the offset of a noon run in that zone on January 1 of the
+year the description is made in; for a zone that leaves that offset once in
+the year and returns, the second value and the months it changes in must be
+those of the noon runs on the other days. For a zone that changes in another
+way, only the January shift is checked. The goldens given field by
 field (G10) name no values to check, and the four `@every` goldens under 1s
 are not checked: the parser rejects them. Years with the same calendar,
 leap or not and starting on the same day of the week, have the same runs, so
