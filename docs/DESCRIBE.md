@@ -96,7 +96,7 @@ which form a spec gets. Each has an ID, which the grammar cites.
 
 | ID | Rule |
 |---|---|
-| G1 | A description says what the scheduler runs: each golden in `describe_test.go` was checked against the runs `Next()` computes |
+| G1 | A description says what the scheduler runs: each golden in `describe_test.go` was checked against the runs `Next()` computes, and `TestDescribeSpecNamesRuns` checks the times and dates a description names against those runs (see the Grammar section) |
 | G2 | A parser oddity is described as it runs |
 | G3 | The description is built from the spec text as the parser splits it, and its values follow the parser's options |
 | G6 | Wording is for people |
@@ -220,6 +220,29 @@ form (G10) is outside the grammar.
 
 What a context-free grammar can't check is kept by the goldens: the value
 limits (T1, T4, R8–R12), the hour order (T6) and the values themselves (G1).
+`TestDescribeSpecNamesRuns` also checks the values, for the goldens and for
+random specs, from the first year the spec allows, or from 2026 when it allows
+any. Every clock time, minute and second a description names must be a run on
+the first day that has one; every day of the month, day of the week and month
+must have a run in the five years from there, or in the year of the first run
+after them, in the spec's zone; and every year must be one the year field
+allows. Each day field is checked alone, a day that D3 says runs only in
+months that have it needs no run, and "never runs" must have no run in any
+year the spec allows. A spec with `H` is read for every key: a value its
+description names must be one that some key runs at, a day of the month an `H`
+item can pick needs no run in a month that lacks it, and "never runs" must have
+no run for any key, the picks moving together (G11). Only the goldens given
+field by field (G10) name no values to check. Years with the same calendar,
+leap or not and starting on the same day of the week, have the same runs, so
+the check takes one year of each of the 14 calendars. The check does not model
+daylight saving, so a correct time or date can read as not run: a run in an
+hour that daylight saving skips moves forward by the gap's length, several such
+runs becoming one, or with `DSTSkip` does not happen. With `DSTSkip`, two years
+of one calendar can also differ where the zone's transition dates differ (its
+rules changed, or tzdata lists each year's dates), so a wrong "never runs" can
+pass: the check looks for a run only from the first year of each calendar
+through 30 years after it. The check is one-sided: it does not find a run a
+description leaves out.
 
 ```ebnf
 // "x" literal, [x] optional, (x)* repeat, a | b choice.
