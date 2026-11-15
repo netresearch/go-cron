@@ -114,6 +114,21 @@ func TestZoneYearOf(t *testing.T) {
 	}
 }
 
+// TestZoneYearOfEveryYear walks zones that change with the season in every
+// year through 2050. Go can report a year-end bound that is not after the
+// instant asked about (TestNextAcrossYearEnds); the walk must step past it
+// rather than stop with no shifts.
+func TestZoneYearOfEveryYear(t *testing.T) {
+	for _, zone := range []string{"Europe/Berlin", "Australia/Lord_Howe", "Australia/Adelaide", "America/New_York"} {
+		loc := loadLocation(t, zone)
+		for y := 2026; y <= 2050; y++ {
+			if z := zoneYearOf(loc, y); !z.seasonal() {
+				t.Errorf("%s %d: %d shifts, not seasonal", zone, y, len(z.shifts))
+			}
+		}
+	}
+}
+
 func TestUTCShift(t *testing.T) {
 	for zone, want := range map[string]string{
 		"America/New_York":    "5 hours behind UTC, 4 hours from March to November",

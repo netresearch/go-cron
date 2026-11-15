@@ -35,13 +35,14 @@ const maxZoneBounds = 12
 
 // zoneYearOf walks loc's offset changes through year. A bound that leaves
 // the offset as it was is skipped: Go reports year-end bounds past a zone's
-// stored transitions.
+// stored transitions, and some not after the instant asked about, which
+// zoneEndAfter steps past.
 func zoneYearOf(loc *time.Location, year int) zoneYear {
 	t := time.Date(year, time.January, 1, 0, 0, 0, 0, loc)
 	z := zoneYear{loc: loc, base: offsetOf(t)}
 	prev := z.base
 	for range maxZoneBounds {
-		_, end := t.ZoneBounds()
+		end := zoneEndAfter(t)
 		if end.IsZero() || end.In(loc).Year() > year {
 			break
 		}
