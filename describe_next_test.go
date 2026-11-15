@@ -490,19 +490,19 @@ func namesNotRunSpec(p Parser, spec, desc string) ([]string, error) {
 }
 
 // zoneShiftPattern is the shift a zone clause gives after "<name> time, "
-// (Z2): "5 hours behind UTC", "the same as UTC", and for a zone that changes
-// with the season a second value and its months, "…, 4 hours from March to
-// November", "…, 1 hour ahead from March to October".
+// (utcShift): "5 hours behind UTC", "the same as UTC", and for a zone that
+// changes with the season a second value and its months, "…, 4 hours from
+// March to November", "…, 1 hour ahead from March to October".
 var (
 	zoneShiftPattern = regexp.MustCompile(`^(?:the same as UTC|(.+?) (ahead of|behind) UTC)(?:, (?:the same as UTC|(.+?)(?: (ahead|behind))?) from (\w+) to (\w+))?$`)
 	sizePart         = regexp.MustCompile(`(\d+) (hour|minute)s?`)
 )
 
-// zoneMisses checks the zone clause of desc for the written zone loc (Z1,
-// Z2) and returns desc without the clause and the clause's shift when it is
-// not what Next() gives in loc, or "no <name> time" when desc does not name
-// loc. It reads nothing for no zone, TZ=Local and "never runs", which name
-// no zone.
+// zoneMisses checks the zone clause of desc for the written zone loc
+// (zoneName, utcShift) and returns desc without the clause and the clause's
+// shift when it is not what Next() gives in loc, or "no <name> time" when
+// desc does not name loc. It reads nothing for no zone, TZ=Local and "never
+// runs", which name no zone.
 func zoneMisses(loc *time.Location, desc string) (string, []string) {
 	if loc == nil || loc == time.Local || desc == "never runs" {
 		return desc, nil

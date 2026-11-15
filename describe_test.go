@@ -642,7 +642,7 @@ var describeGoldens = []struct {
 	{spec: "30 H(20-23),H(1-5) * * *", opts: []DescribeOption{withHash}, want: "minute 30, hour H(20-23),H(1-5), day of month *, month *, day of week *", literal: true},
 	{spec: "0 H/6,9 * * *", opts: []DescribeOption{withHash}, want: "minute 0, hour H/6,9, day of month *, month *, day of week *", literal: true},
 	{spec: "H(59-0) H/6 * * *", opts: []DescribeOption{withHash}, want: "minute H(59-0), hour H/6, day of month *, month *, day of week *", literal: true},
-	// Time zones: the zone's name and its shift from UTC (Z1, Z2, Z6)
+	// Time zones: the zone's name and its shift from UTC (zoneClause)
 	{spec: "CRON_TZ=America/New_York 30 2 * * *", want: "at 2:30 am every day New York time, 5 hours behind UTC, 4 hours from March to November"},
 	{spec: "TZ=Asia/Kolkata 0 9 * * *", want: "at 9 am every day Kolkata time, 5 hours 30 minutes ahead of UTC"},
 	{spec: "CRON_TZ=Australia/Lord_Howe 0 0 1 1 * 2027", opts: []DescribeOption{withYear}, want: "at midnight on the 1st of the month in January in year 2027 Lord Howe time, 11 hours ahead of UTC, 10 hours 30 minutes from April to October"},
@@ -1282,7 +1282,8 @@ func TestNeverRunsPastTheWalk(t *testing.T) {
 	}
 }
 
-// pinDescribeYear makes 2027 the year the zone clauses are computed for (Z8).
+// pinDescribeYear makes 2027 the year the zone clauses are computed for
+// (describeNow).
 func pinDescribeYear(t *testing.T) {
 	t.Helper()
 	old := describeNow
@@ -1477,8 +1478,8 @@ func describeGrammars() (descRe, noteRe *regexp.Regexp) {
 	)
 
 	hashkey := "; the hash key fixes " + list(alt("the "+unit, "both "+units)) // H1, H6
-	// Z1, Z2: a written zone and its shift from UTC
-	plain := `[A-Za-z0-9][A-Za-z0-9 +/:_-]*` // Z1: the name as derived, or as written
+	// zoneClause: a written zone and its shift from UTC
+	plain := `[A-Za-z0-9][A-Za-z0-9 +/:_-]*` // zoneName: the name as derived, or as written
 	offset := alt(num+" hours?", num+" hours? "+num+" minutes?", num+" minutes?")
 	shiftTo := func(other string) string {
 		return alt(offset+" "+alt("behind", "ahead of")+" "+other, "the same as "+other)
@@ -1783,7 +1784,7 @@ func FuzzDescribeSpec(f *testing.F) {
 	f.Add("+0 0 1 1 0")
 	f.Add("0 0 1 1 0 22-99")
 	f.Add("0 13 * * *")
-	f.Add("TZ=AmeriCA/Buenos_Aires 0 0 1 1 0") // a case-blind file system loads it; Z1 writes it as is
+	f.Add("TZ=AmeriCA/Buenos_Aires 0 0 1 1 0") // a case-blind file system loads it; zoneName writes it as is
 
 	g, ng := describeGrammars()
 	parsers := []Parser{

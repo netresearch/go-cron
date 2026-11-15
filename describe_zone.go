@@ -11,7 +11,7 @@ import (
 )
 
 // describeNow gives the instant whose year the zone clauses are computed
-// for (Z8). Tests replace it.
+// for. Tests replace it.
 var describeNow = time.Now
 
 // zoneShift is a change of a zone's offset from UTC: the instant and the
@@ -73,7 +73,7 @@ var tzAreas = []string{
 	"Atlantic", "Australia", "Europe", "Indian", "Pacific",
 }
 
-// zoneName returns the name a description gives loc (Z1): for a name under
+// zoneName returns the name a description gives loc: for a name under
 // one of the tz areas its last part with spaces, "New York"; any other name
 // as written, "UTC", "Etc/GMT+5", "US/Eastern".
 func zoneName(loc *time.Location) string {
@@ -138,7 +138,7 @@ func monthsWords(a, b time.Time, loc *time.Location) string {
 	return " from " + a.In(loc).Month().String() + " to " + b.In(loc).Month().String()
 }
 
-// utcShift names a zone's offset from UTC over the year (Z2): "5 hours
+// utcShift names a zone's offset from UTC over the year: "5 hours
 // behind UTC", and for a zone that changes with the season "5 hours behind
 // UTC, 4 hours from March to November".
 func utcShift(z zoneYear) string {
@@ -150,8 +150,8 @@ func utcShift(z zoneYear) string {
 }
 
 // zoneClause returns the clause that names the zone a spec wrote and its
-// shift from UTC (Z1, Z2), with its leading space. It is "" for a spec with no
-// zone and for TZ=Local, which reads as no zone does (Z6).
+// shift from UTC (zoneName, utcShift), with its leading space. It is "" for a
+// spec with no zone and for TZ=Local, which reads as no zone does.
 func zoneClause(spec *time.Location, now time.Time) string {
 	if spec == nil || spec == time.Local {
 		return ""
