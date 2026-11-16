@@ -353,6 +353,14 @@ UpsertJob creates or updates a named job entry. If an entry with the given
 name already exists, its schedule and job are atomically replaced via
 `UpdateEntry`. If no entry exists, a new one is created via `ScheduleJob`.
 
+On an update, the options passed are applied to the existing entry in the same
+step, as on a create. A field whose option is not passed keeps its value: an
+update with only `WithName` leaves the tags, priority, `Prev` and paused state
+as they are. An option takes effect where the scheduler reads it:
+`WithRunImmediately` runs the job once more as soon as the scheduler is running,
+`WithPaused` pauses the entry, and `WithMissedPolicy` and `WithPrev` matter for
+the catch-up when the scheduler starts.
+
 A `WithName` option is required. Returns `ErrNameRequired` if no name is provided.
 
 This eliminates the common "try update, fallback to add" boilerplate:
@@ -381,7 +389,9 @@ Pausing before the drain guarantees the old schedule cannot fire again between
 the wait and the replacement — closing the gap present in the two-step
 `WaitForJobByName` + `UpsertJob` sequence. If no entry with the given name
 exists it creates one (no stale schedule ⇒ no window). Same options and errors
-as `UpsertJob`; a `WithName` option is required.
+as `UpsertJob`; a `WithName` option is required. The entry stays paused after
+the update if it was paused before the call or if the options include
+`WithPaused`.
 
 It blocks for as long as the in-flight invocation runs but holds no cron lock
 while draining, so it never blocks the run loop or other mutators. It is not
@@ -1457,8 +1467,8 @@ Actual execution and completion order is decided by the Go scheduler, and chain
 wrappers such as `Jitter` or `SkipIfStillRunning` decouple it further.
 
 Priority is applied at add time. `UpdateEntry` and `UpdateSchedule` preserve
-it; `UpsertJob`'s update path ignores `JobOption`s, which is the existing
-behavior for every option.
+it; `UpsertJob` and `DrainAndUpsertJob` apply it on an update too, like every
+option.
 
 **Example:**
 ```go
