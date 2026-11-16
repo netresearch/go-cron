@@ -4,6 +4,7 @@
 package cron
 
 import (
+	"cmp"
 	"fmt"
 	"maps"
 	"math/rand/v2"
@@ -535,8 +536,8 @@ func zoneMisses(loc, sched *time.Location, desc, note string) (string, []string)
 	}
 	desc = desc[:i] + desc[end:]
 	var bad []string
-	if utc != "" && !shiftRuns(utc, loc, time.UTC, "UTC", zoneWindows(note, name, "UTC")) {
-		bad = append(bad, utc)
+	if name != "UTC" && !shiftRuns(utc, loc, time.UTC, "UTC", zoneWindows(note, name, "UTC")) {
+		bad = append(bad, cmp.Or(utc, "no shift from UTC"))
 	}
 	if fromSched != "" && !schedShiftRuns(fromSched, loc, sched, name, note) {
 		bad = append(bad, fromSched)
@@ -1049,6 +1050,7 @@ func TestZoneMissesSchedulerAndWindows(t *testing.T) {
 		{"a change after noon", tonga, berlin, 0, " Tongatapu time, 13 hours ahead of UTC, and 12 hours ahead of Berlin time, 11 hours from March to October", "", ""},
 		{"a window within one date", fakaofo, nil, 2011, " Fakaofo time, 11 hours behind UTC", "Fakaofo is 13 hours ahead of UTC on December 31", ""},
 		{"a window within one date, named a day late", fakaofo, nil, 2011, " Fakaofo time, 11 hours behind UTC", "Fakaofo is 13 hours ahead of UTC from December 31 to 31 and on December 30", "11 hours behind UTC"},
+		{"no shift from UTC", berlin, nil, 0, " Berlin time, ", "", "no shift from UTC"},
 		{"a change at 11:30 pm", kolkata, almaty, 2024, kolkataAlmaty, "Kolkata is 30 minutes ahead of Almaty from February 29 to December 31", ""},
 		{"a change at 11:30 pm, named a day late", kolkata, almaty, 2024, kolkataAlmaty, "Kolkata is 30 minutes ahead of Almaty from March 1 to December 31", "30 minutes behind Almaty time"},
 	} {
