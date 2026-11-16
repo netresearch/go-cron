@@ -6,6 +6,7 @@ package cron
 import (
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -253,7 +254,7 @@ func TestSchedulerDefaultIsNone(t *testing.T) {
 		t.Errorf("AnalyzeSpec: %q, want %q", got, want)
 	}
 	const la = want + ", and 9 hours ahead of Los Angeles time"
-	if got, _ := p.DescribeSpec(spec, schedLA); len(got) < len(la) || got[:len(la)] != la {
+	if got, _ := p.DescribeSpec(spec, schedLA); !strings.HasPrefix(got, la) {
 		t.Errorf("scheduler in Los Angeles: %q, want it to start %q", got, la)
 	}
 }
