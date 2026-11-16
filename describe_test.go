@@ -823,6 +823,7 @@ var describeNoteGoldens = []struct {
 	{spec: "0 0 H * MON#2", opts: []DescribeOption{WithParseOptions(Minute | Hour | Dom | Month | Dow | Extended | Hash | DowOrDom)}, want: "on day h of every month, where h is a fixed day from 1 to 31"},
 	{spec: "0 0 H * MON", opts: []DescribeOption{withHash}, want: "on day h of every month, where h is a fixed day from 1 to 31; a month without day h is skipped"},
 	{spec: "0 0 H/10,H * H/3", opts: []DescribeOption{withHash}, want: ""},
+	{spec: "CRON_TZ=Europe/Berlin 0 0 H/10,H * H/3", opts: []DescribeOption{withHash, schedNY}, want: "Berlin is 5 hours ahead of New York from March 14 to 28 and from October 31 to November 7, between the two zones' clock changes"}, // N1: the zone's windows stay
 	// Time zones: the windows off the stated shift (windowNote)
 	{spec: "CRON_TZ=Europe/Berlin 0 0 * * *", opts: []DescribeOption{schedNY}, want: "Berlin is 5 hours ahead of New York from March 14 to 28 and from October 31 to November 7, between the two zones' clock changes"},
 	{spec: "CRON_TZ=America/New_York 30 2 * * *", opts: []DescribeOption{schedLA}, want: ""},

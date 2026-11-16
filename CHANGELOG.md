@@ -26,6 +26,12 @@ Originally based on [robfig/cron](https://github.com/robfig/cron).
 - `DescribeSpec` names a zone written with `TZ=` or `CRON_TZ=` and its shift
   from UTC: "at 9 am every day Kolkata time, 5 hours 30 minutes ahead of UTC"
   (#205)
+- `WithSchedulerLocation` names the scheduler's zone, so `DescribeSpec` also
+  gives a written zone's shift from it: "…, and 3 hours ahead of Los Angeles
+  time"; `DescribeSpecNote` names the windows in which the zone is off that
+  shift. Without it the description gives the shift from UTC only (#205)
+- `Parser.AnalyzeSpec` analyzes a spec with the parser's own settings and
+  takes `WithSchedulerLocation` (#205)
 
 ### Planned for v2
 - Context-aware Job interface with graceful shutdown support
