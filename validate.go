@@ -196,7 +196,7 @@ func (p Parser) AnalyzeSpec(spec string, opts ...DescribeOption) SpecAnalysis {
 	result.Description, result.DescriptionNote, _ = p.describe(spec, newDescribeConfig(opts).sched)
 
 	// Extract location and analyze the spec
-	result.analyzeSpec(spec)
+	result.analyzeSpec(spec, p)
 
 	// Check for DOM/DOW AND logic warning
 	result.checkDomDowWarning()
@@ -247,7 +247,7 @@ func (r *SpecAnalysis) checkDomDowWarning() {
 }
 
 // analyzeSpec extracts metadata from the spec string.
-func (r *SpecAnalysis) analyzeSpec(spec string) {
+func (r *SpecAnalysis) analyzeSpec(spec string, p Parser) {
 	// Extract timezone
 	loc, remaining, _ := parseTimezone(spec)
 	r.Location = loc
@@ -260,7 +260,7 @@ func (r *SpecAnalysis) analyzeSpec(spec string) {
 	}
 
 	// Parse fields for non-descriptor specs
-	r.parseFields(remaining)
+	r.parseFields(remaining, p)
 }
 
 // analyzeDescriptor extracts information from descriptor-style specs. The
@@ -275,47 +275,25 @@ func (r *SpecAnalysis) analyzeDescriptor() {
 	}
 }
 
-// parseFields extracts individual field values from a standard cron expression.
-func (r *SpecAnalysis) parseFields(spec string) {
-	fields := strings.Fields(spec)
-
-	// Map fields based on count
-	// 5 fields: minute hour dom month dow
-	// 6 fields: second minute hour dom month dow (or minute hour dom month dow year)
-	// 7 fields: second minute hour dom month dow year
-	switch len(fields) {
-	case 5:
-		r.Fields["minute"] = fields[0]
-		r.Fields["hour"] = fields[1]
-		r.Fields["day_of_month"] = fields[2]
-		r.Fields["month"] = fields[3]
-		r.Fields["day_of_week"] = fields[4]
-	case 6:
-		// Could be either with seconds or with year (without seconds)
-		// We detect year by checking if the last field looks like a year (4 digits, 1970-2099 range)
-		if looksLikeYear(fields[5]) {
-			r.Fields["minute"] = fields[0]
-			r.Fields["hour"] = fields[1]
-			r.Fields["day_of_month"] = fields[2]
-			r.Fields["month"] = fields[3]
-			r.Fields["day_of_week"] = fields[4]
-			r.Fields["year"] = fields[5]
-		} else {
-			r.Fields["second"] = fields[0]
-			r.Fields["minute"] = fields[1]
-			r.Fields["hour"] = fields[2]
-			r.Fields["day_of_month"] = fields[3]
-			r.Fields["month"] = fields[4]
-			r.Fields["day_of_week"] = fields[5]
-		}
-	case 7:
+// parseFields names the fields of spec as p parses them: the year as p's
+// options split it off (handleYearExtraction), then six fields from the
+// second or five from the minute.
+func (r *SpecAnalysis) parseFields(spec string, p Parser) {
+	fields, year, _ := p.handleYearExtraction(strings.Fields(spec))
+	if len(fields) == 6 {
 		r.Fields["second"] = fields[0]
-		r.Fields["minute"] = fields[1]
-		r.Fields["hour"] = fields[2]
-		r.Fields["day_of_month"] = fields[3]
-		r.Fields["month"] = fields[4]
-		r.Fields["day_of_week"] = fields[5]
-		r.Fields["year"] = fields[6]
+		fields = fields[1:]
+	}
+	if len(fields) != 5 {
+		return
+	}
+	r.Fields["minute"] = fields[0]
+	r.Fields["hour"] = fields[1]
+	r.Fields["day_of_month"] = fields[2]
+	r.Fields["month"] = fields[3]
+	r.Fields["day_of_week"] = fields[4]
+	if year != "" {
+		r.Fields["year"] = year
 	}
 }
 

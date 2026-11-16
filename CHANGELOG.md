@@ -33,6 +33,11 @@ Originally based on [robfig/cron](https://github.com/robfig/cron).
 - `Parser.AnalyzeSpec` analyzes a spec with the parser's own settings and
   takes `WithSchedulerLocation` (#205)
 
+### Fixed
+- `AnalyzeSpec` splits the year off `Fields` as the parser does. With `Year`,
+  `0 9 * * 1 *` reported the `*` year as the day of the week and the `9` as
+  the minute; a year counted only when it held a number of 100 or more
+
 ### Planned for v2
 - Context-aware Job interface with graceful shutdown support
 
