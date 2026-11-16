@@ -68,7 +68,7 @@ func DescribeSpecNote(spec string, opts ...DescribeOption) (string, error) {
 
 // DescribeSpec returns an English description of spec as p parses it, or the
 // parse error. The description follows the grammar in docs/DESCRIBE.md and
-// leaves out the time zone; callers show the location beside it. A valid spec
+// names a written TZ=/CRON_TZ= zone and its shift from UTC. A valid spec
 // always gets a description and a nil error; one that never runs is "never
 // runs", within the limit on H in G11 of docs/DESCRIBE.md. Combinations of H
 // without a form (H17 and H20 in docs/DESCRIBE.md) get each written field by
@@ -124,7 +124,7 @@ func (p Parser) describe(spec string) (desc, note string, err error) {
 		return "", "", err
 	}
 	// The spec parsed, so the split cannot fail.
-	_, descriptor, fields, yearField, _ := p.specFields(spec)
+	loc, descriptor, fields, yearField, _ := p.specFields(spec)
 	fields, text := p.expandDescriptor(descriptor, fields)
 	if text != "" {
 		return text, "", nil
@@ -167,7 +167,7 @@ func (p Parser) describe(spec string) (desc, note string, err error) {
 			parts = append(parts, clause)
 		}
 	}
-	desc = placeAlternatives(strings.Join(parts, " ")+d.noteText()+short) + hashKeyClause(units)
+	desc = placeAlternatives(strings.Join(parts, " ")+d.noteText()) + zoneClause(loc, describeNow()) + short + hashKeyClause(units)
 	return desc, p.hashNote(&d, h, hd, dates), nil
 }
 
@@ -725,10 +725,10 @@ var literalNames = []string{seconds.name, minutes.name, hours.name, dom.name, mo
 
 // describeLiteral names each field spec wrote, as written. fields and
 // yearField are spec's fields from specFields, which fill in the fields
-// spec left out.
+// spec left out. A written zone follows, as zoneClause names it.
 func (p Parser) describeLiteral(spec string, fields []string, yearField string) string {
 	// The spec parsed, so neither step can fail.
-	_, rest, _ := parseTimezone(spec)
+	loc, rest, _ := parseTimezone(spec)
 	tokens := strings.Fields(rest)
 	written, _, _ := p.handleYearExtraction(tokens)
 	opts, _, _ := processOptionalFlags(p.options)
@@ -745,7 +745,7 @@ func (p Parser) describeLiteral(spec string, fields []string, yearField string) 
 	if len(tokens) > len(written) {
 		parts = append(parts, "year "+yearField)
 	}
-	return strings.Join(parts, ", ")
+	return strings.Join(parts, ", ") + zoneClause(loc, describeNow())
 }
 
 // Phrases the descriptions repeat.

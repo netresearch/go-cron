@@ -94,7 +94,7 @@ var describeGoldens = []struct {
 	{spec: "0 22-2/2 * * *", want: "at midnight, 2 am, and 10 pm every day"},
 	{spec: "0 0 * * *", want: "at midnight every day"},
 	{spec: "0 12 * * *", want: "at noon every day"},
-	{spec: "CRON_TZ=UTC 0 0 * * *", want: "at midnight every day"},
+	{spec: "CRON_TZ=UTC 0 0 * * *", want: "at midnight every day UTC"},
 	{spec: "0 17,9 * * *", want: "at 9 am and 5 pm every day"},
 	{spec: "0 0,12,13 * * *", want: "at midnight, noon, and 1 pm every day"},
 
@@ -448,6 +448,9 @@ var describeGoldens = []struct {
 	{spec: "0 0 1 H(11-2) *", opts: []DescribeOption{withHash}, want: "at midnight on the 1st of the month in a fixed month between November and February; the hash key fixes the month"},
 	{spec: "0 0 1 H(11-2)/2 *", opts: []DescribeOption{withHash}, want: "at midnight on the 1st of the month in 2 months in every year between November and February, 2 months apart, starting from a fixed month; the hash key fixes the month"},
 	{spec: "H(59-5) * * * *", opts: []DescribeOption{withHash}, want: "at a fixed minute past the hour, either between minutes 0 and 5 or minute 59; the hash key fixes the minute"},
+	// Two notes share one parenthesis; the alternatives follow it (G7)
+	{spec: "H(59-5) */7 * */2 * *", opts: []DescribeOption{withSecHash}, want: "at a fixed second within minutes 0, 7, 14, … 56 in every hour on the 1st, 3rd, 5th, … 31st of the month (every 7 minutes, starting over each hour; every 2 days, starting over each month), either between seconds 0 and 5 or second 59; the 29th and 31st run only in months that have them; the hash key fixes the second"},
+	{spec: "*/7 * H(31-5) * * 2026-2060/5", opts: []DescribeOption{WithParseOptions(Minute | Hour | Dom | Month | Dow | Hash | Year)}, want: "at minutes 0, 7, 14, … 56 past the hour on a fixed day of the month in years 2026, 2031, 2036, … 2056 (every 7 minutes, starting over each hour; every 5 years), either between the 1st and 5th or on the 31st; the hash key fixes the day"},
 	{spec: "H(1-0)/2 * * * *", opts: []DescribeOption{withHash}, want: "30 runs in every hour, 2 minutes apart, starting from a fixed minute; the hash key fixes the minute"},
 	{spec: "0 9 * * H(1-0)", opts: []DescribeOption{withHash}, want: "at 9 am on a fixed day of the week; the hash key fixes the day"},
 	{spec: "H(50-0) * * * *", opts: []DescribeOption{withHash}, want: "at a fixed minute past the hour, either minute 0 or between minutes 50 and 59; the hash key fixes the minute"},
@@ -472,7 +475,7 @@ var describeGoldens = []struct {
 	{spec: "@triggered", want: "only when triggered"},
 	{spec: "@manual", want: "only when triggered"},
 	{spec: "@none", want: "only when triggered"},
-	{spec: "CRON_TZ=Europe/Berlin @daily", want: "at midnight every day"},
+	{spec: "CRON_TZ=Europe/Berlin @daily", want: "at midnight every day Berlin time, 1 hour ahead of UTC, 2 hours from March to October"},
 	{spec: "@daily", opts: []DescribeOption{withSeconds}, want: "at midnight every day"},
 
 	// Intervals: as they run, from their anchor (P3)
@@ -642,6 +645,23 @@ var describeGoldens = []struct {
 	{spec: "30 H(20-23),H(1-5) * * *", opts: []DescribeOption{withHash}, want: "minute 30, hour H(20-23),H(1-5), day of month *, month *, day of week *", literal: true},
 	{spec: "0 H/6,9 * * *", opts: []DescribeOption{withHash}, want: "minute 0, hour H/6,9, day of month *, month *, day of week *", literal: true},
 	{spec: "H(59-0) H/6 * * *", opts: []DescribeOption{withHash}, want: "minute H(59-0), hour H/6, day of month *, month *, day of week *", literal: true},
+	// Time zones: the zone's name and its shift from UTC (zoneClause)
+	{spec: "CRON_TZ=America/New_York 30 2 * * *", want: "at 2:30 am every day New York time, 5 hours behind UTC, 4 hours from March to November"},
+	{spec: "TZ=Asia/Kolkata 0 9 * * *", want: "at 9 am every day Kolkata time, 5 hours 30 minutes ahead of UTC"},
+	{spec: "CRON_TZ=Australia/Lord_Howe 0 0 1 1 * 2027", opts: []DescribeOption{withYear}, want: "at midnight on the 1st of the month in January in year 2027 Lord Howe time, 11 hours ahead of UTC, 10 hours 30 minutes from April to October"},
+	{spec: "CRON_TZ=Europe/London 0 12 * * *", want: "at noon every day London time, the same as UTC, 1 hour ahead from March to October"},
+	{spec: "CRON_TZ=Etc/UTC 0 0 * * *", want: "at midnight every day Etc/UTC time, the same as UTC"},
+	{spec: "CRON_TZ=America/Argentina/Buenos_Aires 0 0 1 1-3 *", want: "at midnight on the 1st of the month in January thru March Buenos Aires time, 3 hours behind UTC"},
+	{spec: "TZ=\"America/New_York\" */15 * * * *", want: "at minutes 0, 15, 30, and 45 past the hour New York time, 5 hours behind UTC, 4 hours from March to November"},
+	{spec: "CRON_TZ=US/Eastern 0 9 * * *", want: "at 9 am every day US/Eastern time, 5 hours behind UTC, 4 hours from March to November"},
+	{spec: "TZ=Local 0 0 * * *", want: "at midnight every day"},
+	{spec: "CRON_TZ=America/New_York @every 1h", want: "every 1h from when scheduling started"},
+	{spec: "CRON_TZ=America/New_York @triggered", want: "only when triggered"},
+	{spec: "CRON_TZ=America/New_York 0 0 30 2 *", want: "never runs"},
+	{spec: "CRON_TZ=Europe/Berlin */7 * * * *", want: "at minutes 0, 7, 14, … 56 past the hour (every 7 minutes, starting over each hour) Berlin time, 1 hour ahead of UTC, 2 hours from March to October"},
+	{spec: "CRON_TZ=Europe/Berlin H(50-10) * * * *", opts: []DescribeOption{withHash}, want: "at a fixed minute past the hour, either between minutes 0 and 10 or between minutes 50 and 59 Berlin time, 1 hour ahead of UTC, 2 hours from March to October; the hash key fixes the minute"},
+	{spec: "CRON_TZ=Europe/Berlin 0 0 1/10 * *", want: "at midnight on the 1st, 11th, 21st, and 31st of the month Berlin time, 1 hour ahead of UTC, 2 hours from March to October; the 31st runs only in months that have one"},
+	{spec: "CRON_TZ=Europe/Berlin 0 0 H/10 * 1", opts: []DescribeOption{withHash}, want: "minute 0, hour 0, day of month H/10, month *, day of week 1 Berlin time, 1 hour ahead of UTC, 2 hours from March to October", literal: true},
 }
 
 // describeNoteGoldens are the binding notes (docs/DESCRIBE.md, N1–N8).
@@ -801,6 +821,7 @@ func TestDayNoteOrRunsShortMonths(t *testing.T) {
 }
 
 func TestDescribeSpecNote(t *testing.T) {
+	pinDescribeYear(t)
 	g := describeNoteGrammar()
 	for _, tt := range describeNoteGoldens {
 		if tt.want != "" && !g.MatchString(tt.want) { // N1: no note has no form
@@ -1264,7 +1285,17 @@ func TestNeverRunsPastTheWalk(t *testing.T) {
 	}
 }
 
+// pinDescribeYear makes 2027 the year the zone clauses are computed for
+// (describeNow).
+func pinDescribeYear(t *testing.T) {
+	t.Helper()
+	old := describeNow
+	describeNow = func() time.Time { return time.Date(2027, 7, 1, 12, 0, 0, 0, time.UTC) }
+	t.Cleanup(func() { describeNow = old })
+}
+
 func TestDescribeSpec(t *testing.T) {
+	pinDescribeYear(t)
 	for _, tt := range describeGoldens {
 		describe := DescribeSpec
 		if tt.parser != nil {
@@ -1450,7 +1481,17 @@ func describeGrammars() (descRe, noteRe *regexp.Regexp) {
 	)
 
 	hashkey := "; the hash key fixes " + list(alt("the "+unit, "both "+units)) // H1, H6
-	schedule := time + opt(" "+day) + opt(" "+month) + opt(" "+year) + opt(note) + opt(alt(nalts, domalts)) + "(?:" + short + ")*" + opt(hashkey)
+	// zoneClause: a written zone and its shift from UTC
+	plain := `[A-Za-z0-9][A-Za-z0-9 +/:_-]*` // zoneName: the name as derived, or as written
+	offset := alt(num+" hours?", num+" hours? "+num+" minutes?", num+" minutes?")
+	shiftTo := func(other string) string {
+		return alt(offset+" "+alt("behind", "ahead of")+" "+other, "the same as "+other)
+	}
+	second := func(other string) string { return alt(offset, offset+" "+alt("behind", "ahead"), "the same as "+other) }
+	months := " from " + monthname + " to " + monthname
+	utcShift := shiftTo("UTC") + opt(", "+second("UTC")+months)
+	zone := " " + alt("UTC", plain+" time, "+utcShift)
+	schedule := time + opt(" "+day) + opt(" "+month) + opt(" "+year) + opt(note) + opt(alt(nalts, domalts)) + opt(zone) + "(?:" + short + ")*" + opt(hashkey)
 	// P3: an interval as it runs, from its anchor
 	dur := `[-+]?(?:(?:(?:\d+\.?\d*|\.\d+)(?:ns|us|µs|μs|ms|s|m|h))+|0)` // Go's duration: "1.s", ".5m", "0"
 	interval := "every " + dur + " from " + alt("when scheduling started", "Unix epoch") +
@@ -1532,6 +1573,8 @@ func TestDescribeGrammarRejects(t *testing.T) {
 		"at minutes 0 and 30 during the hours of 9 am and 5 pm",
 		"at midnight on 3 days in every month between the 1st and 15th, 5 days apart, starting from a fixed day; the hash key fixes the day",
 		"at midnight on 3 or 4 days in every month between the 29th and 24th, 7 days apart, starting from a fixed day; the hash key fixes the day",
+		"at midnight every day New York time",
+		"every 1h from when scheduling started New York time, 5 hours behind UTC",
 	} {
 		if g.MatchString(s) {
 			t.Errorf("grammar accepts %q", s)
@@ -1744,6 +1787,7 @@ func FuzzDescribeSpec(f *testing.F) {
 	f.Add("+0 0 1 1 0")
 	f.Add("0 0 1 1 0 22-99")
 	f.Add("0 13 * * *")
+	f.Add("TZ=AmeriCA/Buenos_Aires 0 0 1 1 0") // a case-blind file system loads it; zoneName writes it as is
 
 	g, ng := describeGrammars()
 	parsers := []Parser{

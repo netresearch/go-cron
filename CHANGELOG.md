@@ -23,6 +23,9 @@ Originally based on [robfig/cron](https://github.com/robfig/cron).
 - `DescribeSpecNote` and `Parser.DescribeSpecNote` spell out the values the
   hash key picks; `SpecAnalysis.Description` and `SpecAnalysis.DescriptionNote`
   carry the description and the note (#205)
+- `DescribeSpec` names a zone written with `TZ=` or `CRON_TZ=` and its shift
+  from UTC: "at 9 am every day Kolkata time, 5 hours 30 minutes ahead of UTC"
+  (#205)
 
 ### Planned for v2
 - Context-aware Job interface with graceful shutdown support
