@@ -47,9 +47,9 @@ entry before draining**:
    If absent, create via `ScheduleJob` (no stale schedule ⇒ no window).
 2. `PauseEntry(id)` — atomic with respect to the run loop.
 3. `WaitForJobByName(name)` — drain any in-flight invocation.
-4. Swap schedule and job while paused, apply the job options, and resume —
-   only if the caller had not already paused the entry and the options do not
-   include `WithPaused`.
+4. Swap schedule and job while paused, resume — only if the caller had not
+   already paused the entry — and then apply the job options, so that
+   `WithPaused` keeps the entry paused.
 
 Amendment (issue #456): steps 4 and 5 were `UpdateEntry` followed by a
 separate `ResumeEntry`. Since upserts apply their job options on an update,

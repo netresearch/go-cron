@@ -1887,6 +1887,11 @@ func (c *Cron) updateSchedule(req *updateScheduleRequest) error {
 		entry.Job = req.job
 		entry.WrappedJob = c.chain.Then(req.job)
 	}
+	// Resume before the options run, so an option such as WithPaused decides
+	// the final paused state.
+	if req.resume {
+		entry.Paused = false
+	}
 	if len(req.opts) > 0 {
 		// The name keys the name index, so an option cannot change it here.
 		name := entry.Name
@@ -1896,9 +1901,6 @@ func (c *Cron) updateSchedule(req *updateScheduleRequest) error {
 			}
 		}
 		entry.Name = name
-	}
-	if req.resume {
-		entry.Paused = false
 	}
 	if c.running {
 		c.scheduleEntryNext(entry, c.now())
@@ -2247,20 +2249,14 @@ func (c *Cron) TriggerEntryWithInfoByName(name string, info RunInfo) error {
 
 // extractName applies JobOptions to a temporary Entry and returns the Name.
 func extractName(opts []JobOption) string {
-	return probeOptions(opts).Name
-}
-
-// probeOptions applies opts to a temporary Entry and returns it, so a caller
-// can read what the options set before they run on the real Entry.
-func probeOptions(opts []JobOption) Entry {
 	var e Entry
 	for _, opt := range opts {
 		probeOption(opt, &e)
 	}
-	return e
+	return e.Name
 }
 
-// probeOption applies opt to the temporary Entry of probeOptions. That Entry has
+// probeOption applies opt to the temporary Entry of extractName. That Entry has
 // no Schedule yet, so an option that reads one panics here. It ignores the panic,
 // and a nil option's too: the option runs again on the real Entry.
 func probeOption(opt JobOption, e *Entry) {
@@ -2405,16 +2401,15 @@ func (c *Cron) DrainAndUpsertJob(spec string, cmd Job, opts ...JobOption) (Entry
 	// even if the name is concurrently reused by a different entry.
 	c.WaitForJob(id)
 
-	// (3) Replace schedule and job, apply the options and restore the prior
-	// paused state in one run-loop step, so no fire can occur under the stale
+	// (3) Replace schedule and job, restore the prior paused state and apply
+	// the options in one run-loop step, so no fire can occur under the stale
 	// schedule. The entry is resumed only if the caller had not already paused
-	// it and the options do not pause it (WithPaused). Resuming in the same step
-	// keeps a WithRunImmediately run: a separate resume would let the run loop
-	// skip that run while the entry is still paused. With a non-nil cmd the only
-	// failure mode is ErrEntryNotFound (removed during the drain); create
-	// instead, matching the pause path.
-	resume := !wasPaused && !probeOptions(opts).Paused
-	if c.updateEntry(updateScheduleRequest{id: id, schedule: schedule, job: cmd, opts: opts, resume: resume}) != nil {
+	// it; the options run after the resume, so WithPaused keeps it paused.
+	// Resuming in the same step keeps a WithRunImmediately run: a separate
+	// resume would let the run loop skip that run while the entry is still
+	// paused. With a non-nil cmd the only failure mode is ErrEntryNotFound
+	// (removed during the drain); create instead, matching the pause path.
+	if c.updateEntry(updateScheduleRequest{id: id, schedule: schedule, job: cmd, opts: opts, resume: !wasPaused}) != nil {
 		return c.ScheduleJob(schedule, cmd, opts...)
 	}
 	return id, nil

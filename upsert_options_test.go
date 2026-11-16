@@ -113,6 +113,27 @@ func TestUpsertWithPausedOnUpdatePauses(t *testing.T) {
 	}
 }
 
+// TestDrainAndUpsertOptionPausesFromEntryState verifies that an option which
+// pauses the entry based on a field of the real entry keeps it paused. The
+// resume must not run after the options and undo that pause.
+func TestDrainAndUpsertOptionPausesFromEntryState(t *testing.T) {
+	c := New()
+	if _, err := c.DrainAndUpsertJob("@every 1h", FuncJob(func() {}), WithName("prio"), WithPriority(7)); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	pauseIfPriority := func(e *Entry) {
+		if e.Priority > 0 {
+			e.Paused = true
+		}
+	}
+	if _, err := c.DrainAndUpsertJob("@every 2h", FuncJob(func() {}), WithName("prio"), pauseIfPriority); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if !c.IsEntryPausedByName("prio") {
+		t.Error("entry is not paused after an option paused it based on its priority")
+	}
+}
+
 // TestUpsertWithRunImmediatelyOnUpdateRuns verifies that WithRunImmediately on
 // an update of a running scheduler runs the new job at once, without a clock
 // advance. For DrainAndUpsertJob this also pins that the resume happens in the
