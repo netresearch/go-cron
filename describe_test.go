@@ -677,6 +677,8 @@ var describeGoldens = []struct {
 	{spec: "CRON_TZ=Australia/Lord_Howe 0 0 * * *", opts: []DescribeOption{schedKol}, want: "at midnight every day Lord Howe time, 11 hours ahead of UTC, 10 hours 30 minutes from April to October, and 5 hours 30 minutes ahead of Kolkata time, 5 hours from April to October"},
 	{spec: "CRON_TZ=UTC 0 0 * * *", opts: []DescribeOption{schedLon}, want: "at midnight every day UTC, the same as London time, 1 hour behind from March to October"},
 	{spec: "CRON_TZ=Europe/Berlin 0 0 * * *", opts: []DescribeOption{WithSchedulerLocation(goldenZone("US/Eastern"))}, want: "at midnight every day Berlin time, 1 hour ahead of UTC, 2 hours from March to October, and 6 hours ahead of US/Eastern time"},
+	// Berlin's October change is at 2 pm in Tongatapu: the month is the change's
+	{spec: "CRON_TZ=Pacific/Tongatapu 0 9 * * *", opts: []DescribeOption{WithSchedulerLocation(goldenZone("Europe/Berlin"))}, want: "at 9 am every day Tongatapu time, 13 hours ahead of UTC, and 12 hours ahead of Berlin time, 11 hours from March to October"},
 	{spec: "CRON_TZ=Australia/Sydney 0 9 * * *", opts: []DescribeOption{schedNY}, want: "at 9 am every day Sydney time, 11 hours ahead of UTC, 10 hours from April to October, and 14 hours ahead of New York time"},
 	{spec: "CRON_TZ=Europe/Berlin 0 0 H/10 * 1", opts: []DescribeOption{withHash, schedNY}, want: "minute 0, hour 0, day of month H/10, month *, day of week 1, Berlin time, 1 hour ahead of UTC, 2 hours from March to October, and 6 hours ahead of New York time", literal: true},
 	// A zone that changes once in the year gives its January shift; the note

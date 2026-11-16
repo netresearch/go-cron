@@ -503,7 +503,7 @@ func shiftPattern(object string) *regexp.Regexp {
 
 var (
 	sizePart    = regexp.MustCompile(`(\d+) (hour|minute)s?`)
-	windowRange = regexp.MustCompile(`from (\w+) (\d+) to (?:(\w+) )?(\d+)`)
+	windowRange = regexp.MustCompile(`from (\w+) (\d+) to (?:(\w+) )?(\d+)|on (\w+) (\d+)`)
 )
 
 // zoneMisses checks the zone clause of desc for the written zone loc
@@ -560,28 +560,28 @@ func schedShiftRuns(shift string, loc, sched *time.Location, name, note string) 
 }
 
 // shiftRuns reports whether shift, read with shiftPattern(object), is loc's
-// offset from ref at a noon run in loc on each day of the year the clause is
-// made for. A shift with months must be that of a zone pair whose offset
-// leaves its January value once and comes back: the second value and the
-// months of the two changes. Any other shift must hold on every day outside
-// windows, and each window's value inside it.
+// offset from ref over the year the clause is made for, as hourly runs in
+// loc walked with Next() find it. A shift with months must be that of a
+// zone pair whose offset leaves its first value once and comes back: the
+// second value and the months of the two changes. Any other shift is the
+// stated value, and the windows the note names must be the stretches of a
+// day or more in which the offset is another, by first and last date.
 func shiftRuns(shift string, loc, ref *time.Location, object string, windows []zoneWindow) bool {
 	m := shiftPattern(object).FindStringSubmatch(shift)
 	if m == nil {
 		return false
 	}
-	days := noonShifts(loc, ref, describeNow().In(loc).Year())
+	spans := hourSpans(loc, ref, describeNow().In(loc).Year())
 	if m[5] == "" {
-		return daysMatch(days, sizeOf(m[1], m[2]), windows)
+		return windowsMatch(spans, sizeOf(m[1], m[2]), windows)
 	}
 	side := m[4]
 	if side == "" {
 		side = m[2] // the second value is on the first one's side
 	}
-	base, changes := shiftChanges(days)
-	return sizeOf(m[1], m[2]) == base && len(changes) == 2 && changes[1].off == base &&
-		sizeOf(m[3], side) == changes[0].off &&
-		m[5] == changes[0].month.String() && m[6] == changes[1].month.String()
+	return len(spans) == 3 && spans[2].off == spans[0].off &&
+		sizeOf(m[1], m[2]) == spans[0].off && sizeOf(m[3], side) == spans[1].off &&
+		m[5] == spans[1].first.Month().String() && m[6] == spans[2].first.Month().String()
 }
 
 // zoneWindow is a window a note names, by its first and last dates, as
@@ -593,10 +593,10 @@ type zoneWindow struct {
 
 // zoneWindows reads the windows note gives subject's zone off its shift from
 // object (windowNote): "Berlin is 5 hours ahead of New York from March 14 to
-// 28 and from October 31 to November 7".
+// 28 and from October 31 to November 7", "… on December 31".
 func zoneWindows(note, subject, object string) []zoneWindow {
 	sentence := regexp.MustCompile(`^` + regexp.QuoteMeta(subject) + ` is (?:the same as ` + regexp.QuoteMeta(object) +
-		`|(.+?) (ahead of|behind) ` + regexp.QuoteMeta(object) + `) (from .+)$`)
+		`|(.+?) (ahead of|behind) ` + regexp.QuoteMeta(object) + `) ((?:from|on) .+)$`)
 	var windows []zoneWindow
 	for _, s := range strings.Split(strings.TrimSuffix(note, ", between the two zones' clock changes"), "; ") {
 		m := sentence.FindStringSubmatch(s)
@@ -604,11 +604,17 @@ func zoneWindows(note, subject, object string) []zoneWindow {
 			continue
 		}
 		for _, r := range windowRange.FindAllStringSubmatch(m[3], -1) {
-			to := r[3]
-			if to == "" {
-				to = r[1]
+			w := zoneWindow{off: sizeOf(m[1], m[2])}
+			switch {
+			case r[5] != "": // on a date
+				w.from = monthDay(r[5], r[6])
+				w.to = w.from
+			case r[3] != "":
+				w.from, w.to = monthDay(r[1], r[2]), monthDay(r[3], r[4])
+			default:
+				w.from, w.to = monthDay(r[1], r[2]), monthDay(r[1], r[4])
 			}
-			windows = append(windows, zoneWindow{monthDay(r[1], r[2]), monthDay(to, r[4]), sizeOf(m[1], m[2])})
+			windows = append(windows, w)
 		}
 	}
 	return windows
@@ -625,27 +631,20 @@ func monthDay(month, day string) int {
 	return 0
 }
 
-// daysMatch reports whether each day's offset is stated, or the value of a
-// window the day is in. One day off at a time passes: a window under a day,
-// which no note names, holds at most one noon, and a window's last date is
-// the day of the change that ends it, at night.
-func daysMatch(days []dayShift, stated time.Duration, windows []zoneWindow) bool {
-	miss := 0
-	for _, d := range days {
-		want := stated
-		md := int(d.t.Month())*100 + d.t.Day()
-		if i := slices.IndexFunc(windows, func(w zoneWindow) bool { return w.from <= md && md <= w.to }); i >= 0 {
-			want = windows[i].off
-		}
-		if d.off == want {
-			miss = 0
-			continue
-		}
-		if miss++; miss > 1 {
-			return false
+// windowsMatch reports whether windows are the spans of a day or more whose
+// offset is not stated, by the dates of their first and last runs.
+func windowsMatch(spans []runSpan, stated time.Duration, windows []zoneWindow) bool {
+	date := func(t time.Time) int { return int(t.Month())*100 + t.Day() }
+	var runs []zoneWindow
+	for _, s := range spans {
+		if s.off != stated && s.next.Sub(s.first) >= 24*time.Hour {
+			runs = append(runs, zoneWindow{date(s.first), date(s.last), s.off})
 		}
 	}
-	return true
+	byDate := func(a, b zoneWindow) int { return a.from - b.from }
+	slices.SortFunc(runs, byDate)
+	named := slices.SortedFunc(slices.Values(windows), byDate)
+	return slices.Equal(runs, named)
 }
 
 // sizeOf reads an offset as a description gives it, "5 hours 30 minutes",
@@ -666,58 +665,48 @@ func sizeOf(s, side string) time.Duration {
 	return d
 }
 
-// noonDaily is "0 12 * * *" as the parser sets it.
-var noonDaily = func() *SpecSchedule {
-	s, err := NewParser(Minute | Hour | Dom | Month | Dow).Parse("0 12 * * *")
+// hourly is "0 * * * *" as the parser sets it.
+var hourly = func() *SpecSchedule {
+	s, err := NewParser(Minute | Hour | Dom | Month | Dow).Parse("0 * * * *")
 	if err != nil {
 		panic(err)
 	}
 	return s.(*SpecSchedule)
 }()
 
-// zoneChange is a month in which a zone's offset from UTC changes, and the
-// offset after it.
-type zoneChange struct {
-	month time.Month
-	off   time.Duration
+// runSpan is a stretch of hourly runs in which a zone keeps one offset from
+// another: its first and last run, and the first run after it, or the end of
+// the year.
+type runSpan struct {
+	first, last, next time.Time
+	off               time.Duration
 }
 
-// dayShift is a noon run and its zone's offset from another zone at it.
-type dayShift struct {
-	t   time.Time
-	off time.Duration
-}
-
-// noonShifts walks Next() over a noon run on each day of year in loc and
-// returns each run with loc's offset from ref at it.
-func noonShifts(loc, ref *time.Location, year int) []dayShift {
-	noon := *noonDaily
-	noon.Location = loc
-	var days []dayShift
-	for t := noon.Next(yearStart(year, loc)); t.Year() == year; t = noon.Next(t) {
-		days = append(days, dayShift{t, offsetOf(t) - offsetOf(t.In(ref))})
-	}
-	return days
-}
-
-// shiftChanges returns the offset of the first day and the month and offset
-// of each change after it.
-// NOTE: a change after noon shows on the next day's run, so a change late on
-// a month's last day reads as the next month's; zones change at night.
-func shiftChanges(days []dayShift) (time.Duration, []zoneChange) {
-	if len(days) == 0 {
-		return 0, nil
-	}
-	base := days[0].off
-	prev := base
-	var changes []zoneChange
-	for _, d := range days {
-		if d.off != prev {
-			changes = append(changes, zoneChange{d.t.Month(), d.off})
-			prev = d.off
+// hourSpans walks Next() over an hourly run in loc through year and groups
+// the runs by loc's offset from ref at them.
+// NOTE: a change that is not on the hour shows at the next run, so a window
+// that starts or ends at 11:30 pm reads as a day later; zones change on the
+// hour.
+func hourSpans(loc, ref *time.Location, year int) []runSpan {
+	h := *hourly
+	h.Location = loc
+	var spans []runSpan
+	for t := h.Next(yearStart(year, loc)); t.Year() == year; t = h.Next(t) {
+		off := offsetOf(t) - offsetOf(t.In(ref))
+		n := len(spans)
+		if n > 0 && spans[n-1].off == off {
+			spans[n-1].last = t
+			continue
 		}
+		if n > 0 {
+			spans[n-1].next = t
+		}
+		spans = append(spans, runSpan{first: t, last: t, off: off})
 	}
-	return base, changes
+	if n := len(spans); n > 0 {
+		spans[n-1].next = time.Date(year+1, time.January, 1, 0, 0, 0, 0, loc)
+	}
+	return spans
 }
 
 // hashReachSchedule returns s with each field that has H items running at
@@ -1009,6 +998,7 @@ func TestZoneMissesSchedulerAndWindows(t *testing.T) {
 	berlin, py := loadLocation(t, "Europe/Berlin"), loadLocation(t, "Asia/Pyongyang")
 	utc, ny := loadLocation(t, "UTC"), loadLocation(t, "America/New_York")
 	la, sydney := loadLocation(t, "America/Los_Angeles"), loadLocation(t, "Australia/Sydney")
+	tonga, fakaofo := loadLocation(t, "Pacific/Tongatapu"), loadLocation(t, "Pacific/Fakaofo")
 	const berlinUTC = " Berlin time, 1 hour ahead of UTC, 2 hours from March to October"
 	const berlinNY = "Berlin is 5 hours ahead of New York from March 14 to 28 and from October 31 to November 7, between the two zones' clock changes"
 	const sydneyNY = "Sydney is 16 hours ahead of New York from January 1 to March 14 and from November 7 to December 31; Sydney is 15 hours ahead of New York from March 14 to April 4 and from October 3 to November 7"
@@ -1030,6 +1020,11 @@ func TestZoneMissesSchedulerAndWindows(t *testing.T) {
 		{"an unnamed scheduler zone", utc, time.FixedZone("", -8*3600), 0, " UTC, 8 hours ahead of the scheduler's time", "", ""},
 		{"one change, named in the note", py, nil, 2018, " Pyongyang time, 8 hours 30 minutes ahead of UTC", "Pyongyang is 9 hours ahead of UTC from May 5 to December 31", ""},
 		{"one change, no note", py, nil, 2018, " Pyongyang time, 8 hours 30 minutes ahead of UTC", "", "8 hours 30 minutes ahead of UTC"},
+		{"a window a day early", berlin, ny, 0, berlinUTC + ", and 6 hours ahead of New York time", strings.Replace(berlinNY, "March 14 to 28", "March 13 to 28", 1), "6 hours ahead of New York time"},
+		{"a window a day late at its end", berlin, ny, 0, berlinUTC + ", and 6 hours ahead of New York time", strings.Replace(berlinNY, "March 14 to 28", "March 14 to 29", 1), "6 hours ahead of New York time"},
+		{"a change after noon", tonga, berlin, 0, " Tongatapu time, 13 hours ahead of UTC, and 12 hours ahead of Berlin time, 11 hours from March to October", "", ""},
+		{"a window within one date", fakaofo, nil, 2011, " Fakaofo time, 11 hours behind UTC", "Fakaofo is 13 hours ahead of UTC on December 31", ""},
+		{"a window within one date, named a day late", fakaofo, nil, 2011, " Fakaofo time, 11 hours behind UTC", "Fakaofo is 13 hours ahead of UTC from December 31 to 31 and on December 30", "11 hours behind UTC"},
 	} {
 		setDescribeYear(tt.year)
 		_, bad := zoneMisses(tt.loc, tt.sched, "at 9 am every day"+tt.clause, tt.note)

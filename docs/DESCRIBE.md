@@ -250,14 +250,12 @@ description names must be one that some key runs at, a day of the month an `H`
 item can pick needs no run in a month that lacks it, and "never runs" must have
 no run for any key, the picks moving together (G11). For a spec with a written
 zone, the zone's name must be the one the description gives, and each shift it
-gives, from UTC and from the scheduler's zone, is read against a noon run in
-that zone on each day of the year the description is made in. A shift with a
-second value and months must be the offset on January 1, the value it changes
-to, and the months of the two changes. Any other shift must be the offset on
-each day outside the windows the note names, and each window's value inside
-it. One day off at a time passes: a window under a day, which the note does
-not name, holds at most one noon, and a window ends on the day of its change.
-Each golden is described in 2027, or in the year it names for a zone whose
+gives, from UTC and from the scheduler's zone, is read against an hourly run in
+that zone through the year the description is made in. A shift with a second
+value and months must be the offset at the start of the year, the value it
+changes to, and the months of the two changes. Any other shift is the stated
+value, and the windows the note names must be the stretches of a day or more in
+which the offset is another, with their dates of first and last run. Each golden is described in 2027, or in the year it names for a zone whose
 rules changed then. The goldens given field by
 field (G10) name no values to check, and the four `@every` goldens under 1s
 are not checked: the parser rejects them. Years with the same calendar,
