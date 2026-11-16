@@ -36,27 +36,33 @@ func TestUpsertAppliesOptionsOnUpdate(t *testing.T) {
 			); err != nil {
 				t.Fatalf("update: %v", err)
 			}
-
-			e := c.EntryByName("report")
-			if !slices.Equal(e.Tags, []string{"b"}) {
-				t.Errorf("Tags = %v, want [b]", e.Tags)
-			}
-			if !e.Prev.Equal(prev) {
-				t.Errorf("Prev = %v, want %v", e.Prev, prev)
-			}
-			if e.MissedPolicy != MissedRunOnce {
-				t.Errorf("MissedPolicy = %v, want MissedRunOnce", e.MissedPolicy)
-			}
-			if e.MissedGracePeriod != time.Hour {
-				t.Errorf("MissedGracePeriod = %v, want 1h", e.MissedGracePeriod)
-			}
-			if e.Priority != 7 {
-				t.Errorf("Priority = %d, want 7", e.Priority)
-			}
-			if !c.entryIndex[e.ID].runOnce {
-				t.Error("runOnce is not set after the update")
-			}
+			checkUpdatedOptions(t, c, "report", prev)
 		})
+	}
+}
+
+// checkUpdatedOptions checks the fields that TestUpsertAppliesOptionsOnUpdate
+// sets in its update call.
+func checkUpdatedOptions(t *testing.T, c *Cron, name string, prev time.Time) {
+	t.Helper()
+	e := c.EntryByName(name)
+	if !slices.Equal(e.Tags, []string{"b"}) {
+		t.Errorf("Tags = %v, want [b]", e.Tags)
+	}
+	if !e.Prev.Equal(prev) {
+		t.Errorf("Prev = %v, want %v", e.Prev, prev)
+	}
+	if e.MissedPolicy != MissedRunOnce {
+		t.Errorf("MissedPolicy = %v, want MissedRunOnce", e.MissedPolicy)
+	}
+	if e.MissedGracePeriod != time.Hour {
+		t.Errorf("MissedGracePeriod = %v, want 1h", e.MissedGracePeriod)
+	}
+	if e.Priority != 7 {
+		t.Errorf("Priority = %d, want 7", e.Priority)
+	}
+	if !c.entryIndex[e.ID].runOnce {
+		t.Error("runOnce is not set after the update")
 	}
 }
 
