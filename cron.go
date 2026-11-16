@@ -276,8 +276,10 @@ type nameLookupRequest struct {
 // updateScheduleRequest is used to update an entry's schedule (required) and optionally its job.
 type updateScheduleRequest struct {
 	id       EntryID
-	schedule Schedule // new schedule for the entry (must be provided)
-	job      Job      // nil means keep existing job
+	schedule Schedule    // new schedule for the entry (must be provided)
+	job      Job         // nil means keep existing job
+	opts     []JobOption // job options to apply to the entry (upsert update path)
+	resume   bool        // un-pause the entry in the same step (DrainAndUpsertJob)
 }
 
 // scheduleJobRequest is used to schedule a new job.
@@ -781,8 +783,7 @@ func WithPaused() JobOption {
 // chain wrappers such as Jitter or SkipIfStillRunning decouple it further.
 //
 // Priority is applied at add time. UpdateEntry and UpdateSchedule preserve it;
-// UpsertJob's update path ignores JobOptions, which is the existing behavior
-// for every option.
+// UpsertJob and DrainAndUpsertJob apply it on an update too, like every option.
 //
 // Example:
 //
@@ -1886,6 +1887,21 @@ func (c *Cron) updateSchedule(req *updateScheduleRequest) error {
 		entry.Job = req.job
 		entry.WrappedJob = c.chain.Then(req.job)
 	}
+	// Resume before the options run, so an option such as WithPaused decides
+	// the final paused state.
+	if req.resume {
+		entry.Paused = false
+	}
+	if len(req.opts) > 0 {
+		// The name keys the name index, so an option cannot change it here.
+		name := entry.Name
+		for _, opt := range req.opts {
+			if opt != nil {
+				opt(entry)
+			}
+		}
+		entry.Name = name
+	}
 	if c.running {
 		c.scheduleEntryNext(entry, c.now())
 		c.entries.Update(entry)
@@ -1995,12 +2011,17 @@ var ErrNilJob = errors.New("cron: job must not be nil; use UpdateSchedule to upd
 // Returns ErrEntryNotFound if no entry with the given id exists.
 // Returns ErrNilJob if job is nil.
 func (c *Cron) UpdateEntry(id EntryID, schedule Schedule, job Job) error {
-	if job == nil {
+	return c.updateEntry(updateScheduleRequest{id: id, schedule: schedule, job: job})
+}
+
+// updateEntry implements UpdateEntry. The upsert methods call it with the job
+// options to apply and, for DrainAndUpsertJob, the resume flag.
+func (c *Cron) updateEntry(request updateScheduleRequest) error {
+	if request.job == nil {
 		return ErrNilJob
 	}
 	c.runningMu.Lock()
 	defer c.runningMu.Unlock()
-	request := updateScheduleRequest{id: id, schedule: schedule, job: job}
 	if c.running {
 		req := makeReq[updateScheduleRequest, error](request)
 		c.update <- req
@@ -2248,6 +2269,14 @@ func probeOption(opt JobOption, e *Entry) {
 // UpdateEntry. If no entry with that name exists, a new one is created via
 // AddJob. The name is determined from the opts; a WithName option is required.
 //
+// On an update, the options passed are applied to the existing entry in the
+// same step, as on a create. A field whose option is not passed keeps its
+// value: an update with only WithName leaves the tags, priority, Prev and
+// paused state as they are. An option takes effect where the scheduler reads
+// it: WithRunImmediately runs the job once more as soon as the scheduler is
+// running, WithPaused pauses the entry, and WithMissedPolicy and WithPrev
+// matter for the catch-up when the scheduler starts.
+//
 // This eliminates the common "try update, fallback to add" boilerplate pattern:
 //
 //	// Before (manual upsert):
@@ -2283,7 +2312,7 @@ func (c *Cron) upsertScheduled(name string, schedule Schedule, cmd Job, opts []J
 	// Try update first (entry exists)
 	e := c.EntryByName(name)
 	if e.Valid() {
-		err := c.UpdateEntry(e.ID, schedule, cmd)
+		err := c.updateEntry(updateScheduleRequest{id: e.ID, schedule: schedule, job: cmd, opts: opts})
 		if !errors.Is(err, ErrEntryNotFound) {
 			return e.ID, err
 		}
@@ -2310,6 +2339,10 @@ func (c *Cron) upsertScheduled(name string, schedule Schedule, cmd Job, opts []J
 //
 // If no entry with the given name exists, the job is created via ScheduleJob;
 // with no stale schedule there is no window to close.
+//
+// On an update, the options passed are applied as described for UpsertJob.
+// The entry stays paused afterwards if it was paused before the call or if
+// the options include WithPaused.
 //
 // The call blocks for as long as the in-flight invocation runs. It does not
 // hold any cron lock while draining, so it never blocks the run loop or other
@@ -2368,19 +2401,16 @@ func (c *Cron) DrainAndUpsertJob(spec string, cmd Job, opts ...JobOption) (Entry
 	// even if the name is concurrently reused by a different entry.
 	c.WaitForJob(id)
 
-	// (3) Replace schedule and job while still paused — UpdateEntry leaves
-	// Paused untouched, so no fire can occur during the swap. With a non-nil
-	// cmd its only failure mode is ErrEntryNotFound (removed during the drain);
-	// create instead, matching the pause path.
-	if c.UpdateEntry(id, schedule, cmd) != nil {
+	// (3) Replace schedule and job, restore the prior paused state and apply
+	// the options in one run-loop step, so no fire can occur under the stale
+	// schedule. The entry is resumed only if the caller had not already paused
+	// it; the options run after the resume, so WithPaused keeps it paused.
+	// Resuming in the same step keeps a WithRunImmediately run: a separate
+	// resume would let the run loop skip that run while the entry is still
+	// paused. With a non-nil cmd the only failure mode is ErrEntryNotFound
+	// (removed during the drain); create instead, matching the pause path.
+	if c.updateEntry(updateScheduleRequest{id: id, schedule: schedule, job: cmd, opts: opts, resume: !wasPaused}) != nil {
 		return c.ScheduleJob(schedule, cmd, opts...)
-	}
-
-	// (4) Restore prior paused state: resume only if the caller had not already
-	// paused the entry themselves. ResumeEntry only fails with ErrEntryNotFound
-	// (removed after the swap), in which case there is nothing to resume.
-	if !wasPaused {
-		_ = c.ResumeEntry(id)
 	}
 	return id, nil
 }
