@@ -5,6 +5,7 @@ package cron
 
 import (
 	"errors"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -467,5 +468,37 @@ func TestParserAnalyzeSpec(t *testing.T) {
 	}
 	if got := standardParser.AnalyzeSpec("not a spec"); got.Valid || got.Error == nil {
 		t.Errorf("bad spec: %+v", got)
+	}
+}
+
+// TestSchedShiftUnnamedWindows checks the windows against a scheduler zone
+// with no name of its own that changes in the year, as time.Local can: New
+// York's rules under the name "Local".
+func TestSchedShiftUnnamedWindows(t *testing.T) {
+	pinDescribeYear(t)
+	data, err := os.ReadFile("/usr/share/zoneinfo/America/New_York")
+	if err != nil {
+		t.Skipf("no zoneinfo file: %v", err)
+	}
+	local, err := time.LoadLocationFromTZData("Local", data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const spec = "CRON_TZ=Europe/Berlin 0 0 * * *"
+	opt := WithSchedulerLocation(local)
+	for _, tt := range []struct {
+		name string
+		get  func(string, ...DescribeOption) (string, error)
+		want string
+	}{
+		{"DescribeSpec", DescribeSpec, "at midnight every day Berlin time, 1 hour ahead of UTC, 2 hours from March to October, and 6 hours ahead of the scheduler's time"},
+		{"DescribeSpecNote", DescribeSpecNote, "Berlin is 5 hours ahead of the scheduler's time from March 14 to 28 and from October 31 to November 7, between the two zones' clock changes"},
+	} {
+		if got, err := tt.get(spec, opt); err != nil || got != tt.want {
+			t.Errorf("%s(%q) = %q, %v; want %q", tt.name, spec, got, err, tt.want)
+		}
+	}
+	if !checkSpecNamesRuns(t, standardParser, spec, opt) {
+		t.Errorf("%q: not checked", spec)
 	}
 }
