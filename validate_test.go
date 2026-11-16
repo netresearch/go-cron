@@ -932,6 +932,19 @@ func TestAnalyzeSpec_ParseFields(t *testing.T) {
 			unexpectedKeys: []string{"day_of_week", "year"},
 		},
 		{
+			name: "5-field with optional seconds left out",
+			p:    NewParser(SecondOptional | Minute | Hour | Dom | Month | Dow),
+			spec: "0 9 15 6 1",
+			expectedFields: map[string]string{
+				"minute":       "0",
+				"hour":         "9",
+				"day_of_month": "15",
+				"month":        "6",
+				"day_of_week":  "1",
+			},
+			unexpectedKeys: []string{"second", "year"},
+		},
+		{
 			name: "3-field day, month and optional day of week",
 			p:    NewParser(Dom | Month | DowOptional),
 			spec: "15 6 1",
@@ -948,6 +961,17 @@ func TestAnalyzeSpec_ParseFields(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			checkParseFields(t, tc.p, tc.spec, tc.expectedFields, tc.unexpectedKeys)
 		})
+	}
+}
+
+// TestAnalyzeSpec_ParseFieldsWrongCount checks that parseFields names no
+// field when spec's field count does not fit the parser. AnalyzeSpec calls
+// it only for a spec that parses, so this test calls it directly.
+func TestAnalyzeSpec_ParseFieldsWrongCount(t *testing.T) {
+	r := &SpecAnalysis{Fields: make(map[string]string)}
+	r.parseFields("0 9 *", standardParser)
+	if len(r.Fields) != 0 {
+		t.Errorf("parseFields(%q) = %v, want no fields", "0 9 *", r.Fields)
 	}
 }
 
