@@ -469,7 +469,7 @@ znote: zsent (";" zsent)* ["," "between" "the" "two" "zones'" "clock" "changes"]
 zsent: zonename "is" zshift list{window}                                    // windowNote, G8
 zshift: offset ("behind" | "ahead" "of") zobject | "the" "same" "as" zobject
 zobject: zonename | "the" "scheduler's" "time"
-window: "from" MONTHNAME INT "to" [MONTHNAME] INT                          // windowNote: the dates of its first and last instant
+window: "from" MONTHNAME INT "to" [MONTHNAME] INT | "on" MONTHNAME INT     // windowNote: the dates of its first and last instant
 
 nclause: ntime | nday | nmonth
 

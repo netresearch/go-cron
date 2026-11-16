@@ -313,6 +313,22 @@ func TestWindowNote(t *testing.T) {
 	}
 }
 
+func TestWindowWords(t *testing.T) {
+	at := func(m time.Month, d, hour int) time.Time { return time.Date(2027, m, d, hour, 0, 0, 0, time.UTC) }
+	for _, tt := range []struct {
+		from, last time.Time
+		want       string
+	}{
+		{at(3, 14, 2), at(3, 28, 1), "from March 14 to 28"},
+		{at(10, 31, 1), at(11, 7, 1), "from October 31 to November 7"},
+		{at(9, 30, 0), at(9, 30, 23), "on September 30"},
+	} {
+		if got := windowWords(tt.from, tt.last); got != tt.want {
+			t.Errorf("windowWords(%v, %v) = %q, want %q", tt.from, tt.last, got, tt.want)
+		}
+	}
+}
+
 func TestBetweenChanges(t *testing.T) {
 	day := func(d int) time.Time { return time.Date(2027, 1, d, 0, 0, 0, 0, time.UTC) }
 	shifts := func(days ...int) zoneYear {

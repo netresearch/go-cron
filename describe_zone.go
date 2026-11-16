@@ -169,6 +169,16 @@ func dateWords(t time.Time, sameMonth bool) string {
 	return t.Month().String() + " " + strconv.Itoa(t.Day())
 }
 
+// windowWords names a window by the dates of its first and last instant:
+// "from March 14 to 28", "from October 31 to November 7", or "on September
+// 30" for a window within one date.
+func windowWords(from, last time.Time) string {
+	if from.Month() == last.Month() && from.Day() == last.Day() {
+		return "on " + dateWords(from, false)
+	}
+	return "from " + dateWords(from, false) + " to " + dateWords(last, from.Month() == last.Month())
+}
+
 // windowNote names the windows in which subject's zone is off the steady
 // shift the description states, by the dates, in loc, of each window's
 // first and last instant: "Berlin is 5 hours ahead of New York from March 14
@@ -185,8 +195,7 @@ func windowNote(subject, object string, spans []zoneSpan, steady time.Duration, 
 		if windows[s.off] == nil {
 			order = append(order, s.off)
 		}
-		from, last := s.from.In(loc), s.to.Add(-1).In(loc)
-		windows[s.off] = append(windows[s.off], "from "+dateWords(from, false)+" to "+dateWords(last, from.Month() == last.Month()))
+		windows[s.off] = append(windows[s.off], windowWords(s.from.In(loc), s.to.Add(-1).In(loc)))
 	}
 	if len(order) == 0 {
 		return ""
