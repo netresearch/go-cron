@@ -675,18 +675,26 @@ var hourly = func() *SpecSchedule {
 }()
 
 // runSpan is a stretch of hourly runs in which a zone keeps one offset from
-// another: its first and last run, and the first run after it, or the end of
-// the year.
+// another: its first run, at the change by the minute, its last, and the
+// first run after it, or the end of the year.
 type runSpan struct {
 	first, last, next time.Time
 	off               time.Duration
 }
 
+// everyMinute is "* * * * *" as the parser sets it.
+var everyMinute = func() *SpecSchedule {
+	s, err := NewParser(Minute | Hour | Dom | Month | Dow).Parse("* * * * *")
+	if err != nil {
+		panic(err)
+	}
+	return s.(*SpecSchedule)
+}()
+
 // hourSpans walks Next() over an hourly run in loc through year and groups
-// the runs by loc's offset from ref at them.
-// NOTE: a change that is not on the hour shows at the next run, so a window
-// that starts or ends at 11:30 pm reads as a day later; zones change on the
-// hour.
+// the runs by loc's offset from ref at them. A span starts at the change
+// itself, found by the minute between two hourly runs (changeAt): ref's
+// change can fall at 11:30 pm in loc, as Almaty's of 2024 does in Kolkata.
 func hourSpans(loc, ref *time.Location, year int) []runSpan {
 	h := *hourly
 	h.Location = loc
@@ -699,6 +707,7 @@ func hourSpans(loc, ref *time.Location, year int) []runSpan {
 			continue
 		}
 		if n > 0 {
+			t = changeAt(loc, ref, spans[n-1].last, t, off)
 			spans[n-1].next = t
 		}
 		spans = append(spans, runSpan{first: t, last: t, off: off})
@@ -707,6 +716,19 @@ func hourSpans(loc, ref *time.Location, year int) []runSpan {
 		spans[n-1].next = time.Date(year+1, time.January, 1, 0, 0, 0, 0, loc)
 	}
 	return spans
+}
+
+// changeAt returns the first run of every minute in loc after from, and
+// before to, at which loc is off from ref, or to.
+func changeAt(loc, ref *time.Location, from, to time.Time, off time.Duration) time.Time {
+	m := *everyMinute
+	m.Location = loc
+	for t := m.Next(from); t.Before(to); t = m.Next(t) {
+		if offsetOf(t)-offsetOf(t.In(ref)) == off {
+			return t
+		}
+	}
+	return to
 }
 
 // hashReachSchedule returns s with each field that has H items running at
@@ -999,6 +1021,8 @@ func TestZoneMissesSchedulerAndWindows(t *testing.T) {
 	utc, ny := loadLocation(t, "UTC"), loadLocation(t, "America/New_York")
 	la, sydney := loadLocation(t, "America/Los_Angeles"), loadLocation(t, "Australia/Sydney")
 	tonga, fakaofo := loadLocation(t, "Pacific/Tongatapu"), loadLocation(t, "Pacific/Fakaofo")
+	kolkata, almaty := loadLocation(t, "Asia/Kolkata"), loadLocation(t, "Asia/Almaty")
+	const kolkataAlmaty = " Kolkata time, 5 hours 30 minutes ahead of UTC, and 30 minutes behind Almaty time"
 	const berlinUTC = " Berlin time, 1 hour ahead of UTC, 2 hours from March to October"
 	const berlinNY = "Berlin is 5 hours ahead of New York from March 14 to 28 and from October 31 to November 7, between the two zones' clock changes"
 	const sydneyNY = "Sydney is 16 hours ahead of New York from January 1 to March 14 and from November 7 to December 31; Sydney is 15 hours ahead of New York from March 14 to April 4 and from October 3 to November 7"
@@ -1025,6 +1049,8 @@ func TestZoneMissesSchedulerAndWindows(t *testing.T) {
 		{"a change after noon", tonga, berlin, 0, " Tongatapu time, 13 hours ahead of UTC, and 12 hours ahead of Berlin time, 11 hours from March to October", "", ""},
 		{"a window within one date", fakaofo, nil, 2011, " Fakaofo time, 11 hours behind UTC", "Fakaofo is 13 hours ahead of UTC on December 31", ""},
 		{"a window within one date, named a day late", fakaofo, nil, 2011, " Fakaofo time, 11 hours behind UTC", "Fakaofo is 13 hours ahead of UTC from December 31 to 31 and on December 30", "11 hours behind UTC"},
+		{"a change at 11:30 pm", kolkata, almaty, 2024, kolkataAlmaty, "Kolkata is 30 minutes ahead of Almaty from February 29 to December 31", ""},
+		{"a change at 11:30 pm, named a day late", kolkata, almaty, 2024, kolkataAlmaty, "Kolkata is 30 minutes ahead of Almaty from March 1 to December 31", "30 minutes behind Almaty time"},
 	} {
 		setDescribeYear(tt.year)
 		_, bad := zoneMisses(tt.loc, tt.sched, "at 9 am every day"+tt.clause, tt.note)

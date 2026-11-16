@@ -688,6 +688,8 @@ var describeGoldens = []struct {
 	{spec: "CRON_TZ=Europe/Istanbul 0 9 * * *", opts: []DescribeOption{schedNY}, year: 2016, want: "at 9 am every day Istanbul time, 2 hours ahead of UTC, and 7 hours ahead of New York time"},
 	{spec: "CRON_TZ=Asia/Pyongyang 0 9 * * *", opts: []DescribeOption{schedKol}, year: 2018, want: "at 9 am every day Pyongyang time, 8 hours 30 minutes ahead of UTC, and 3 hours ahead of Kolkata time"},
 	{spec: "CRON_TZ=Pacific/Fakaofo 0 9 * * *", year: 2011, want: "at 9 am every day Fakaofo time, 11 hours behind UTC"},
+	// Almaty's change of 2024 is at 11:30 pm on February 29 in Kolkata
+	{spec: "CRON_TZ=Asia/Kolkata 45 23 * * *", opts: []DescribeOption{WithSchedulerLocation(goldenZone("Asia/Almaty"))}, year: 2024, want: "at 11:45 pm every day Kolkata time, 5 hours 30 minutes ahead of UTC, and 30 minutes behind Almaty time"},
 	// A scheduler on UTC under another name adds no shift (zoneClause)
 	{spec: "CRON_TZ=Europe/Berlin 0 0 * * *", opts: []DescribeOption{WithSchedulerLocation(goldenZone("Etc/UTC"))}, want: "at midnight every day Berlin time, 1 hour ahead of UTC, 2 hours from March to October"},
 	{spec: "CRON_TZ=Europe/Berlin 0 0 * * *", opts: []DescribeOption{WithSchedulerLocation(time.FixedZone("Local", 0))}, want: "at midnight every day Berlin time, 1 hour ahead of UTC, 2 hours from March to October"},
@@ -838,6 +840,8 @@ var describeNoteGoldens = []struct {
 	{spec: "CRON_TZ=Europe/Istanbul 0 9 * * *", opts: []DescribeOption{schedNY}, year: 2016, want: "Istanbul is 3 hours ahead of UTC from March 27 to December 31; Istanbul is 6 hours ahead of New York from March 13 to 27; Istanbul is 8 hours ahead of New York from November 6 to December 31"},
 	{spec: "CRON_TZ=Asia/Pyongyang 0 9 * * *", opts: []DescribeOption{schedKol}, year: 2018, want: "Pyongyang is 9 hours ahead of UTC from May 5 to December 31; Pyongyang is 3 hours 30 minutes ahead of Kolkata from May 5 to December 31"},
 	{spec: "CRON_TZ=Pacific/Fakaofo 0 9 * * *", year: 2011, want: "Fakaofo is 13 hours ahead of UTC on December 31"}, // a window within one date (windowWords)
+	// Almaty's change of 2024 is at 11:30 pm on February 29 in Kolkata
+	{spec: "CRON_TZ=Asia/Kolkata 45 23 * * *", opts: []DescribeOption{WithSchedulerLocation(goldenZone("Asia/Almaty"))}, year: 2024, want: "Kolkata is 30 minutes ahead of Almaty from February 29 to December 31"},
 	// Windows that run from January 1 or to December 31 do not lie between the
 	// two zones' clock changes (betweenChanges)
 	{spec: "CRON_TZ=Australia/Sydney 0 9 * * *", opts: []DescribeOption{schedNY}, want: "Sydney is 16 hours ahead of New York from January 1 to March 14 and from November 7 to December 31; Sydney is 15 hours ahead of New York from March 14 to April 4 and from October 3 to November 7"},

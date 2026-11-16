@@ -420,6 +420,8 @@ func TestZoneOffsetsBehindGoldens(t *testing.T) {
 		{"Asia/Pyongyang", 2018}:   {{1, 1, 8*h + 30*m}, {5, 4, 8*h + 30*m}, {5, 5, 9 * h}, {12, 31, 9 * h}},
 		{"Asia/Kolkata", 2018}:     {{1, 1, 5*h + 30*m}, {7, 1, 5*h + 30*m}},
 		{"Pacific/Fakaofo", 2011}:  {{1, 1, -11 * h}, {12, 29, -11 * h}, {12, 31, 13 * h}},
+		{"Asia/Almaty", 2024}:      {{1, 1, 6 * h}, {2, 29, 6 * h}, {3, 1, 5 * h}, {12, 31, 5 * h}},
+		{"Asia/Kolkata", 2024}:     {{1, 1, 5*h + 30*m}, {7, 1, 5*h + 30*m}},
 		// 2027
 		{"Pacific/Tongatapu", 2027}:              {{1, 1, 13 * h}, {7, 1, 13 * h}},
 		{"America/New_York", 2027}:               {{3, 13, -5 * h}, {3, 14, -4 * h}, {11, 6, -4 * h}, {11, 7, -5 * h}},

@@ -251,7 +251,8 @@ item can pick needs no run in a month that lacks it, and "never runs" must have
 no run for any key, the picks moving together (G11). For a spec with a written
 zone, the zone's name must be the one the description gives, and each shift it
 gives, from UTC and from the scheduler's zone, is read against an hourly run in
-that zone through the year the description is made in. A shift with a second
+that zone through the year the description is made in, a change between two
+runs placed by the minute. A shift with a second
 value and months must be the offset at the start of the year, the value it
 changes to, and the months of the two changes. Any other shift is the stated
 value, and the windows the note names must be the stretches of a day or more in
