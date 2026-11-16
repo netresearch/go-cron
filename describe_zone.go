@@ -238,7 +238,8 @@ func (z zoneYear) changesAt(t time.Time) bool {
 // or to December 31, or one between two changes of one zone, is not.
 func betweenChanges(spans []zoneSpan, steady time.Duration, spec, sched zoneYear) bool {
 	for _, s := range spans {
-		if s.named(steady) && !(spec.changesAt(s.from) && sched.changesAt(s.to) || sched.changesAt(s.from) && spec.changesAt(s.to)) {
+		fromTo := func(a, b zoneYear) bool { return a.changesAt(s.from) && b.changesAt(s.to) }
+		if s.named(steady) && !fromTo(spec, sched) && !fromTo(sched, spec) {
 			return false
 		}
 	}
