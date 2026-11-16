@@ -710,7 +710,10 @@ func firstOfEachKindList(sch Schedule) []int {
 func checkGoldensNameRuns(t *testing.T) int {
 	t.Helper()
 	checked := 0
+	old := describeNow
+	defer func() { describeNow = old }()
 	for _, tt := range describeGoldens {
+		setDescribeYear(tt.year)
 		p, err := tryParserForOptions(newDescribeConfig(tt.opts).parse)
 		if err != nil {
 			t.Fatalf("parser for %q: %v", tt.spec, err)

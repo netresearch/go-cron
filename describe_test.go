@@ -50,6 +50,7 @@ var describeGoldens = []struct {
 	parser  *Parser
 	want    string
 	literal bool
+	year    int // the year the zone clause is for; 0 is 2027 (setDescribeYear)
 }{
 	// Times within the hour
 	{spec: "0,15,30,45 * * * *", want: "at minutes 0, 15, 30, and 45 past the hour"},
@@ -678,6 +679,12 @@ var describeGoldens = []struct {
 	{spec: "CRON_TZ=Europe/Berlin 0 0 * * *", opts: []DescribeOption{WithSchedulerLocation(goldenZone("US/Eastern"))}, want: "at midnight every day Berlin time, 1 hour ahead of UTC, 2 hours from March to October, and 6 hours ahead of US/Eastern time"},
 	{spec: "CRON_TZ=Australia/Sydney 0 9 * * *", opts: []DescribeOption{schedNY}, want: "at 9 am every day Sydney time, 11 hours ahead of UTC, 10 hours from April to October, and 14 hours ahead of New York time"},
 	{spec: "CRON_TZ=Europe/Berlin 0 0 H/10 * 1", opts: []DescribeOption{withHash, schedNY}, want: "minute 0, hour 0, day of month H/10, month *, day of week 1, Berlin time, 1 hour ahead of UTC, 2 hours from March to October, and 6 hours ahead of New York time", literal: true},
+	// A zone that changes once in the year gives its January shift; the note
+	// names the rest (utcShift, windowNote)
+	{spec: "CRON_TZ=Europe/Istanbul 0 9 * * *", year: 2016, want: "at 9 am every day Istanbul time, 2 hours ahead of UTC"},
+	{spec: "CRON_TZ=Asia/Pyongyang 0 9 * * *", year: 2018, want: "at 9 am every day Pyongyang time, 8 hours 30 minutes ahead of UTC"},
+	{spec: "CRON_TZ=Europe/Istanbul 0 9 * * *", opts: []DescribeOption{schedNY}, year: 2016, want: "at 9 am every day Istanbul time, 2 hours ahead of UTC, and 7 hours ahead of New York time"},
+	{spec: "CRON_TZ=Asia/Pyongyang 0 9 * * *", opts: []DescribeOption{schedKol}, year: 2018, want: "at 9 am every day Pyongyang time, 8 hours 30 minutes ahead of UTC, and 3 hours ahead of Kolkata time"},
 	// A scheduler on UTC under another name adds no shift (zoneClause)
 	{spec: "CRON_TZ=Europe/Berlin 0 0 * * *", opts: []DescribeOption{WithSchedulerLocation(goldenZone("Etc/UTC"))}, want: "at midnight every day Berlin time, 1 hour ahead of UTC, 2 hours from March to October"},
 	{spec: "CRON_TZ=Europe/Berlin 0 0 * * *", opts: []DescribeOption{WithSchedulerLocation(time.FixedZone("Local", 0))}, want: "at midnight every day Berlin time, 1 hour ahead of UTC, 2 hours from March to October"},
@@ -689,6 +696,7 @@ var describeNoteGoldens = []struct {
 	spec string
 	opts []DescribeOption
 	want string
+	year int // as in describeGoldens
 }{
 	{spec: "H/10 */7 * * * *", opts: []DescribeOption{WithParseOptions(Second | Minute | Hour | Dom | Month | Dow | Hash)}, want: "at seconds h, h+10, h+20, h+30, h+40, and h+50 within minutes 0, 7, 14, … 56 in every hour (every 7 minutes, starting over each hour), where h is a fixed second from 0 to 9"},
 	{spec: "H/10 */4 * * * *", opts: []DescribeOption{WithParseOptions(Second | Minute | Hour | Dom | Month | Dow | Hash)}, want: "at seconds h, h+10, h+20, h+30, h+40, and h+50 within minutes 0, 4, 8, … 56 in every hour (every 4 minutes), where h is a fixed second from 0 to 9"},
@@ -821,6 +829,10 @@ var describeNoteGoldens = []struct {
 	{spec: "CRON_TZ=Europe/Berlin H/15 9 * * *", opts: []DescribeOption{withHash, schedNY}, want: "at minutes h, h+15, h+30, and h+45 during the 9 am hour, where h is a fixed minute from 0 to 14; Berlin is 5 hours ahead of New York from March 14 to 28 and from October 31 to November 7, between the two zones' clock changes"},
 	{spec: "CRON_TZ=Europe/Berlin 0 0 * * *", want: ""},
 	{spec: "CRON_TZ=UTC 0 0 * * *", opts: []DescribeOption{schedLA}, want: ""},
+	{spec: "CRON_TZ=Europe/Istanbul 0 9 * * *", year: 2016, want: "Istanbul is 3 hours ahead of UTC from March 27 to December 31"},
+	{spec: "CRON_TZ=Asia/Pyongyang 0 9 * * *", year: 2018, want: "Pyongyang is 9 hours ahead of UTC from May 5 to December 31"},
+	{spec: "CRON_TZ=Europe/Istanbul 0 9 * * *", opts: []DescribeOption{schedNY}, year: 2016, want: "Istanbul is 3 hours ahead of UTC from March 27 to December 31; Istanbul is 6 hours ahead of New York from March 13 to 27; Istanbul is 8 hours ahead of New York from November 6 to December 31"},
+	{spec: "CRON_TZ=Asia/Pyongyang 0 9 * * *", opts: []DescribeOption{schedKol}, year: 2018, want: "Pyongyang is 9 hours ahead of UTC from May 5 to December 31; Pyongyang is 3 hours 30 minutes ahead of Kolkata from May 5 to December 31"},
 	// Windows that run from January 1 or to December 31 do not lie between the
 	// two zones' clock changes (betweenChanges)
 	{spec: "CRON_TZ=Australia/Sydney 0 9 * * *", opts: []DescribeOption{schedNY}, want: "Sydney is 16 hours ahead of New York from January 1 to March 14 and from November 7 to December 31; Sydney is 15 hours ahead of New York from March 14 to April 4 and from October 3 to November 7"},
@@ -857,6 +869,7 @@ func TestDescribeSpecNote(t *testing.T) {
 		if tt.want != "" && !g.MatchString(tt.want) { // N1: no note has no form
 			t.Errorf("%q: note %q is outside the note grammar", tt.spec, tt.want)
 		}
+		setDescribeYear(tt.year)
 		got, err := DescribeSpecNote(tt.spec, tt.opts...)
 		if err != nil {
 			t.Errorf("DescribeSpecNote(%q): unexpected error %v", tt.spec, err)
@@ -1316,17 +1329,29 @@ func TestNeverRunsPastTheWalk(t *testing.T) {
 }
 
 // pinDescribeYear makes 2027 the year the zone clauses are computed for
-// (describeNow).
+// (describeNow) until the test ends.
 func pinDescribeYear(t *testing.T) {
 	t.Helper()
 	old := describeNow
-	describeNow = func() time.Time { return time.Date(2027, 7, 1, 12, 0, 0, 0, time.UTC) }
+	setDescribeYear(0)
 	t.Cleanup(func() { describeNow = old })
+}
+
+// setDescribeYear makes year, or 2027 for 0, the year the zone clauses are
+// computed for. A zone that changes other than with the season does so in a
+// year its rules changed, and the goldens name one whose data every tzdata
+// release agrees on.
+func setDescribeYear(year int) {
+	if year == 0 {
+		year = 2027
+	}
+	describeNow = func() time.Time { return time.Date(year, 7, 1, 12, 0, 0, 0, time.UTC) }
 }
 
 func TestDescribeSpec(t *testing.T) {
 	pinDescribeYear(t)
 	for _, tt := range describeGoldens {
+		setDescribeYear(tt.year)
 		describe := DescribeSpec
 		if tt.parser != nil {
 			describe = tt.parser.DescribeSpec
