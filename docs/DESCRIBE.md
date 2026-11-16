@@ -60,12 +60,12 @@ func WithSchedulerLocation(loc *time.Location) DescribeOption
   change.
 - `DescribeSpecNote` spells out the values the hash key picks, which the
   description leaves as "a fixed …": "at minutes h, h+15, h+30, and h+45
-  past the hour, where h is a fixed minute from 0 to 14". It is "" unless
-  a field has a hashed step or a fixed day of the month (N1–N8). For a
-  written zone it also names the windows in which the zone is off the shift
-  the description states (windowNote): "Berlin is 5 hours ahead of New York
+  past the hour, where h is a fixed minute from 0 to 14". For a written
+  zone it also names the windows in which the zone is off the shift the
+  description states (windowNote): "Berlin is 5 hours ahead of New York
   from March 14 to 28 and from October 31 to November 7, between the two
-  zones' clock changes".
+  zones' clock changes". It is "" unless a field has a hashed step or a
+  fixed day of the month, or the zone has such a window (N1–N8).
 - **Coverage:** the second, minute and hour fields, and the day of month, day
   of week, month and year written as values, ranges, steps and lists; the
   `L` and `W` days of month (`DomL`, `DomW`) and the `#` days of week
