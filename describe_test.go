@@ -661,7 +661,11 @@ var describeGoldens = []struct {
 	{spec: "CRON_TZ=Europe/Berlin */7 * * * *", want: "at minutes 0, 7, 14, … 56 past the hour (every 7 minutes, starting over each hour) Berlin time, 1 hour ahead of UTC, 2 hours from March to October"},
 	{spec: "CRON_TZ=Europe/Berlin H(50-10) * * * *", opts: []DescribeOption{withHash}, want: "at a fixed minute past the hour, either between minutes 0 and 10 or between minutes 50 and 59 Berlin time, 1 hour ahead of UTC, 2 hours from March to October; the hash key fixes the minute"},
 	{spec: "CRON_TZ=Europe/Berlin 0 0 1/10 * *", want: "at midnight on the 1st, 11th, 21st, and 31st of the month Berlin time, 1 hour ahead of UTC, 2 hours from March to October; the 31st runs only in months that have one"},
-	{spec: "CRON_TZ=Europe/Berlin 0 0 H/10 * 1", opts: []DescribeOption{withHash}, want: "minute 0, hour 0, day of month H/10, month *, day of week 1 Berlin time, 1 hour ahead of UTC, 2 hours from March to October", literal: true},
+	{spec: "CRON_TZ=Europe/Berlin 0 0 H/10 * 1", opts: []DescribeOption{withHash}, want: "minute 0, hour 0, day of month H/10, month *, day of week 1, Berlin time, 1 hour ahead of UTC, 2 hours from March to October", literal: true},
+	// Field by field, the zone follows as one more item (zoneClause)
+	{spec: "CRON_TZ=Europe/Berlin H/15,H/20 * * * *", opts: []DescribeOption{withHash}, want: "minute H/15,H/20, hour *, day of month *, month *, day of week *, Berlin time, 1 hour ahead of UTC, 2 hours from March to October", literal: true},
+	{spec: "TZ=UTC 30 H(20-23),H(1-5) * * *", opts: []DescribeOption{withHash}, want: "minute 30, hour H(20-23),H(1-5), day of month *, month *, day of week *, UTC", literal: true},
+	{spec: "TZ=Local H/15,H/20 * * * *", opts: []DescribeOption{withHash}, want: "minute H/15,H/20, hour *, day of month *, month *, day of week *", literal: true},
 	// The shift from the scheduler's zone (schedShift, WithSchedulerLocation)
 	{spec: "CRON_TZ=UTC 0 0 * * *", opts: []DescribeOption{schedLA}, want: "at midnight every day UTC, 8 hours ahead of Los Angeles time, 7 hours from March to November"},
 	{spec: "CRON_TZ=Europe/Berlin 0 0 * * *", opts: []DescribeOption{schedNY}, want: "at midnight every day Berlin time, 1 hour ahead of UTC, 2 hours from March to October, and 6 hours ahead of New York time"},
@@ -672,6 +676,7 @@ var describeGoldens = []struct {
 	{spec: "CRON_TZ=Australia/Lord_Howe 0 0 * * *", opts: []DescribeOption{schedKol}, want: "at midnight every day Lord Howe time, 11 hours ahead of UTC, 10 hours 30 minutes from April to October, and 5 hours 30 minutes ahead of Kolkata time, 5 hours from April to October"},
 	{spec: "CRON_TZ=UTC 0 0 * * *", opts: []DescribeOption{schedLon}, want: "at midnight every day UTC, the same as London time, 1 hour behind from March to October"},
 	{spec: "CRON_TZ=Europe/Berlin 0 0 * * *", opts: []DescribeOption{WithSchedulerLocation(goldenZone("US/Eastern"))}, want: "at midnight every day Berlin time, 1 hour ahead of UTC, 2 hours from March to October, and 6 hours ahead of US/Eastern time"},
+	{spec: "CRON_TZ=Europe/Berlin 0 0 H/10 * 1", opts: []DescribeOption{withHash, schedNY}, want: "minute 0, hour 0, day of month H/10, month *, day of week 1, Berlin time, 1 hour ahead of UTC, 2 hours from March to October, and 6 hours ahead of New York time", literal: true},
 	// A scheduler on UTC under another name adds no shift (zoneClause)
 	{spec: "CRON_TZ=Europe/Berlin 0 0 * * *", opts: []DescribeOption{WithSchedulerLocation(goldenZone("Etc/UTC"))}, want: "at midnight every day Berlin time, 1 hour ahead of UTC, 2 hours from March to October"},
 	{spec: "CRON_TZ=Europe/Berlin 0 0 * * *", opts: []DescribeOption{WithSchedulerLocation(time.FixedZone("Local", 0))}, want: "at midnight every day Berlin time, 1 hour ahead of UTC, 2 hours from March to October"},
@@ -815,6 +820,7 @@ var describeNoteGoldens = []struct {
 	{spec: "CRON_TZ=Europe/Berlin H/15 9 * * *", opts: []DescribeOption{withHash, schedNY}, want: "at minutes h, h+15, h+30, and h+45 during the 9 am hour, where h is a fixed minute from 0 to 14; Berlin is 5 hours ahead of New York from March 14 to 28 and from October 31 to November 7, between the two zones' clock changes"},
 	{spec: "CRON_TZ=Europe/Berlin 0 0 * * *", want: ""},
 	{spec: "CRON_TZ=UTC 0 0 * * *", opts: []DescribeOption{schedLA}, want: ""},
+	{spec: "CRON_TZ=Europe/Berlin 0 0 H/10 * 1", opts: []DescribeOption{withHash, schedNY}, want: "on days h, h+10, h+20, and h+30 of every month, where h is a fixed day from 1 to 10; h+30 runs only when h is below 2; h+20 and h+30 run only in months that have them; Berlin is 5 hours ahead of New York from March 14 to 28 and from October 31 to November 7, between the two zones' clock changes"},
 }
 
 // TestDayNoteOrRunsShortMonths binds the note of a fixed day under DowOrDom
