@@ -398,8 +398,9 @@ func TestUTCShiftNote(t *testing.T) {
 }
 
 // TestZoneOffsetsBehindGoldens asserts, against Zone() directly, every
-// month, date and offset the zoned goldens name (G1). A host with other zone
-// data fails here, with the zone and date named.
+// month, date and offset the zoned goldens name (G1), in the year each is
+// described in. A host with other zone data fails here, with the zone and
+// date named.
 func TestZoneOffsetsBehindGoldens(t *testing.T) {
 	const h, m = time.Hour, time.Minute
 	type day struct {
@@ -407,21 +408,33 @@ func TestZoneOffsetsBehindGoldens(t *testing.T) {
 		day   int
 		want  time.Duration
 	}
-	for zone, days := range map[string][]day{
-		"America/New_York":               {{3, 13, -5 * h}, {3, 14, -4 * h}, {11, 6, -4 * h}, {11, 7, -5 * h}},
-		"America/Los_Angeles":            {{3, 13, -8 * h}, {3, 14, -7 * h}, {11, 7, -8 * h}},
-		"America/Detroit":                {{3, 14, -4 * h}, {11, 7, -5 * h}},
-		"Europe/Berlin":                  {{3, 27, h}, {3, 28, 2 * h}, {10, 30, 2 * h}, {10, 31, h}},
-		"Europe/London":                  {{3, 27, 0}, {3, 28, h}, {10, 31, 0}},
-		"Australia/Lord_Howe":            {{4, 3, 11 * h}, {4, 4, 10*h + 30*m}, {10, 2, 10*h + 30*m}, {10, 3, 11 * h}},
-		"Asia/Kolkata":                   {{1, 1, 5*h + 30*m}, {7, 1, 5*h + 30*m}},
-		"Australia/Sydney":               {{4, 3, 11 * h}, {4, 4, 10 * h}, {10, 2, 10 * h}, {10, 3, 11 * h}},
-		"America/Argentina/Buenos_Aires": {{1, 1, -3 * h}, {7, 1, -3 * h}},
+	type zoneYear struct {
+		zone string
+		year int
+	}
+	for zy, days := range map[zoneYear][]day{
+		// The goldens of other years (setDescribeYear)
+		{"Europe/Istanbul", 2016}:  {{3, 26, 2 * h}, {3, 27, 3 * h}, {11, 6, 3 * h}, {12, 31, 3 * h}},
+		{"America/New_York", 2016}: {{3, 12, -5 * h}, {3, 13, -4 * h}, {11, 5, -4 * h}, {11, 6, -5 * h}},
+		{"Asia/Pyongyang", 2018}:   {{1, 1, 8*h + 30*m}, {5, 4, 8*h + 30*m}, {5, 5, 9 * h}, {12, 31, 9 * h}},
+		{"Asia/Kolkata", 2018}:     {{1, 1, 5*h + 30*m}, {7, 1, 5*h + 30*m}},
+		{"Pacific/Fakaofo", 2011}:  {{1, 1, -11 * h}, {12, 29, -11 * h}, {12, 31, 13 * h}},
+		// 2027
+		{"Pacific/Tongatapu", 2027}:              {{1, 1, 13 * h}, {7, 1, 13 * h}},
+		{"America/New_York", 2027}:               {{3, 13, -5 * h}, {3, 14, -4 * h}, {11, 6, -4 * h}, {11, 7, -5 * h}},
+		{"America/Los_Angeles", 2027}:            {{3, 13, -8 * h}, {3, 14, -7 * h}, {11, 7, -8 * h}},
+		{"America/Detroit", 2027}:                {{3, 14, -4 * h}, {11, 7, -5 * h}},
+		{"Europe/Berlin", 2027}:                  {{3, 27, h}, {3, 28, 2 * h}, {10, 30, 2 * h}, {10, 31, h}},
+		{"Europe/London", 2027}:                  {{3, 27, 0}, {3, 28, h}, {10, 31, 0}},
+		{"Australia/Lord_Howe", 2027}:            {{4, 3, 11 * h}, {4, 4, 10*h + 30*m}, {10, 2, 10*h + 30*m}, {10, 3, 11 * h}},
+		{"Asia/Kolkata", 2027}:                   {{1, 1, 5*h + 30*m}, {7, 1, 5*h + 30*m}},
+		{"Australia/Sydney", 2027}:               {{4, 3, 11 * h}, {4, 4, 10 * h}, {10, 2, 10 * h}, {10, 3, 11 * h}},
+		{"America/Argentina/Buenos_Aires", 2027}: {{1, 1, -3 * h}, {7, 1, -3 * h}},
 	} {
 		for _, d := range days {
-			noon := time.Date(2027, d.month, d.day, 12, 0, 0, 0, loadLocation(t, zone))
+			noon := time.Date(zy.year, d.month, d.day, 12, 0, 0, 0, loadLocation(t, zy.zone))
 			if got := offsetOf(noon); got != d.want {
-				t.Errorf("%s at noon on %s %d, 2027: offset %v, want %v", zone, d.month, d.day, got, d.want)
+				t.Errorf("%s at noon on %s %d, %d: offset %v, want %v", zy.zone, d.month, d.day, zy.year, got, d.want)
 			}
 		}
 	}
