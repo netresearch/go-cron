@@ -1864,24 +1864,30 @@ func FuzzDescribeSpec(f *testing.F) {
 		NewParser(Second | Minute | Hour | Dom | Month | Dow | Descriptor),
 		FullParser(),
 	}
+	// No scheduler zone, and two that change with the season in opposite
+	// halves of the year, so a written zone gets windows (schedShift).
+	scheds := [][]DescribeOption{nil, {schedNY}, {WithSchedulerLocation(goldenZone("Australia/Sydney"))}}
 	f.Fuzz(func(t *testing.T, spec string) {
 		if wideRange(spec) {
 			t.Skip("range of more than 100 years")
 		}
 		for _, p := range parsers {
-			checkDescribed(t, p, spec, g, ng)
+			for _, opts := range scheds {
+				checkDescribed(t, p, spec, g, ng, opts...)
+			}
 		}
 	})
 }
 
-// checkDescribed checks what p says about spec, if p parses it: a nil error,
-// a description in the grammar or the literal form, and a note in its grammar.
-func checkDescribed(t *testing.T, p Parser, spec string, g, ng *regexp.Regexp) {
+// checkDescribed checks what p says about spec with opts, if p parses it: a
+// nil error, a description in the grammar or the literal form, and a note in
+// its grammar.
+func checkDescribed(t *testing.T, p Parser, spec string, g, ng *regexp.Regexp, opts ...DescribeOption) {
 	t.Helper()
 	if _, err := p.WithHashKey("fuzz").Parse(spec); err != nil {
 		return
 	}
-	got, err := p.DescribeSpec(spec)
+	got, err := p.DescribeSpec(spec, opts...)
 	if err != nil {
 		t.Fatalf("DescribeSpec(%q): unexpected error %v", spec, err)
 	}
@@ -1895,7 +1901,7 @@ func checkDescribed(t *testing.T, p Parser, spec string, g, ng *regexp.Regexp) {
 	if literalForm.MatchString(got) && !containsHashExpr(fields) {
 		t.Fatalf("DescribeSpec(%q) = %q: literal form without H", spec, got)
 	}
-	if note, _ := p.DescribeSpecNote(spec); note != "" && !ng.MatchString(note) {
+	if note, _ := p.DescribeSpecNote(spec, opts...); note != "" && !ng.MatchString(note) {
 		t.Fatalf("DescribeSpecNote(%q) = %q, outside the note grammar", spec, note)
 	}
 }
