@@ -84,9 +84,9 @@ scheduler, all verified in `cron.go`:
    `processDueEntries`, before the `go func()` that runs the job), so
    `WaitForJobByName` provably observes and joins it.
 
-`updateSchedule` does not touch `Paused`, so the entry stays paused across the
-swap; the resume in step 4 re-enables the **new** schedule, whose `Next` was
-computed at swap time.
+`updateSchedule` changes `Paused` only in the same step as the swap of schedule
+and job, so the entry stays paused until the swap is complete; the resume in
+step 4 re-enables the **new** schedule, whose `Next` was computed at swap time.
 
 ### Explicit non-guarantee
 
@@ -105,15 +105,16 @@ cannot cause an ABA.
 ### Positive
 - Closes the stale-fire window for the common graceful-reschedule use case with
   a single call.
-- No new run-loop machinery, no new struct fields, no lock held across the
-  blocking drain — low risk, easy to reason about.
+- No new run-loop request type and no lock held across the blocking drain — low
+  risk, easy to reason about. (Since issue #456 the existing update request
+  carries the job options and a resume flag.)
 - Mirrors `UpsertJob`'s contract exactly (same options, same errors), so it is a
   drop-in replacement for the two-step pattern.
 
 ### Negative
 - Composes three run-loop round trips (lookup, pause, swap with resume) plus
-  the drain, versus `UpsertJob`'s two (lookup, swap). The extra round trips are O(1) and dwarfed by
-  the drain wait; not a concern in practice.
+  the drain, versus `UpsertJob`'s two (lookup, swap). The extra round trip is
+  O(1) and dwarfed by the drain wait; not a concern in practice.
 - The windowless guarantee depends on the run loop incrementing the job tracker
   **synchronously before** launching the job goroutine. A future refactor that
   moved `start()` into the goroutine would reopen the window. Flagged here and
