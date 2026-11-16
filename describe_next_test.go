@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -572,7 +573,7 @@ func shiftRuns(shift string, loc, ref *time.Location, object string, windows []z
 	if m == nil {
 		return false
 	}
-	spans := hourSpans(loc, ref, describeNow().In(loc).Year())
+	spans := cachedHourSpans(loc, ref, describeNow().In(loc).Year())
 	if m[5] == "" {
 		return windowsMatch(spans, sizeOf(m[1], m[2]), windows)
 	}
@@ -691,6 +692,32 @@ var everyMinute = func() *SpecSchedule {
 	}
 	return s.(*SpecSchedule)
 }()
+
+// spansCache keeps hourSpans by zone names and year, as the goldens and the
+// random specs describe a few zones many times over.
+var spansCache sync.Map
+
+type spansKey struct {
+	loc, ref string
+	year     int
+}
+
+// cachedHourSpans returns hourSpans, kept for zones that tzdata names: a
+// zone named "Local", or a fixed zone, can have other offsets under the
+// same name.
+func cachedHourSpans(loc, ref *time.Location, year int) []runSpan {
+	named := func(l *time.Location) bool { return l == time.UTC || strings.Contains(l.String(), "/") }
+	if !named(loc) || !named(ref) {
+		return hourSpans(loc, ref, year)
+	}
+	k := spansKey{loc.String(), ref.String(), year}
+	if s, ok := spansCache.Load(k); ok {
+		return s.([]runSpan)
+	}
+	s := hourSpans(loc, ref, year)
+	spansCache.Store(k, s)
+	return s
+}
 
 // hourSpans walks Next() over an hourly run in loc through year and groups
 // the runs by loc's offset from ref at them. A span starts at the change
