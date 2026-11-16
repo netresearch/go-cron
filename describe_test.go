@@ -448,6 +448,9 @@ var describeGoldens = []struct {
 	{spec: "0 0 1 H(11-2) *", opts: []DescribeOption{withHash}, want: "at midnight on the 1st of the month in a fixed month between November and February; the hash key fixes the month"},
 	{spec: "0 0 1 H(11-2)/2 *", opts: []DescribeOption{withHash}, want: "at midnight on the 1st of the month in 2 months in every year between November and February, 2 months apart, starting from a fixed month; the hash key fixes the month"},
 	{spec: "H(59-5) * * * *", opts: []DescribeOption{withHash}, want: "at a fixed minute past the hour, either between minutes 0 and 5 or minute 59; the hash key fixes the minute"},
+	// Two notes share one parenthesis; the alternatives follow it (G7)
+	{spec: "H(59-5) */7 * */2 * *", opts: []DescribeOption{withSecHash}, want: "at a fixed second within minutes 0, 7, 14, … 56 in every hour on the 1st, 3rd, 5th, … 31st of the month (every 7 minutes, starting over each hour; every 2 days, starting over each month), either between seconds 0 and 5 or second 59; the 29th and 31st run only in months that have them; the hash key fixes the second"},
+	{spec: "*/7 * H(31-5) * * 2026-2060/5", opts: []DescribeOption{WithParseOptions(Minute | Hour | Dom | Month | Dow | Hash | Year)}, want: "at minutes 0, 7, 14, … 56 past the hour on a fixed day of the month in years 2026, 2031, 2036, … 2056 (every 7 minutes, starting over each hour; every 5 years), either between the 1st and 5th or on the 31st; the hash key fixes the day"},
 	{spec: "H(1-0)/2 * * * *", opts: []DescribeOption{withHash}, want: "30 runs in every hour, 2 minutes apart, starting from a fixed minute; the hash key fixes the minute"},
 	{spec: "0 9 * * H(1-0)", opts: []DescribeOption{withHash}, want: "at 9 am on a fixed day of the week; the hash key fixes the day"},
 	{spec: "H(50-0) * * * *", opts: []DescribeOption{withHash}, want: "at a fixed minute past the hour, either minute 0 or between minutes 50 and 59; the hash key fixes the minute"},
@@ -642,7 +645,7 @@ var describeGoldens = []struct {
 	{spec: "30 H(20-23),H(1-5) * * *", opts: []DescribeOption{withHash}, want: "minute 30, hour H(20-23),H(1-5), day of month *, month *, day of week *", literal: true},
 	{spec: "0 H/6,9 * * *", opts: []DescribeOption{withHash}, want: "minute 0, hour H/6,9, day of month *, month *, day of week *", literal: true},
 	{spec: "H(59-0) H/6 * * *", opts: []DescribeOption{withHash}, want: "minute H(59-0), hour H/6, day of month *, month *, day of week *", literal: true},
-	// Time zones (Z1–Z9)
+	// Time zones: the zone's name, its shift from UTC and from the scheduler's zone (zoneClause)
 	{spec: "CRON_TZ=America/New_York 30 2 * * *", want: "at 2:30 am every day New York time, 5 hours behind UTC, 4 hours from March to November"},
 	{spec: "TZ=Asia/Kolkata 0 9 * * *", want: "at 9 am every day Kolkata time, 5 hours 30 minutes ahead of UTC"},
 	{spec: "CRON_TZ=Australia/Lord_Howe 0 0 1 1 * 2027", opts: []DescribeOption{withYear}, want: "at midnight on the 1st of the month in January in year 2027 Lord Howe time, 11 hours ahead of UTC, 10 hours 30 minutes from April to October"},
@@ -1302,7 +1305,8 @@ func TestNeverRunsPastTheWalk(t *testing.T) {
 	}
 }
 
-// pinDescribeYear makes 2027 the year the zone clauses are computed for (Z8).
+// pinDescribeYear makes 2027 the year the zone clauses are computed for
+// (describeNow).
 func pinDescribeYear(t *testing.T) {
 	t.Helper()
 	old := describeNow
@@ -1497,8 +1501,8 @@ func describeGrammars() (descRe, noteRe *regexp.Regexp) {
 	)
 
 	hashkey := "; the hash key fixes " + list(alt("the "+unit, "both "+units)) // H1, H6
-	// Z1, Z2: a written zone and its shift from UTC
-	plain := `[A-Za-z0-9][A-Za-z0-9 +/:_-]*` // Z1: the name as derived, or as written
+	// zoneClause: a written zone and its shift from UTC
+	plain := `[A-Za-z0-9][A-Za-z0-9 +/:_-]*` // zoneName: the name as derived, or as written
 	offset := alt(num+" hours?", num+" hours? "+num+" minutes?", num+" minutes?")
 	shiftTo := func(other string) string {
 		return alt(offset+" "+alt("behind", "ahead of")+" "+other, "the same as "+other)
@@ -1812,7 +1816,7 @@ func FuzzDescribeSpec(f *testing.F) {
 	f.Add("+0 0 1 1 0")
 	f.Add("0 0 1 1 0 22-99")
 	f.Add("0 13 * * *")
-	f.Add("TZ=AmeriCA/Buenos_Aires 0 0 1 1 0") // a case-blind file system loads it; Z1 writes it as is
+	f.Add("TZ=AmeriCA/Buenos_Aires 0 0 1 1 0") // a case-blind file system loads it; zoneName writes it as is
 
 	g, ng := describeGrammars()
 	parsers := []Parser{

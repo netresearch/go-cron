@@ -3006,8 +3006,10 @@ func WithParseOptions(o ParseOption) DescribeOption
 DescribeSpec returns an English description of a cron expression, or the parse
 error. The package function parses as `AnalyzeSpec` does (the standard parser
 unless `WithParseOptions` is given; several calls OR together); the `Parser`
-method uses the parser's own settings and ignores `WithParseOptions`. Times are on the 12-hour clock. Descriptions carry no time zone. A
-valid spec always gets a description; one that never runs is "never runs",
+method uses the parser's own settings and ignores `WithParseOptions`. Times are on the 12-hour clock. Time zone support starts with the zone a
+spec writes: a spec with a `TZ=`/`CRON_TZ=` prefix names its zone and the
+zone's shift from UTC; one without a prefix, and `TZ=Local`, carries no time
+zone. A valid spec always gets a description; one that never runs is "never runs",
 but past 8,192 hash values each `H` is tested on its own, so a spec whose `H`
 values never fit together can read as running.
 Combinations of `H` without a form get each written field by name ("minute

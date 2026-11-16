@@ -49,18 +49,18 @@ func TestZoneName(t *testing.T) {
 		want    string
 		generic bool
 	}{
-		{mustZone("America/New_York"), "New York", false},
-		{mustZone("Europe/Berlin"), "Berlin", false},
-		{mustZone("America/Argentina/Buenos_Aires"), "Buenos Aires", false},
+		{loadLocation(t, "America/New_York"), "New York", false},
+		{loadLocation(t, "Europe/Berlin"), "Berlin", false},
+		{loadLocation(t, "America/Argentina/Buenos_Aires"), "Buenos Aires", false},
 		{time.UTC, "UTC", false},
-		{mustZone("Etc/UTC"), "Etc/UTC", false},
-		{mustZone("Etc/GMT+5"), "Etc/GMT+5", false},
-		{mustZone("EST5EDT"), "EST5EDT", false},
+		{loadLocation(t, "Etc/UTC"), "Etc/UTC", false},
+		{loadLocation(t, "Etc/GMT+5"), "Etc/GMT+5", false},
+		{loadLocation(t, "EST5EDT"), "EST5EDT", false},
 		// A name outside the tz areas is often one of several alike.
-		{mustZone("US/Eastern"), "US/Eastern", false},
-		{mustZone("Canada/Central"), "Canada/Central", false},
-		{mustZone("Australia/Sydney"), "Sydney", false},
-		{mustZone("Pacific/Auckland"), "Auckland", false},
+		{loadLocation(t, "US/Eastern"), "US/Eastern", false},
+		{loadLocation(t, "Canada/Central"), "Canada/Central", false},
+		{loadLocation(t, "Australia/Sydney"), "Sydney", false},
+		{loadLocation(t, "Pacific/Auckland"), "Auckland", false},
 		// time.Local is named "Local" unless the TZ variable names it.
 		{time.FixedZone("Local", 0), "the scheduler's", true},
 		{time.FixedZone("", 3600), "the scheduler's", true},
@@ -131,7 +131,7 @@ func TestZoneYearOf(t *testing.T) {
 		{"Asia/Kolkata", 5*time.Hour + 30*time.Minute, nil, false},
 		{"Australia/Lord_Howe", 11 * time.Hour, []zoneShift{{utc(4, 3, 15, 0), 10*time.Hour + 30*time.Minute}, {utc(10, 2, 15, 30), 11 * time.Hour}}, true},
 	} {
-		z := zoneYearOf(mustZone(tt.zone), 2027)
+		z := zoneYearOf(loadLocation(t, tt.zone), 2027)
 		if z.base != tt.base || len(z.shifts) != len(tt.shifts) || z.seasonal() != tt.seasonal {
 			t.Errorf("%s: base %v, %d shifts, seasonal %v; want %v, %d, %v", tt.zone, z.base, len(z.shifts), z.seasonal(), tt.base, len(tt.shifts), tt.seasonal)
 			continue
@@ -139,6 +139,21 @@ func TestZoneYearOf(t *testing.T) {
 		for i, s := range tt.shifts {
 			if got := z.shifts[i]; !got.at.Equal(s.at) || got.off != s.off {
 				t.Errorf("%s: shift %d = %v %v, want %v %v", tt.zone, i, got.at.UTC(), got.off, s.at, s.off)
+			}
+		}
+	}
+}
+
+// TestZoneYearOfEveryYear walks zones that change with the season in every
+// year through 2050. Go can report a year-end bound that is not after the
+// instant asked about (TestNextAcrossYearEnds); the walk must step past it
+// rather than stop with no shifts.
+func TestZoneYearOfEveryYear(t *testing.T) {
+	for _, zone := range []string{"Europe/Berlin", "Australia/Lord_Howe", "Australia/Adelaide", "America/New_York"} {
+		loc := loadLocation(t, zone)
+		for y := 2026; y <= 2050; y++ {
+			if z := zoneYearOf(loc, y); !z.seasonal() {
+				t.Errorf("%s %d: %d shifts, not seasonal", zone, y, len(z.shifts))
 			}
 		}
 	}
@@ -153,7 +168,7 @@ func TestUTCShift(t *testing.T) {
 		"Asia/Kolkata":        "5 hours 30 minutes ahead of UTC",
 		"Etc/UTC":             "the same as UTC",
 	} {
-		if got, note := utcShift(zoneYearOf(mustZone(zone), 2027), "X"); got != want || note != "" {
+		if got, note := utcShift(zoneYearOf(loadLocation(t, zone), 2027), "X"); got != want || note != "" {
 			t.Errorf("%s: utcShift = %q, note %q; want %q and no note", zone, got, note, want)
 		}
 	}

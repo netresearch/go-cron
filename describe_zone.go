@@ -11,7 +11,7 @@ import (
 )
 
 // describeNow gives the instant whose year the zone clauses are computed
-// for (Z8). Tests replace it.
+// for. Tests replace it.
 var describeNow = time.Now
 
 // zoneShift is a change of a zone's offset from UTC: the instant and the
@@ -36,13 +36,14 @@ const maxZoneBounds = 12
 
 // zoneYearOf walks loc's offset changes through year. A bound that leaves
 // the offset as it was is skipped: Go reports year-end bounds past a zone's
-// stored transitions.
+// stored transitions, and some not after the instant asked about, which
+// zoneEndAfter steps past.
 func zoneYearOf(loc *time.Location, year int) zoneYear {
 	t := time.Date(year, time.January, 1, 0, 0, 0, 0, loc)
 	z := zoneYear{loc: loc, year: year, base: offsetOf(t)}
 	prev := z.base
 	for range maxZoneBounds {
-		_, end := t.ZoneBounds()
+		end := zoneEndAfter(t)
 		if end.IsZero() || end.In(loc).Year() > year {
 			break
 		}
@@ -74,7 +75,7 @@ var tzAreas = []string{
 	"Atlantic", "Australia", "Europe", "Indian", "Pacific",
 }
 
-// zoneName returns the name a description gives loc (Z1): for a name under
+// zoneName returns the name a description gives loc: for a name under
 // one of the tz areas its last part with spaces, "New York"; any other name
 // as written, "UTC", "Etc/GMT+5", "US/Eastern". generic is true for a zone
 // with no name of its own, time.Local or an unnamed one, which reads "the
@@ -144,7 +145,7 @@ func monthsWords(a, b time.Time, loc *time.Location) string {
 	return " from " + a.In(loc).Month().String() + " to " + b.In(loc).Month().String()
 }
 
-// utcShift names a zone's offset from UTC over the year (Z2): "5 hours
+// utcShift names a zone's offset from UTC over the year: "5 hours
 // behind UTC", and for a zone that changes with the season "5 hours behind
 // UTC, 4 hours from March to November". A zone that changes in another way
 // gets its January offset, and the note names the rest of the year (Z4).

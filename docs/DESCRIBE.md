@@ -44,7 +44,11 @@ func WithParseOptions(o ParseOption) DescribeOption // package function only
 - The description is made from the spec text as the parser splits it, not
   from the parsed schedule, because the parsed bits have lost what was
   written (`*/15` and `0,15,30,45` parse the same, but only one has a step).
-- Descriptions carry no time zone; callers show the location beside them.
+- Time zone support starts with the zone a spec writes: a spec with a
+  `TZ=`/`CRON_TZ=` prefix names its zone and the zone's shift from UTC
+  ("Kolkata time, 5 hours 30 minutes ahead of UTC"). A spec without a
+  prefix, and `TZ=Local`, carries no time zone; callers show the location
+  beside it.
 - `DescribeSpecNote` spells out the values the hash key picks, which the
   description leaves as "a fixed …": "at minutes h, h+15, h+30, and h+45
   past the hour, where h is a fixed minute from 0 to 14". It is "" unless
@@ -96,11 +100,11 @@ which form a spec gets. Each has an ID, which the grammar cites.
 
 | ID | Rule |
 |---|---|
-| G1 | A description says what the scheduler runs: each golden in `describe_test.go` was checked against the runs `Next()` computes |
+| G1 | A description says what the scheduler runs: each golden in `describe_test.go` was checked against the runs `Next()` computes, and `TestDescribeSpecNamesRuns` checks the times and dates a description names against those runs (see the Grammar section) |
 | G2 | A parser oddity is described as it runs |
 | G3 | The description is built from the spec text as the parser splits it, and its values follow the parser's options |
 | G6 | Wording is for people |
-| G7 | Clause order: time, day, month, year, then the note, then the short-month clause |
+| G7 | Clause order: time, day, month, year, then the note, then the alternatives, then the zone, then the short-month clause, then the hash key clause |
 | G8 | No comma before a trailing clause such as "every day". A list of three or more takes the serial comma: "at minutes 0, 15, 30, and 45 past the hour" |
 | G10 | A combination of fields the grammar has no form for renders field by field |
 | G11 | A spec that never runs reads "never runs": a day that none of the written months and years has (`0 0 30 2 *`, `0 0 29 2 * 2027`, `0 0 31W 4 *`, `0 0 L-30 2 *`), a day that cannot be the counted day of the week (`0 0 1 * MON#2`), and an H day that no key can find in them (`0 0 H(30-31) 2 *`). Every `H` in a spec takes its value from one hash, so the test covers the combinations the parser can produce: `0 0 H(29-31) 1 H(1-3) 2028` never runs, as none of its three pairs of a day and a day of the week occurs in January 2028. Past 8,192 hash values, each `H` is tested on its own. It reads the calendar, not `Next`, which looks 5 years ahead: `0 0 * 2 MON#5` is described, as it runs in 2044 |
@@ -220,6 +224,36 @@ form (G10) is outside the grammar.
 
 What a context-free grammar can't check is kept by the goldens: the value
 limits (T1, T4, R8–R12), the hour order (T6) and the values themselves (G1).
+`TestDescribeSpecNamesRuns` also checks the values, for the goldens and for
+random specs, from the first year the spec allows, or from 2026 when it allows
+any. Every clock time, minute and second a description names must be a run on
+the first day that has one; every day of the month, day of the week and month
+must have a run in the five years from there, or in the year of the first run
+after them, in the spec's zone; and every year must be one the year field
+allows. Each day field is checked alone, a day that D3 says runs only in
+months that have it needs no run, and "never runs" must have no run in any
+year the spec allows. A spec with `H` is read for every key: a value its
+description names must be one that some key runs at, a day of the month an `H`
+item can pick needs no run in a month that lacks it, and "never runs" must have
+no run for any key, the picks moving together (G11). For a spec with a written
+zone, the zone's name must be the one the description gives, and its shift
+from UTC must be the offset of a noon run in that zone on January 1 of the
+year the description is made in; for a zone that leaves that offset once in
+the year and returns, the second value and the months it changes in must be
+those of the noon runs on the other days. For a zone that changes in another
+way, only the January shift is checked. The goldens given field by
+field (G10) name no values to check, and the four `@every` goldens under 1s
+are not checked: the parser rejects them. Years with the same calendar,
+leap or not and starting on the same day of the week, have the same runs, so
+the check takes one year of each of the 14 calendars. The check does not model
+daylight saving, so a correct time or date can read as not run: a run in an
+hour that daylight saving skips moves forward by the gap's length, several such
+runs becoming one, or with `DSTSkip` does not happen. With `DSTSkip`, two years
+of one calendar can also differ where the zone's transition dates differ (its
+rules changed, or tzdata lists each year's dates), so a wrong "never runs" can
+pass: the check looks for a run only from the first year of each calendar
+through 30 years after it. The check is one-sided: it does not find a run a
+description leaves out.
 
 ```ebnf
 // "x" literal, [x] optional, (x)* repeat, a | b choice.
@@ -230,7 +264,7 @@ start: schedule
      | "only" "when" "triggered"                                          // P2
      | interval                                                           // P3
 
-schedule: time [day] [month] [year] [note] [alts | domalts] short* [hashkey]               // G7, H1
+schedule: time [day] [month] [year] [note] [alts | domalts] [zone] short* [hashkey]        // G7, H1
 
 time: clocktime | span | hourstep | parts | hashed | counted
 
@@ -369,6 +403,18 @@ dapart: "," INT "days" "apart" "," "starting" "from" "a" "fixed" "day"
 year: "in" "year" INT | "in" "years" vlist                                // D6
 short: ";" "the" list{ORD} ("runs" | "run") "only" "in" "months" "that" "have" ("one" | "them")   // D3, X5
      | ";" ("it" | beforeitem) "runs" "only" "in" "months" "of" INT "days" ["or" "more"]           // X6
+
+// a written zone and its shift from UTC (zoneClause)
+zone: "UTC"                                                               // zoneName
+    | zonename "time" "," utcshift                                        // zoneName, utcShift
+utcshift: offset ("behind" | "ahead" "of") "UTC" ["," second months]      // utcShift
+        | "the" "same" "as" "UTC" ["," second months]
+second: offset ["behind" | "ahead"] | "the" "same" "as" "UTC"             // utcShift
+months: "from" MONTHNAME "to" MONTHNAME                                   // utcShift
+offset: INT ("hour" | "hours") [INT ("minute" | "minutes")]               // utcShift
+      | INT ("minute" | "minutes")
+zonename: ZONEWORD+                                                       // zoneName: "New York", "Etc/GMT+5", "US/Eastern"
+ZONEWORD: /[A-Za-z0-9][A-Za-z0-9+\/:_-]*/
 
 interval: "every" DURATION ("from" "when" "scheduling" "started"         // P3
                            | "from" "Unix" "epoch") [ivnote]

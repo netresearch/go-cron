@@ -152,7 +152,7 @@ func (p Parser) describe(spec string, sched *time.Location) (desc, note string, 
 	// describableItem or one of the special forms. It keeps an item syntax the
 	// parser adds later from being described as something else.
 	if !allDescribable(fields) || !describable(yearField) {
-		return p.describeLiteral(spec, fields, yearField) + zone, znote, nil
+		return p.describeLiteral(spec, fields, yearField, zone), znote, nil
 	}
 	if p.dayMissing(sch, fields) {
 		return "never runs", "", nil
@@ -166,7 +166,7 @@ func (p Parser) describe(spec string, sched *time.Location) (desc, note string, 
 	d := p.dayDescriber(sch, fields)
 	day, month, short, dok := p.describeDates(&d, hd, dates)
 	if !ok || !dok {
-		return p.describeLiteral(spec, fields, yearField) + zone, joinNote(p.hashNote(&d, h, hd, dates), znote), nil
+		return p.describeLiteral(spec, fields, yearField, zone), joinNote(p.hashNote(&d, h, hd, dates), znote), nil
 	}
 	d.named = day != ""
 	var timeText string
@@ -175,7 +175,7 @@ func (p Parser) describe(spec string, sched *time.Location) (desc, note string, 
 	} else if t, ok := d.describeHashTime(h); ok {
 		timeText = t
 	} else {
-		return p.describeLiteral(spec, fields, yearField) + zone, joinNote(p.hashNote(&d, h, hd, dates), znote), nil
+		return p.describeLiteral(spec, fields, yearField, zone), joinNote(p.hashNote(&d, h, hd, dates), znote), nil
 	}
 	parts := []string{timeText}
 	for _, clause := range []string{day, month, d.describeYears(yearField)} {
@@ -741,8 +741,8 @@ var literalNames = []string{seconds.name, minutes.name, hours.name, dom.name, mo
 
 // describeLiteral names each field spec wrote, as written. fields and
 // yearField are spec's fields from specFields, which fill in the fields
-// spec left out.
-func (p Parser) describeLiteral(spec string, fields []string, yearField string) string {
+// spec left out. zone, the clause zoneClause gives a written zone, follows.
+func (p Parser) describeLiteral(spec string, fields []string, yearField, zone string) string {
 	// The spec parsed, so neither step can fail.
 	_, rest, _ := parseTimezone(spec)
 	tokens := strings.Fields(rest)
@@ -761,7 +761,7 @@ func (p Parser) describeLiteral(spec string, fields []string, yearField string) 
 	if len(tokens) > len(written) {
 		parts = append(parts, "year "+yearField)
 	}
-	return strings.Join(parts, ", ")
+	return strings.Join(parts, ", ") + zone
 }
 
 // Phrases the descriptions repeat.
