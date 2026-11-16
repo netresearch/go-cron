@@ -300,6 +300,34 @@ func TestWindowNote(t *testing.T) {
 	}
 }
 
+func TestBetweenChanges(t *testing.T) {
+	day := func(d int) time.Time { return time.Date(2027, 1, d, 0, 0, 0, 0, time.UTC) }
+	shifts := func(days ...int) zoneYear {
+		var z zoneYear
+		for _, d := range days {
+			z.shifts = append(z.shifts, zoneShift{at: day(d)})
+		}
+		return z
+	}
+	spec, sched := shifts(5, 20), shifts(10)
+	for _, tt := range []struct {
+		name  string
+		spans []zoneSpan
+		want  bool
+	}{
+		{"one zone's change to the other's", []zoneSpan{{day(5), day(10), time.Hour}}, true},
+		{"the other way round", []zoneSpan{{day(10), day(20), time.Hour}}, true},
+		{"two changes of one zone", []zoneSpan{{day(5), day(20), time.Hour}}, false},
+		{"from the start of the year", []zoneSpan{{day(1), day(10), time.Hour}}, false},
+		{"a steady span is not named", []zoneSpan{{day(1), day(5), 0}, {day(5), day(10), time.Hour}}, true},
+		{"a span under a day is not named", []zoneSpan{{day(5), day(5).Add(time.Hour), time.Hour}}, true},
+	} {
+		if got := betweenChanges(tt.spans, 0, spec, sched); got != tt.want {
+			t.Errorf("%s: %v, want %v", tt.name, got, tt.want)
+		}
+	}
+}
+
 // TestUTCShiftNote: a zone whose year is not seasonal states its January
 // offset, and the note names the rest of the year. Pyongyang moved from 8
 // hours 30 minutes to 9 hours ahead of UTC on May 5, 2018, and stayed.
@@ -334,6 +362,7 @@ func TestZoneOffsetsBehindGoldens(t *testing.T) {
 		"Europe/London":                  {{3, 27, 0}, {3, 28, h}, {10, 31, 0}},
 		"Australia/Lord_Howe":            {{4, 3, 11 * h}, {4, 4, 10*h + 30*m}, {10, 2, 10*h + 30*m}, {10, 3, 11 * h}},
 		"Asia/Kolkata":                   {{1, 1, 5*h + 30*m}, {7, 1, 5*h + 30*m}},
+		"Australia/Sydney":               {{4, 3, 11 * h}, {4, 4, 10 * h}, {10, 2, 10 * h}, {10, 3, 11 * h}},
 		"America/Argentina/Buenos_Aires": {{1, 1, -3 * h}, {7, 1, -3 * h}},
 	} {
 		for _, d := range days {

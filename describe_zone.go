@@ -174,12 +174,12 @@ func dateWords(t time.Time, sameMonth bool) string {
 // first and last instant: "Berlin is 5 hours ahead of New York from March 14
 // to 28 and from October 31 to November 7". Each shift gets one sentence. A
 // window under a day is left out. tail says that the windows lie between two
-// zones' clock changes.
+// zones' clock changes (betweenChanges).
 func windowNote(subject, object string, spans []zoneSpan, steady time.Duration, loc *time.Location, tail bool) string {
 	var order []time.Duration
 	windows := map[time.Duration][]string{}
 	for _, s := range spans {
-		if s.off == steady || s.to.Sub(s.from) < 24*time.Hour {
+		if !s.named(steady) {
 			continue
 		}
 		if windows[s.off] == nil {
@@ -219,6 +219,30 @@ func (z zoneYear) same(o zoneYear) bool {
 type zoneSpan struct {
 	from, to time.Time
 	off      time.Duration
+}
+
+// named reports whether a note names s as a window off the steady shift: it
+// has another offset and lasts a day or more.
+func (s zoneSpan) named(steady time.Duration) bool {
+	return s.off != steady && s.to.Sub(s.from) >= 24*time.Hour
+}
+
+// changesAt reports whether the zone's offset changes at t.
+func (z zoneYear) changesAt(t time.Time) bool {
+	return slices.ContainsFunc(z.shifts, func(s zoneShift) bool { return s.at.Equal(t) })
+}
+
+// betweenChanges reports whether every window the note names starts at a
+// clock change of one zone and ends at a clock change of the other, as
+// Berlin's and New York's spring and autumn gaps do. A window from January 1
+// or to December 31, or one between two changes of one zone, is not.
+func betweenChanges(spans []zoneSpan, steady time.Duration, spec, sched zoneYear) bool {
+	for _, s := range spans {
+		if s.named(steady) && !(spec.changesAt(s.from) && sched.changesAt(s.to) || sched.changesAt(s.from) && spec.changesAt(s.to)) {
+			return false
+		}
+	}
+	return true
 }
 
 // zoneSpans splits spec's year, in its own zone, at each offset change of
@@ -296,7 +320,7 @@ func schedShift(spec, sched zoneYear, name, sname string, generic bool) (clause,
 	if generic {
 		object = other
 	}
-	return shiftWords(steady, other), windowNote(name, object, spans, steady, spec.loc, !oneMoves)
+	return shiftWords(steady, other), windowNote(name, object, spans, steady, spec.loc, betweenChanges(spans, steady, spec, sched))
 }
 
 // zoneClause returns the clause that names the zone a spec wrote, its shift
