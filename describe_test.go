@@ -1596,7 +1596,7 @@ func describeGrammars() (descRe, noteRe *regexp.Regexp) {
 	// windowNote: the windows where a zone is off its stated shift, by date
 	zdate := monthname + ` \d+`
 	window := "from " + zdate + " to " + alt(zdate, num)
-	zsent := plain + " is " + shiftTo(alt(plain, "the scheduler's time")) + " " + window + "(?: and " + window + ")*"
+	zsent := plain + " is " + shiftTo(alt(plain, "the scheduler's time")) + " " + list(window) // G8
 	znote := zsent + "(?:; " + zsent + ")*" + opt(", between the two zones' clock changes")
 	noteRe = regexp.MustCompile("^" + alt(nclause+"(?:, "+nclause+")*"+opt("; "+znote), znote) + "$")
 	return descRe, noteRe

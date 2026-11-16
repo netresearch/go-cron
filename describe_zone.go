@@ -172,9 +172,9 @@ func dateWords(t time.Time, sameMonth bool) string {
 // windowNote names the windows in which subject's zone is off the steady
 // shift the description states, by the dates, in loc, of each window's
 // first and last instant: "Berlin is 5 hours ahead of New York from March 14
-// to 28 and from October 31 to November 7". Each shift gets one sentence. A
-// window under a day is left out. tail says that the windows lie between two
-// zones' clock changes (betweenChanges).
+// to 28 and from October 31 to November 7", a list as G8 has it. Each shift
+// gets one sentence. A window under a day is left out. tail says that the
+// windows lie between two zones' clock changes (betweenChanges).
 func windowNote(subject, object string, spans []zoneSpan, steady time.Duration, loc *time.Location, tail bool) string {
 	var order []time.Duration
 	windows := map[time.Duration][]string{}
@@ -193,7 +193,7 @@ func windowNote(subject, object string, spans []zoneSpan, steady time.Duration, 
 	}
 	sentences := make([]string, len(order))
 	for i, off := range order {
-		sentences[i] = subject + " is " + shiftWords(off, object) + " " + strings.Join(windows[off], " and ")
+		sentences[i] = subject + " is " + shiftWords(off, object) + " " + andList(windows[off])
 	}
 	note := strings.Join(sentences, "; ")
 	if tail {

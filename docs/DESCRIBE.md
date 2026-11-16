@@ -466,7 +466,7 @@ notetext: nclause ("," nclause)* [";" znote] | znote                        // N
 
 // the windows in which a written zone is off the shift its description states
 znote: zsent (";" zsent)* ["," "between" "the" "two" "zones'" "clock" "changes"]   // windowNote, betweenChanges
-zsent: zonename "is" zshift window ("and" window)*                           // windowNote
+zsent: zonename "is" zshift list{window}                                    // windowNote, G8
 zshift: offset ("behind" | "ahead" "of") zobject | "the" "same" "as" zobject
 zobject: zonename | "the" "scheduler's" "time"
 window: "from" MONTHNAME INT "to" [MONTHNAME] INT                          // windowNote: the dates of its first and last instant

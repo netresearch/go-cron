@@ -293,6 +293,19 @@ func TestWindowNote(t *testing.T) {
 			6 * h, berlin, true,
 			"X is 5 hours ahead of the scheduler's time from March 14 to 28; X is 7 hours ahead of the scheduler's time from October 31 to November 7" + tail,
 		},
+		{
+			"three windows of one value", "X", "UTC",
+			[]zoneSpan{
+				{at(1, 1, 0), at(2, 15, 3), h},
+				{at(2, 15, 3), at(3, 22, 3), 0},
+				{at(3, 22, 3), at(3, 29, 3), h},
+				{at(3, 29, 3), at(9, 20, 3), 0},
+				{at(9, 20, 3), at(10, 25, 3), h},
+				{at(10, 25, 3), at(12, 31, 23), 0},
+			},
+			h, berlin, false,
+			"X is the same as UTC from February 15 to March 22, from March 29 to September 20, and from October 25 to December 31",
+		},
 	} {
 		if got := windowNote(tt.subject, tt.object, tt.spans, tt.steady, tt.loc, tt.tail); got != tt.want {
 			t.Errorf("%s:\n got %q\nwant %q", tt.name, got, tt.want)
