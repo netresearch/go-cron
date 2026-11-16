@@ -883,8 +883,8 @@ func checkGoldensNameRuns(t *testing.T) int {
 // (namesNotRunSpec); only the goldens given field by field (G10) and the
 // specs the parser rejects are not checked.
 func TestDescribeSpecNamesRuns(t *testing.T) {
-	if checked := checkGoldensNameRuns(t); checked < 523 {
-		t.Errorf("checked %d goldens, want at least 523", checked)
+	if checked := checkGoldensNameRuns(t); checked < 524 {
+		t.Errorf("checked %d goldens, want at least 524", checked)
 	}
 
 	r := rand.New(rand.NewPCG(1, 2)) // fixed seed: the same specs on every run
