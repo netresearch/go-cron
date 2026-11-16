@@ -34,24 +34,31 @@ type zoneYear struct {
 // changes its offset monthly.
 const maxZoneBounds = 12
 
-// zoneYearOf walks loc's offset changes through year. A bound that leaves
-// the offset as it was is skipped: Go reports year-end bounds past a zone's
+// zoneYearOf walks loc's offset changes through year of its own calendar.
+func zoneYearOf(loc *time.Location, year int) zoneYear {
+	start := time.Date(year, time.January, 1, 0, 0, 0, 0, loc)
+	return zoneYearOver(loc, year, start, start.AddDate(1, 0, 0))
+}
+
+// zoneYearOver walks loc's offset changes from start up to end, the instants
+// another zone's year spans; year is that year. A bound that leaves the
+// offset as it was is skipped: Go reports year-end bounds past a zone's
 // stored transitions, and some not after the instant asked about, which
 // zoneEndAfter steps past.
-func zoneYearOf(loc *time.Location, year int) zoneYear {
-	t := time.Date(year, time.January, 1, 0, 0, 0, 0, loc)
+func zoneYearOver(loc *time.Location, year int, start, end time.Time) zoneYear {
+	t := start.In(loc)
 	z := zoneYear{loc: loc, year: year, base: offsetOf(t)}
 	prev := z.base
 	for range maxZoneBounds {
-		end := zoneEndAfter(t)
-		if end.IsZero() || end.In(loc).Year() > year {
+		bound := zoneEndAfter(t)
+		if bound.IsZero() || !bound.Before(end) {
 			break
 		}
-		if off := offsetOf(end); off != prev {
-			z.shifts = append(z.shifts, zoneShift{at: end, off: off})
+		if off := offsetOf(bound); off != prev {
+			z.shifts = append(z.shifts, zoneShift{at: bound, off: off})
 			prev = off
 		}
-		t = end
+		t = bound
 	}
 	return z
 }
@@ -356,7 +363,8 @@ func zoneClause(spec, sched *time.Location, now time.Time) (clause, note string)
 		return clause, note
 	}
 	sname, generic := zoneName(sched)
-	if s := zoneYearOf(sched, z.year); !s.utc() && !s.same(z) {
+	start := time.Date(z.year, time.January, 1, 0, 0, 0, 0, spec)
+	if s := zoneYearOver(sched, z.year, start, start.AddDate(1, 0, 0)); !s.utc() && !s.same(z) {
 		shift, n := schedShift(z, s, name, sname, generic)
 		clause, note = clause+join+shift, joinNote(note, n)
 	}

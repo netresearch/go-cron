@@ -313,6 +313,30 @@ func TestWindowNote(t *testing.T) {
 	}
 }
 
+// TestZoneYearOverSpan: a scheduler zone's changes are taken over the
+// instants of the spec zone's year, not over its own calendar year, which
+// can start up to a day apart.
+func TestZoneYearOverSpan(t *testing.T) {
+	berlin := loadLocation(t, "Europe/Berlin")
+	start := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	z := zoneYearOver(berlin, 2027, start, start.AddDate(1, 0, 0))
+	if z.base != time.Hour || len(z.shifts) != 2 || !z.seasonal() {
+		t.Fatalf("base %v, shifts %v; want 1h and two changes", z.base, z.shifts)
+	}
+	for i, want := range []time.Time{
+		time.Date(2027, 3, 28, 1, 0, 0, 0, time.UTC),
+		time.Date(2027, 10, 31, 1, 0, 0, 0, time.UTC),
+	} {
+		if !z.shifts[i].at.Equal(want) {
+			t.Errorf("change %d at %v, want %v", i, z.shifts[i].at, want)
+		}
+	}
+	// Berlin does not change between November 1, 2026 and January 1, 2027.
+	if z := zoneYearOver(berlin, 2027, start, time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)); len(z.shifts) != 0 {
+		t.Errorf("November thru December 2026: shifts %v, want none", z.shifts)
+	}
+}
+
 func TestWindowWords(t *testing.T) {
 	at := func(m time.Month, d, hour int) time.Time { return time.Date(2027, m, d, hour, 0, 0, 0, time.UTC) }
 	for _, tt := range []struct {
