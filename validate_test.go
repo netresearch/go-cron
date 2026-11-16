@@ -918,6 +918,30 @@ func TestAnalyzeSpec_ParseFields(t *testing.T) {
 			},
 			unexpectedKeys: []string{"year"},
 		},
+		{
+			name: "5-field with seconds and an optional day of week left out",
+			p:    NewParser(Second | Minute | Hour | Dom | Month | DowOptional),
+			spec: "30 0 9 15 6",
+			expectedFields: map[string]string{
+				"second":       "30",
+				"minute":       "0",
+				"hour":         "9",
+				"day_of_month": "15",
+				"month":        "6",
+			},
+			unexpectedKeys: []string{"day_of_week", "year"},
+		},
+		{
+			name: "3-field day, month and optional day of week",
+			p:    NewParser(Dom | Month | DowOptional),
+			spec: "15 6 1",
+			expectedFields: map[string]string{
+				"day_of_month": "15",
+				"month":        "6",
+				"day_of_week":  "1",
+			},
+			unexpectedKeys: []string{"second", "minute", "hour"},
+		},
 	}
 
 	for _, tc := range testCases {

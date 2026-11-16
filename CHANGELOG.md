@@ -37,6 +37,10 @@ Originally based on [robfig/cron](https://github.com/robfig/cron).
 - `AnalyzeSpec` splits the year off `Fields` as the parser does. With `Year`,
   `0 9 * * 1 *` reported the `*` year as the day of the week and the `9` as
   the minute; a year counted only when it held a number of 100 or more
+- `AnalyzeSpec` names `Fields` by the parser's fields. With `Second` and
+  `DowOptional`, `30 0 9 15 6` reported `30` as the minute and `15` as the
+  month; a parser without the time fields (`Dom | Month | Dow`) left
+  `Fields` empty
 
 ### Planned for v2
 - Context-aware Job interface with graceful shutdown support

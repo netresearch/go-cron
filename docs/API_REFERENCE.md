@@ -3005,9 +3005,9 @@ func AnalyzeSpecWithHash(spec string, options ParseOption, hashSeed string) Spec
 
 AnalyzeSpecWithHash analyzes a cron expression containing H hash expressions.
 The seed (e.g., job name) produces deterministic, distributed scheduling times.
-`options` must include `Hash`. For a spec of five, six or seven fields,
-`Fields` holds the spec's text (`H`), not the values chosen for the seed;
-for other field counts it is empty. `NextRun` reflects the chosen values. See
+`options` must include `Hash`. `Fields` holds the spec's text (`H`) for
+each field it writes, not the values chosen for the seed. `NextRun` reflects
+the chosen values. See
 [Hash expressions](#hash-expressions-h).
 
 ### DescribeSpec

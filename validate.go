@@ -28,7 +28,8 @@ type SpecAnalysis struct {
 	Location *time.Location
 
 	// Fields contains the original field values from the spec.
-	// Keys: "second" (if applicable), "minute", "hour", "day_of_month", "month", "day_of_week"
+	// Keys, for the fields the spec writes under the parser's options:
+	// "second", "minute", "hour", "day_of_month", "month", "day_of_week", "year"
 	// For descriptors, this will be empty.
 	Fields map[string]string
 
@@ -275,25 +276,44 @@ func (r *SpecAnalysis) analyzeDescriptor() {
 	}
 }
 
+// fieldNames are the Fields keys of places, in the same order.
+var fieldNames = []string{unitSecond, unitMinute, unitHour, "day_of_month", unitMonth, "day_of_week"}
+
 // parseFields names the fields of spec as p parses them: the year as p's
-// options split it off (handleYearExtraction), then six fields from the
-// second or five from the minute.
+// options split it off (handleYearExtraction), then p's places in order,
+// less an optional field the spec left out (writtenPlaces).
 func (r *SpecAnalysis) parseFields(spec string, p Parser) {
 	fields, year, _ := p.handleYearExtraction(strings.Fields(spec))
-	if len(fields) == 6 {
-		r.Fields["second"] = fields[0]
-		fields = fields[1:]
+	written := writtenPlaces(p.options, len(fields))
+	var names []string
+	for i, place := range places {
+		if written&place != 0 {
+			names = append(names, fieldNames[i])
+		}
 	}
-	if len(fields) != 5 {
+	if len(names) != len(fields) {
 		return
 	}
-	r.Fields["minute"] = fields[0]
-	r.Fields["hour"] = fields[1]
-	r.Fields["day_of_month"] = fields[2]
-	r.Fields["month"] = fields[3]
-	r.Fields["day_of_week"] = fields[4]
+	for i, name := range names {
+		r.Fields[name] = fields[i]
+	}
 	if year != "" {
 		r.Fields["year"] = year
+	}
+}
+
+// writtenPlaces returns the places a spec of n fields writes under options:
+// all configured places, or, one short, all but the optional field that
+// normalizeFields fills in (the day of week before the second, as there).
+func writtenPlaces(options ParseOption, n int) ParseOption {
+	all, optionals, _ := processOptionalFlags(options)
+	switch {
+	case optionals == 0 || countConfiguredFields(all) == n:
+		return all
+	case options&DowOptional > 0:
+		return all &^ Dow
+	default:
+		return all &^ Second
 	}
 }
 
