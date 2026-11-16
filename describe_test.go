@@ -448,6 +448,9 @@ var describeGoldens = []struct {
 	{spec: "0 0 1 H(11-2) *", opts: []DescribeOption{withHash}, want: "at midnight on the 1st of the month in a fixed month between November and February; the hash key fixes the month"},
 	{spec: "0 0 1 H(11-2)/2 *", opts: []DescribeOption{withHash}, want: "at midnight on the 1st of the month in 2 months in every year between November and February, 2 months apart, starting from a fixed month; the hash key fixes the month"},
 	{spec: "H(59-5) * * * *", opts: []DescribeOption{withHash}, want: "at a fixed minute past the hour, either between minutes 0 and 5 or minute 59; the hash key fixes the minute"},
+	// Two notes share one parenthesis; the alternatives follow it (G7)
+	{spec: "H(59-5) */7 * */2 * *", opts: []DescribeOption{withSecHash}, want: "at a fixed second within minutes 0, 7, 14, … 56 in every hour on the 1st, 3rd, 5th, … 31st of the month (every 7 minutes, starting over each hour; every 2 days, starting over each month), either between seconds 0 and 5 or second 59; the 29th and 31st run only in months that have them; the hash key fixes the second"},
+	{spec: "*/7 * H(31-5) * * 2026-2060/5", opts: []DescribeOption{WithParseOptions(Minute | Hour | Dom | Month | Dow | Hash | Year)}, want: "at minutes 0, 7, 14, … 56 past the hour on a fixed day of the month in years 2026, 2031, 2036, … 2056 (every 7 minutes, starting over each hour; every 5 years), either between the 1st and 5th or on the 31st; the hash key fixes the day"},
 	{spec: "H(1-0)/2 * * * *", opts: []DescribeOption{withHash}, want: "30 runs in every hour, 2 minutes apart, starting from a fixed minute; the hash key fixes the minute"},
 	{spec: "0 9 * * H(1-0)", opts: []DescribeOption{withHash}, want: "at 9 am on a fixed day of the week; the hash key fixes the day"},
 	{spec: "H(50-0) * * * *", opts: []DescribeOption{withHash}, want: "at a fixed minute past the hour, either minute 0 or between minutes 50 and 59; the hash key fixes the minute"},
