@@ -671,9 +671,9 @@ var describeGoldens = []struct {
 	{spec: "CRON_TZ=UTC 0 0 * * *", opts: []DescribeOption{schedLocal}, want: "at midnight every day UTC, 8 hours ahead of the scheduler's time"},
 	{spec: "CRON_TZ=Australia/Lord_Howe 0 0 * * *", opts: []DescribeOption{schedKol}, want: "at midnight every day Lord Howe time, 11 hours ahead of UTC, 10 hours 30 minutes from April to October, and 5 hours 30 minutes ahead of Kolkata time, 5 hours from April to October"},
 	{spec: "CRON_TZ=UTC 0 0 * * *", opts: []DescribeOption{schedLon}, want: "at midnight every day UTC, the same as London time, 1 hour behind from March to October"},
-	{spec: "CRON_TZ=Europe/Berlin 0 0 * * *", opts: []DescribeOption{WithSchedulerLocation(mustZone("US/Eastern"))}, want: "at midnight every day Berlin time, 1 hour ahead of UTC, 2 hours from March to October, and 6 hours ahead of US/Eastern time"},
+	{spec: "CRON_TZ=Europe/Berlin 0 0 * * *", opts: []DescribeOption{WithSchedulerLocation(goldenZone("US/Eastern"))}, want: "at midnight every day Berlin time, 1 hour ahead of UTC, 2 hours from March to October, and 6 hours ahead of US/Eastern time"},
 	// A scheduler on UTC under another name adds no shift (Z3)
-	{spec: "CRON_TZ=Europe/Berlin 0 0 * * *", opts: []DescribeOption{WithSchedulerLocation(mustZone("Etc/UTC"))}, want: "at midnight every day Berlin time, 1 hour ahead of UTC, 2 hours from March to October"},
+	{spec: "CRON_TZ=Europe/Berlin 0 0 * * *", opts: []DescribeOption{WithSchedulerLocation(goldenZone("Etc/UTC"))}, want: "at midnight every day Berlin time, 1 hour ahead of UTC, 2 hours from March to October"},
 	{spec: "CRON_TZ=Europe/Berlin 0 0 * * *", opts: []DescribeOption{WithSchedulerLocation(time.FixedZone("Local", 0))}, want: "at midnight every day Berlin time, 1 hour ahead of UTC, 2 hours from March to October"},
 	{spec: "CRON_TZ=Asia/Kolkata 0 0 * * *", opts: []DescribeOption{WithSchedulerLocation(time.FixedZone("", 3600))}, want: "at midnight every day Kolkata time, 5 hours 30 minutes ahead of UTC, and 4 hours 30 minutes ahead of the scheduler's time"},
 }
