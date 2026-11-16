@@ -80,19 +80,19 @@ func DescribeSpecNote(spec string, opts ...DescribeOption) (string, error) {
 // DescribeSpec returns an English description of spec as p parses it, or the
 // parse error. The description follows the grammar in docs/DESCRIBE.md and
 // names a written TZ=/CRON_TZ= zone and its shift from UTC and from the
-// scheduler's zone (WithSchedulerLocation), as docs/DESCRIBE.md Z1–Z9 say. A
-// valid spec always gets a description and a nil error; one that never runs
-// is "never runs", within the limit on H in G11 of docs/DESCRIBE.md.
-// Combinations of H without a form (H17 and H20 in docs/DESCRIBE.md) get each
-// written field by name, as written: "minute 0, hour 0, day of month H/10,
-// month *, day of week 1". A descriptor reads as its cron equivalent
-// ("@weekly" is "at 12 am on Sunday"), and "@triggered", "@manual" and "@none"
-// read "only when triggered". An interval reads as it runs, from its anchor,
-// with the parser's minimum: "every 1h30m from when scheduling started",
-// "every 15m from Unix epoch". H needs no hash key here: the description does
-// not depend on it. With no key, StrictDays does not check a spec with H in
-// the day of the month or the month when the value the key picks decides that
-// check; when no key finds the day, the parser's error returns.
+// scheduler's zone (WithSchedulerLocation). A valid spec always gets a
+// description and a nil error; one that never runs is "never runs", within the
+// limit on H in G11 of docs/DESCRIBE.md. Combinations of H without a form (H17
+// and H20 in docs/DESCRIBE.md) get each written field by name, as written:
+// "minute 0, hour 0, day of month H/10, month *, day of week 1". A descriptor
+// reads as its cron equivalent ("@weekly" is "at 12 am on Sunday"), and
+// "@triggered", "@manual" and "@none" read "only when triggered". An interval
+// reads as it runs, from its anchor, with the parser's minimum: "every 1h30m
+// from when scheduling started", "every 15m from Unix epoch". H needs no hash
+// key here: the description does not depend on it. With no key, StrictDays
+// does not check a spec with H in the day of the month or the month when the
+// value the key picks decides that check; when no key finds the day, the
+// parser's error returns.
 func (p Parser) DescribeSpec(spec string, opts ...DescribeOption) (string, error) {
 	desc, _, err := p.describe(spec, newDescribeConfig(opts).sched)
 	return desc, err
@@ -102,7 +102,7 @@ func (p Parser) DescribeSpec(spec string, opts ...DescribeOption) (string, error
 // key picks in spec's description, as p parses it: "at minutes h, h+15,
 // h+30, and h+45 past the hour, where h is a fixed minute from 0 to 14".
 // For a spec with a written zone it names the windows in which that zone is
-// off the shift the description states (Z4). It is "" unless a field has a
+// off the shift the description states (windowNote). It is "" unless a field has a
 // hashed step or a fixed day of the month, or the zone has such a window. A
 // description given field by field still gets its note. See docs/DESCRIBE.md.
 func (p Parser) DescribeSpecNote(spec string, opts ...DescribeOption) (string, error) {

@@ -232,7 +232,7 @@ func TestSteadyOf(t *testing.T) {
 
 // TestSchedulerDefaultIsNone checks that with no scheduler zone given a
 // description states the shift from UTC only, on every host, for the package
-// functions, AnalyzeSpec and the Parser methods alike (Z9).
+// functions, AnalyzeSpec and the Parser methods alike.
 func TestSchedulerDefaultIsNone(t *testing.T) {
 	pinDescribeYear(t)
 	const spec = "CRON_TZ=Europe/Berlin 0 9 * * *"
