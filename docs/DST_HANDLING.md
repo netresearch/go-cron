@@ -175,9 +175,12 @@ these that has the zone:
 1. The directory or uncompressed zip file named by the `ZONEINFO` environment
    variable
 2. The system's directories (`/usr/share/zoneinfo/` first on Unix)
-3. The copy embedded in a program that imports `time/tzdata`; go-cron does not
-   import it
+3. The copy embedded in a program that imports `time/tzdata` or is built with
+   `-tags timetzdata`; go-cron does neither
 4. `$GOROOT/lib/time/zoneinfo.zip`
+
+The order is that of Go's code (`loadLocation` in `zoneinfo_read.go`); the
+`time.LoadLocation` doc comment lists the zip before the embedded copy.
 
 `ZONEINFO` gives a program current zone data without a rebuild. It must hold a
 complete set: a zone missing there is read from the next source, which can be
