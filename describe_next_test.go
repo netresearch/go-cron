@@ -4,6 +4,7 @@
 package cron
 
 import (
+	"cmp"
 	"fmt"
 	"maps"
 	"math/rand/v2"
@@ -12,6 +13,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -426,16 +428,16 @@ func randomField(r *rand.Rand, lo, hi int) string {
 }
 
 // checkSpecNamesRuns reports an error for each time or date the description
-// of spec names that Next() does not run at. It returns false for a spec
-// that p does not take or that is described field by field, which names
-// none.
-func checkSpecNamesRuns(t *testing.T, p Parser, spec string) bool {
+// of spec, with opts, names that Next() does not run at. It returns false
+// for a spec that p does not take or that is described field by field,
+// which names none.
+func checkSpecNamesRuns(t *testing.T, p Parser, spec string, opts ...DescribeOption) bool {
 	t.Helper()
 	p = withCheckKey(p)
 	if _, err := p.Parse(spec); err != nil {
 		return false
 	}
-	desc, err := p.DescribeSpec(spec)
+	desc, err := p.DescribeSpec(spec, opts...)
 	if err != nil {
 		t.Errorf("DescribeSpec(%q): unexpected error %v", spec, err)
 		return false
@@ -443,7 +445,8 @@ func checkSpecNamesRuns(t *testing.T, p Parser, spec string) bool {
 	if literalForm.MatchString(desc) {
 		return false
 	}
-	if bad, _ := namesNotRunSpec(p, spec, desc); len(bad) > 0 { // spec parsed above
+	note, _ := p.DescribeSpecNote(spec, opts...)
+	if bad, _ := namesNotRunSpec(p, spec, desc, note, newDescribeConfig(opts).sched); len(bad) > 0 { // spec parsed above
 		t.Errorf("DescribeSpec(%q) = %q: names %s, which Next() does not run at", spec, desc, strings.Join(bad, ", "))
 	}
 	return true
@@ -464,8 +467,9 @@ func withCheckKey(p Parser) Parser {
 // value it names must be one some key runs at (hashReachSchedule), a day of
 // the month an H item can pick needs no run in the months that lack it, and
 // "never runs" must hold for every key, the picks moving together (G11). The
-// zone clause is checked by zoneMisses and taken out before the rest is read.
-func namesNotRunSpec(p Parser, spec, desc string) ([]string, error) {
+// zone clause is checked by zoneMisses, with note and the scheduler's zone
+// sched, and taken out before the rest is read.
+func namesNotRunSpec(p Parser, spec, desc, note string, sched *time.Location) ([]string, error) {
 	p = withCheckKey(p)
 	sch, err := p.Parse(spec)
 	if err != nil {
@@ -475,7 +479,7 @@ func namesNotRunSpec(p Parser, spec, desc string) ([]string, error) {
 	if _, text := p.expandDescriptor(descriptor, fields); text != "" {
 		loc = nil // "only when triggered" and the interval texts name no zone
 	}
-	desc, bad := zoneMisses(loc, desc)
+	desc, bad := zoneMisses(loc, sched, desc, note)
 	s, ok := sch.(*SpecSchedule)
 	if !ok || !containsHashExpr(fields) {
 		return append(bad, namesNotRun(desc, sch, 0)...), nil
@@ -489,25 +493,32 @@ func namesNotRunSpec(p Parser, spec, desc string) ([]string, error) {
 	return append(bad, namesNotRun(desc, hashReachSchedule(p, s, fields), hashReach(fields[3], p.fieldBounds(dom)))...), nil
 }
 
-// zoneShiftPattern is the shift a zone clause gives after "<name> time, "
-// (utcShift): "5 hours behind UTC", "the same as UTC", and for a zone that
-// changes with the season a second value and its months, "…, 4 hours from
-// March to November", "…, 1 hour ahead from March to October".
+// shiftPattern matches the shift a zone clause gives from object, "UTC" or
+// "<name> time" (utcShift, schedShift): "5 hours behind UTC", "the same as
+// UTC", and for a shift that changes with the season a second value and its
+// months, "…, 4 hours from March to November", "…, 1 hour ahead from March to
+// October".
+func shiftPattern(object string) *regexp.Regexp {
+	o := regexp.QuoteMeta(object)
+	return regexp.MustCompile(`^(?:the same as ` + o + `|(.+?) (ahead of|behind) ` + o + `)(?:, (?:the same as ` + o + `|(.+?)(?: (ahead|behind))?) from (\w+) to (\w+))?$`)
+}
+
 var (
-	zoneShiftPattern = regexp.MustCompile(`^(?:the same as UTC|(.+?) (ahead of|behind) UTC)(?:, (?:the same as UTC|(.+?)(?: (ahead|behind))?) from (\w+) to (\w+))?$`)
-	sizePart         = regexp.MustCompile(`(\d+) (hour|minute)s?`)
+	sizePart    = regexp.MustCompile(`(\d+) (hour|minute)s?`)
+	windowRange = regexp.MustCompile(`from (\w+) (\d+) to (?:(\w+) )?(\d+)|on (\w+) (\d+)`)
 )
 
 // zoneMisses checks the zone clause of desc for the written zone loc
-// (zoneName, utcShift) and returns desc without the clause and the clause's
-// shift when it is not what Next() gives in loc, or "no <name> time" when
-// desc does not name loc. It reads nothing for no zone, TZ=Local and "never
-// runs", which name no zone.
-func zoneMisses(loc *time.Location, desc string) (string, []string) {
+// (zoneName, utcShift, schedShift) and returns desc without the clause, and
+// each shift that is not what Next() gives in loc, or "no <name> time" when
+// desc does not name loc. A shift is read with the windows note names off it
+// (windowNote). sched is the scheduler's zone, nil when none is given. It
+// reads nothing for no zone, TZ=Local and "never runs", which name no zone.
+func zoneMisses(loc, sched *time.Location, desc, note string) (string, []string) {
 	if loc == nil || loc == time.Local || desc == "never runs" {
 		return desc, nil
 	}
-	name := zoneName(loc)
+	name, _ := zoneName(loc)
 	head := " " + name + " time, "
 	if name == "UTC" {
 		head = " UTC"
@@ -520,39 +531,122 @@ func zoneMisses(loc *time.Location, desc string) (string, []string) {
 	if j := strings.Index(desc[i:], ";"); j >= 0 {
 		end = i + j
 	}
-	shift := desc[i+len(head) : end]
+	utc, fromSched, _ := strings.Cut(desc[i+len(head):end], ", and ")
+	if name == "UTC" { // UTC has no shift from UTC to give
+		utc, fromSched = "", strings.TrimPrefix(desc[i+len(head):end], ", ")
+	}
 	desc = desc[:i] + desc[end:]
-	if name == "UTC" {
-		return desc, nil // UTC has no shift to give
+	var bad []string
+	if name != "UTC" && !shiftRuns(utc, loc, time.UTC, "UTC", zoneWindows(note, name, "UTC")) {
+		bad = append(bad, cmp.Or(utc, "no shift from UTC"))
 	}
-	if !shiftRuns(shift, loc) {
-		return desc, []string{shift}
+	if fromSched != "" && !schedShiftRuns(fromSched, loc, sched, name, note) {
+		bad = append(bad, fromSched)
 	}
-	return desc, nil
+	return desc, bad
 }
 
-// shiftRuns reports whether shift, read as zoneShiftPattern, is the offset
-// from UTC of a noon run in loc on January 1 of the clause's year, and for a
-// zone whose offset leaves that value once and comes back, the offset it
-// changes to and the months of the two changes.
-func shiftRuns(shift string, loc *time.Location) bool {
-	m := zoneShiftPattern.FindStringSubmatch(shift)
+// schedShiftRuns reports whether shift, the clause's shift from the
+// scheduler's zone, is what Next() gives in loc against sched. A shift with
+// no scheduler zone given is wrong.
+func schedShiftRuns(shift string, loc, sched *time.Location, name, note string) bool {
+	if sched == nil {
+		return false
+	}
+	sname, generic := zoneName(sched)
+	object := sname
+	if generic {
+		object = sname + " time"
+	}
+	return shiftRuns(shift, loc, sched, sname+" time", zoneWindows(note, name, object))
+}
+
+// shiftRuns reports whether shift, read with shiftPattern(object), is loc's
+// offset from ref over the year the clause is made for, as hourly runs in
+// loc walked with Next() find it. A shift with months must be that of a
+// zone pair whose offset leaves its first value once and comes back: the
+// second value and the months of the two changes. Any other shift is the
+// stated value, and the windows the note names must be the stretches of a
+// day or more in which the offset is another, by first and last date.
+func shiftRuns(shift string, loc, ref *time.Location, object string, windows []zoneWindow) bool {
+	m := shiftPattern(object).FindStringSubmatch(shift)
 	if m == nil {
 		return false
+	}
+	spans := cachedHourSpans(loc, ref, describeNow().In(loc).Year())
+	if m[5] == "" {
+		return windowsMatch(spans, sizeOf(m[1], m[2]), windows)
 	}
 	side := m[4]
 	if side == "" {
 		side = m[2] // the second value is on the first one's side
 	}
-	base, changes := noonOffsets(loc, describeNow().In(loc).Year())
-	if sizeOf(m[1], m[2]) != base {
-		return false
+	return len(spans) == 3 && spans[2].off == spans[0].off &&
+		sizeOf(m[1], m[2]) == spans[0].off && sizeOf(m[3], side) == spans[1].off &&
+		m[5] == spans[1].first.Month().String() && m[6] == spans[2].first.Month().String()
+}
+
+// zoneWindow is a window a note names, by its first and last dates, as
+// month*100+day, and the offset in it.
+type zoneWindow struct {
+	from, to int
+	off      time.Duration
+}
+
+// zoneWindows reads the windows note gives subject's zone off its shift from
+// object (windowNote): "Berlin is 5 hours ahead of New York from March 14 to
+// 28 and from October 31 to November 7", "… on December 31".
+func zoneWindows(note, subject, object string) []zoneWindow {
+	sentence := regexp.MustCompile(`^` + regexp.QuoteMeta(subject) + ` is (?:the same as ` + regexp.QuoteMeta(object) +
+		`|(.+?) (ahead of|behind) ` + regexp.QuoteMeta(object) + `) ((?:from|on) .+)$`)
+	var windows []zoneWindow
+	for _, s := range strings.Split(strings.TrimSuffix(note, ", between the two zones' clock changes"), "; ") {
+		m := sentence.FindStringSubmatch(s)
+		if m == nil {
+			continue
+		}
+		for _, r := range windowRange.FindAllStringSubmatch(m[3], -1) {
+			w := zoneWindow{off: sizeOf(m[1], m[2])}
+			switch {
+			case r[5] != "": // on a date
+				w.from = monthDay(r[5], r[6])
+				w.to = w.from
+			case r[3] != "":
+				w.from, w.to = monthDay(r[1], r[2]), monthDay(r[3], r[4])
+			default:
+				w.from, w.to = monthDay(r[1], r[2]), monthDay(r[1], r[4])
+			}
+			windows = append(windows, w)
+		}
 	}
-	if len(changes) != 2 || changes[1].off != base {
-		return m[5] == ""
+	return windows
+}
+
+// monthDay returns a date a note names as month*100+day, 0 for no month.
+func monthDay(month, day string) int {
+	d, _ := strconv.Atoi(day)
+	for m := time.January; m <= time.December; m++ {
+		if m.String() == month {
+			return int(m)*100 + d
+		}
 	}
-	return sizeOf(m[3], side) == changes[0].off &&
-		m[5] == changes[0].month.String() && m[6] == changes[1].month.String()
+	return 0
+}
+
+// windowsMatch reports whether windows are the spans of a day or more whose
+// offset is not stated, by the dates of their first and last runs.
+func windowsMatch(spans []runSpan, stated time.Duration, windows []zoneWindow) bool {
+	date := func(t time.Time) int { return int(t.Month())*100 + t.Day() }
+	var runs []zoneWindow
+	for _, s := range spans {
+		if s.off != stated && s.next.Sub(s.first) >= 24*time.Hour {
+			runs = append(runs, zoneWindow{date(s.first), date(s.last), s.off})
+		}
+	}
+	byDate := func(a, b zoneWindow) int { return a.from - b.from }
+	slices.SortFunc(runs, byDate)
+	named := slices.SortedFunc(slices.Values(windows), byDate)
+	return slices.Equal(runs, named)
 }
 
 // sizeOf reads an offset as a description gives it, "5 hours 30 minutes",
@@ -573,40 +667,96 @@ func sizeOf(s, side string) time.Duration {
 	return d
 }
 
-// noonDaily is "0 12 * * *" as the parser sets it.
-var noonDaily = func() *SpecSchedule {
-	s, err := NewParser(Minute | Hour | Dom | Month | Dow).Parse("0 12 * * *")
+// hourly is "0 * * * *" as the parser sets it.
+var hourly = func() *SpecSchedule {
+	s, err := NewParser(Minute | Hour | Dom | Month | Dow).Parse("0 * * * *")
 	if err != nil {
 		panic(err)
 	}
 	return s.(*SpecSchedule)
 }()
 
-// zoneChange is a month in which a zone's offset from UTC changes, and the
-// offset after it.
-type zoneChange struct {
-	month time.Month
-	off   time.Duration
+// runSpan is a stretch of hourly runs in which a zone keeps one offset from
+// another: its first run, at the change by the minute, its last, and the
+// first run after it, or the end of the year.
+type runSpan struct {
+	first, last, next time.Time
+	off               time.Duration
 }
 
-// noonOffsets walks Next() over a noon run on each day of year in loc and
-// returns the offset of the first run and each change after it.
-// NOTE: a change after noon shows on the next day's run, so a change late on
-// a month's last day reads as the next month's; zones change at night.
-func noonOffsets(loc *time.Location, year int) (time.Duration, []zoneChange) {
-	noon := *noonDaily
-	noon.Location = loc
-	t := noon.Next(yearStart(year, loc))
-	base := offsetOf(t)
-	prev := base
-	var changes []zoneChange
-	for ; t.Year() == year; t = noon.Next(t) {
-		if off := offsetOf(t); off != prev {
-			changes = append(changes, zoneChange{t.Month(), off})
-			prev = off
+// everyMinute is "* * * * *" as the parser sets it.
+var everyMinute = func() *SpecSchedule {
+	s, err := NewParser(Minute | Hour | Dom | Month | Dow).Parse("* * * * *")
+	if err != nil {
+		panic(err)
+	}
+	return s.(*SpecSchedule)
+}()
+
+// spansCache keeps hourSpans by zone names and year, as the goldens and the
+// random specs describe a few zones many times over.
+var spansCache sync.Map
+
+type spansKey struct {
+	loc, ref string
+	year     int
+}
+
+// cachedHourSpans returns hourSpans, kept for zones that tzdata names: a
+// zone named "Local", or a fixed zone, can have other offsets under the
+// same name.
+func cachedHourSpans(loc, ref *time.Location, year int) []runSpan {
+	named := func(l *time.Location) bool { return l == time.UTC || strings.Contains(l.String(), "/") }
+	if !named(loc) || !named(ref) {
+		return hourSpans(loc, ref, year)
+	}
+	k := spansKey{loc.String(), ref.String(), year}
+	if s, ok := spansCache.Load(k); ok {
+		return s.([]runSpan)
+	}
+	s := hourSpans(loc, ref, year)
+	spansCache.Store(k, s)
+	return s
+}
+
+// hourSpans walks Next() over an hourly run in loc through year and groups
+// the runs by loc's offset from ref at them. A span starts at the change
+// itself, found by the minute between two hourly runs (changeAt): ref's
+// change can fall at 11:30 pm in loc, as Almaty's of 2024 does in Kolkata.
+func hourSpans(loc, ref *time.Location, year int) []runSpan {
+	h := *hourly
+	h.Location = loc
+	var spans []runSpan
+	for t := h.Next(yearStart(year, loc)); t.Year() == year; t = h.Next(t) {
+		off := offsetOf(t) - offsetOf(t.In(ref))
+		n := len(spans)
+		if n > 0 && spans[n-1].off == off {
+			spans[n-1].last = t
+			continue
+		}
+		if n > 0 {
+			t = changeAt(loc, ref, spans[n-1].last, t, off)
+			spans[n-1].next = t
+		}
+		spans = append(spans, runSpan{first: t, last: t, off: off})
+	}
+	if n := len(spans); n > 0 {
+		spans[n-1].next = time.Date(year+1, time.January, 1, 0, 0, 0, 0, loc)
+	}
+	return spans
+}
+
+// changeAt returns the first run of every minute in loc after from, and
+// before to, at which loc is off from ref, or to.
+func changeAt(loc, ref *time.Location, from, to time.Time, off time.Duration) time.Time {
+	m := *everyMinute
+	m.Location = loc
+	for t := m.Next(from); t.Before(to); t = m.Next(t) {
+		if offsetOf(t)-offsetOf(t.In(ref)) == off {
+			return t
 		}
 	}
-	return base, changes
+	return to
 }
 
 // hashReachSchedule returns s with each field that has H items running at
@@ -710,12 +860,15 @@ func firstOfEachKindList(sch Schedule) []int {
 func checkGoldensNameRuns(t *testing.T) int {
 	t.Helper()
 	checked := 0
+	old := describeNow
+	defer func() { describeNow = old }()
 	for _, tt := range describeGoldens {
+		setDescribeYear(tt.year)
 		p, err := tryParserForOptions(newDescribeConfig(tt.opts).parse)
 		if err != nil {
 			t.Fatalf("parser for %q: %v", tt.spec, err)
 		}
-		if checkSpecNamesRuns(t, p, tt.spec) {
+		if checkSpecNamesRuns(t, p, tt.spec, tt.opts...) {
 			checked++
 		}
 	}
@@ -730,8 +883,8 @@ func checkGoldensNameRuns(t *testing.T) int {
 // (namesNotRunSpec); only the goldens given field by field (G10) and the
 // specs the parser rejects are not checked.
 func TestDescribeSpecNamesRuns(t *testing.T) {
-	if checked := checkGoldensNameRuns(t); checked < 504 {
-		t.Errorf("checked %d goldens, want at least 504", checked)
+	if checked := checkGoldensNameRuns(t); checked < 524 {
+		t.Errorf("checked %d goldens, want at least 524", checked)
 	}
 
 	r := rand.New(rand.NewPCG(1, 2)) // fixed seed: the same specs on every run
@@ -888,6 +1041,54 @@ func TestAnyDayMatchesParse(t *testing.T) {
 	}
 }
 
+// TestZoneMissesSchedulerAndWindows checks that the zone check finds a wrong
+// shift from the scheduler's zone and wrong or missing windows in the note.
+func TestZoneMissesSchedulerAndWindows(t *testing.T) {
+	pinDescribeYear(t)
+	berlin, py := loadLocation(t, "Europe/Berlin"), loadLocation(t, "Asia/Pyongyang")
+	utc, ny := loadLocation(t, "UTC"), loadLocation(t, "America/New_York")
+	la, sydney := loadLocation(t, "America/Los_Angeles"), loadLocation(t, "Australia/Sydney")
+	tonga, fakaofo := loadLocation(t, "Pacific/Tongatapu"), loadLocation(t, "Pacific/Fakaofo")
+	kolkata, almaty := loadLocation(t, "Asia/Kolkata"), loadLocation(t, "Asia/Almaty")
+	const kolkataAlmaty = " Kolkata time, 5 hours 30 minutes ahead of UTC, and 30 minutes behind Almaty time"
+	const berlinUTC = " Berlin time, 1 hour ahead of UTC, 2 hours from March to October"
+	const berlinNY = "Berlin is 5 hours ahead of New York from March 14 to 28 and from October 31 to November 7, between the two zones' clock changes"
+	const sydneyNY = "Sydney is 16 hours ahead of New York from January 1 to March 14 and from November 7 to December 31; Sydney is 15 hours ahead of New York from March 14 to April 4 and from October 3 to November 7"
+	for _, tt := range []struct {
+		name       string
+		loc, sched *time.Location
+		year       int
+		clause     string
+		note, want string
+	}{
+		{"steady shift and its windows", berlin, ny, 0, berlinUTC + ", and 6 hours ahead of New York time", berlinNY, ""},
+		{"wrong steady shift", berlin, ny, 0, berlinUTC + ", and 7 hours ahead of New York time", berlinNY, "7 hours ahead of New York time"},
+		{"windows left out", berlin, ny, 0, berlinUTC + ", and 6 hours ahead of New York time", "", "6 hours ahead of New York time"},
+		{"a window a week late", berlin, ny, 0, berlinUTC + ", and 6 hours ahead of New York time", strings.Replace(berlinNY, "March 14 to 28", "March 21 to April 4", 1), "6 hours ahead of New York time"},
+		{"windows from January 1", sydney, ny, 0, " Sydney time, 11 hours ahead of UTC, 10 hours from April to October, and 14 hours ahead of New York time", sydneyNY, ""},
+		{"no scheduler zone given", berlin, nil, 0, berlinUTC + ", and 6 hours ahead of New York time", berlinNY, "6 hours ahead of New York time"},
+		{"months against the scheduler", utc, la, 0, " UTC, 8 hours ahead of Los Angeles time, 7 hours from March to November", "", ""},
+		{"wrong months against the scheduler", utc, la, 0, " UTC, 8 hours ahead of Los Angeles time, 7 hours from April to November", "", "8 hours ahead of Los Angeles time, 7 hours from April to November"},
+		{"an unnamed scheduler zone", utc, time.FixedZone("", -8*3600), 0, " UTC, 8 hours ahead of the scheduler's time", "", ""},
+		{"one change, named in the note", py, nil, 2018, " Pyongyang time, 8 hours 30 minutes ahead of UTC", "Pyongyang is 9 hours ahead of UTC from May 5 to December 31", ""},
+		{"one change, no note", py, nil, 2018, " Pyongyang time, 8 hours 30 minutes ahead of UTC", "", "8 hours 30 minutes ahead of UTC"},
+		{"a window a day early", berlin, ny, 0, berlinUTC + ", and 6 hours ahead of New York time", strings.Replace(berlinNY, "March 14 to 28", "March 13 to 28", 1), "6 hours ahead of New York time"},
+		{"a window a day late at its end", berlin, ny, 0, berlinUTC + ", and 6 hours ahead of New York time", strings.Replace(berlinNY, "March 14 to 28", "March 14 to 29", 1), "6 hours ahead of New York time"},
+		{"a change after noon", tonga, berlin, 0, " Tongatapu time, 13 hours ahead of UTC, and 12 hours ahead of Berlin time, 11 hours from March to October", "", ""},
+		{"a window within one date", fakaofo, nil, 2011, " Fakaofo time, 11 hours behind UTC", "Fakaofo is 13 hours ahead of UTC on December 31", ""},
+		{"a window within one date, named a day late", fakaofo, nil, 2011, " Fakaofo time, 11 hours behind UTC", "Fakaofo is 13 hours ahead of UTC from December 31 to 31 and on December 30", "11 hours behind UTC"},
+		{"no shift from UTC", berlin, nil, 0, " Berlin time, ", "", "no shift from UTC"},
+		{"a change at 11:30 pm", kolkata, almaty, 2024, kolkataAlmaty, "Kolkata is 30 minutes ahead of Almaty from February 29 to December 31", ""},
+		{"a change at 11:30 pm, named a day late", kolkata, almaty, 2024, kolkataAlmaty, "Kolkata is 30 minutes ahead of Almaty from March 1 to December 31", "30 minutes behind Almaty time"},
+	} {
+		setDescribeYear(tt.year)
+		_, bad := zoneMisses(tt.loc, tt.sched, "at 9 am every day"+tt.clause, tt.note)
+		if got := strings.Join(bad, ", "); got != tt.want {
+			t.Errorf("%s: %q, want %q", tt.name, got, tt.want)
+		}
+	}
+}
+
 // TestNamesNotRun checks that the check finds what a wrong description
 // names: each case pairs a spec with a description it does not run as.
 func TestNamesNotRun(t *testing.T) {
@@ -959,7 +1160,7 @@ func TestNamesNotRun(t *testing.T) {
 		{five, "CRON_TZ=UTC 0 0 * * *", "at midnight every day UTC", ""},
 		{five, "CRON_TZ=America/New_York 0 0 30 2 *", "never runs", ""},
 	} {
-		bad, err := namesNotRunSpec(tt.p, tt.spec, tt.desc)
+		bad, err := namesNotRunSpec(tt.p, tt.spec, tt.desc, "", nil)
 		if err != nil {
 			t.Fatalf("Parse(%q): %v", tt.spec, err)
 		}

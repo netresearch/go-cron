@@ -836,12 +836,14 @@ func TestAnalyzeSpecDomDowWarning(t *testing.T) {
 func TestAnalyzeSpec_ParseFields(t *testing.T) {
 	testCases := []struct {
 		name           string
+		p              Parser
 		spec           string
 		expectedFields map[string]string
 		unexpectedKeys []string
 	}{
 		{
 			name: "6-field with year",
+			p:    NewParser(Minute | Hour | Dom | Month | Dow | Year),
 			spec: "0 9 15 6 1 2026",
 			expectedFields: map[string]string{
 				"minute":       "0",
@@ -855,6 +857,7 @@ func TestAnalyzeSpec_ParseFields(t *testing.T) {
 		},
 		{
 			name: "6-field with seconds",
+			p:    NewParser(Second | Minute | Hour | Dom | Month | Dow),
 			spec: "30 0 9 15 6 1",
 			expectedFields: map[string]string{
 				"second":       "30",
@@ -868,6 +871,7 @@ func TestAnalyzeSpec_ParseFields(t *testing.T) {
 		},
 		{
 			name: "7-field with seconds and year",
+			p:    NewParser(Second | Minute | Hour | Dom | Month | Dow | Year),
 			spec: "30 0 9 15 6 1 2026",
 			expectedFields: map[string]string{
 				"second":       "30",
@@ -879,25 +883,118 @@ func TestAnalyzeSpec_ParseFields(t *testing.T) {
 				"year":         "2026",
 			},
 		},
+		{
+			name: "6-field with a wildcard year",
+			p:    NewParser(Minute | Hour | Dom | Month | Dow | Year),
+			spec: "0 9 * * 1 *",
+			expectedFields: map[string]string{
+				"minute":       "0",
+				"hour":         "9",
+				"day_of_month": "*",
+				"month":        "*",
+				"day_of_week":  "1",
+				"year":         "*",
+			},
+			unexpectedKeys: []string{"second"},
+		},
+		{
+			name: "5-field with an optional year left out",
+			p:    NewParser(Minute | Hour | Dom | Month | Dow | YearOptional),
+			spec: "0 9 * * 1",
+			expectedFields: map[string]string{
+				"minute":      "0",
+				"day_of_week": "1",
+			},
+			unexpectedKeys: []string{"second", "year"},
+		},
+		{
+			name: "6-field with optional seconds and a wildcard year read as seconds",
+			p:    NewParser(SecondOptional | Minute | Hour | Dom | Month | Dow | Year),
+			spec: "0 9 * * 1 *",
+			expectedFields: map[string]string{
+				"second":      "0",
+				"minute":      "9",
+				"day_of_week": "*",
+			},
+			unexpectedKeys: []string{"year"},
+		},
+		{
+			name: "5-field with seconds and an optional day of week left out",
+			p:    NewParser(Second | Minute | Hour | Dom | Month | DowOptional),
+			spec: "30 0 9 15 6",
+			expectedFields: map[string]string{
+				"second":       "30",
+				"minute":       "0",
+				"hour":         "9",
+				"day_of_month": "15",
+				"month":        "6",
+			},
+			unexpectedKeys: []string{"day_of_week", "year"},
+		},
+		{
+			name: "5-field with optional seconds left out",
+			p:    NewParser(SecondOptional | Minute | Hour | Dom | Month | Dow),
+			spec: "0 9 15 6 1",
+			expectedFields: map[string]string{
+				"minute":       "0",
+				"hour":         "9",
+				"day_of_month": "15",
+				"month":        "6",
+				"day_of_week":  "1",
+			},
+			unexpectedKeys: []string{"second", "year"},
+		},
+		{
+			name: "3-field day, month and optional day of week",
+			p:    NewParser(Dom | Month | DowOptional),
+			spec: "15 6 1",
+			expectedFields: map[string]string{
+				"day_of_month": "15",
+				"month":        "6",
+				"day_of_week":  "1",
+			},
+			unexpectedKeys: []string{"second", "minute", "hour"},
+		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			r := &SpecAnalysis{Fields: make(map[string]string)}
-			r.parseFields(tc.spec)
-
-			for key, expectedVal := range tc.expectedFields {
-				if actualVal, ok := r.Fields[key]; !ok || actualVal != expectedVal {
-					t.Errorf("expected field %s=%q, got %q", key, expectedVal, actualVal)
-				}
-			}
-
-			for _, key := range tc.unexpectedKeys {
-				if _, ok := r.Fields[key]; ok {
-					t.Errorf("unexpected field %q found", key)
-				}
-			}
+			checkParseFields(t, tc.p, tc.spec, tc.expectedFields, tc.unexpectedKeys)
 		})
+	}
+}
+
+// TestAnalyzeSpec_ParseFieldsWrongCount checks that parseFields names no
+// field when spec's field count does not fit the parser. AnalyzeSpec calls
+// it only for a spec that parses, so this test calls it directly.
+func TestAnalyzeSpec_ParseFieldsWrongCount(t *testing.T) {
+	r := &SpecAnalysis{Fields: make(map[string]string)}
+	r.parseFields("0 9 *", standardParser)
+	if len(r.Fields) != 0 {
+		t.Errorf("parseFields(%q) = %v, want no fields", "0 9 *", r.Fields)
+	}
+}
+
+// checkParseFields checks the Fields that parseFields gives spec, as p
+// parses it: each expected value, and none of the unexpected keys.
+func checkParseFields(t *testing.T, p Parser, spec string, expected map[string]string, unexpected []string) {
+	t.Helper()
+	if _, err := p.Parse(spec); err != nil {
+		t.Fatalf("Parse(%q): %v", spec, err)
+	}
+	r := &SpecAnalysis{Fields: make(map[string]string)}
+	r.parseFields(spec, p)
+
+	for key, expectedVal := range expected {
+		if actualVal, ok := r.Fields[key]; !ok || actualVal != expectedVal {
+			t.Errorf("expected field %s=%q, got %q", key, expectedVal, actualVal)
+		}
+	}
+
+	for _, key := range unexpected {
+		if _, ok := r.Fields[key]; ok {
+			t.Errorf("unexpected field %q found", key)
+		}
 	}
 }
 

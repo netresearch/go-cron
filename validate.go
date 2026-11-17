@@ -28,7 +28,8 @@ type SpecAnalysis struct {
 	Location *time.Location
 
 	// Fields contains the original field values from the spec.
-	// Keys: "second" (if applicable), "minute", "hour", "day_of_month", "month", "day_of_week"
+	// Keys, for the fields the spec writes under the parser's options:
+	// "second", "minute", "hour", "day_of_month", "month", "day_of_week", "year"
 	// For descriptors, this will be empty.
 	Fields map[string]string
 
@@ -48,8 +49,9 @@ type SpecAnalysis struct {
 	Description string
 
 	// DescriptionNote spells out the values the hash key picks, as
-	// DescribeSpecNote gives it. Empty unless a field has a hashed step or
-	// a hashed day of the month.
+	// DescribeSpecNote gives it, and the windows in which a written zone is
+	// off the shift the description states. Empty unless a field has a
+	// hashed step or a hashed day of the month, or the zone has a window.
 	DescriptionNote string
 
 	// Warnings contains non-fatal warnings about the schedule.
@@ -160,6 +162,19 @@ func ValidateSpecs(specs []string, options ...ParseOption) map[int]error {
 //	    log.Printf("Fields: %v", result.Fields)
 //	}
 func AnalyzeSpec(spec string, options ...ParseOption) SpecAnalysis {
+	if spec == "" { // before the options, which may be invalid
+		return standardParser.AnalyzeSpec(spec)
+	}
+	return getParserForOptions(options).AnalyzeSpec(spec)
+}
+
+// AnalyzeSpec analyzes spec as p parses it, with p's own settings, as its
+// hash key; see the package function AnalyzeSpec. WithSchedulerLocation
+// names the zone that Description gives a written zone's shift from; callers
+// in a running scheduler pass c.Location(). Without it Description gives the
+// shift from UTC only.
+// WithParseOptions is ignored.
+func (p Parser) AnalyzeSpec(spec string, opts ...DescribeOption) SpecAnalysis {
 	result := SpecAnalysis{
 		Fields: make(map[string]string),
 	}
@@ -170,10 +185,8 @@ func AnalyzeSpec(spec string, options ...ParseOption) SpecAnalysis {
 		return result
 	}
 
-	parser := getParserForOptions(options)
-
 	// Parse the spec
-	schedule, err := parser.Parse(spec)
+	schedule, err := p.Parse(spec)
 	if err != nil {
 		result.Error = err
 		return result
@@ -181,10 +194,10 @@ func AnalyzeSpec(spec string, options ...ParseOption) SpecAnalysis {
 
 	result.Valid = true
 	result.Schedule = schedule
-	result.Description, result.DescriptionNote, _ = parser.describe(spec)
+	result.Description, result.DescriptionNote, _ = p.describe(spec, newDescribeConfig(opts).sched)
 
 	// Extract location and analyze the spec
-	result.analyzeSpec(spec)
+	result.analyzeSpec(spec, p)
 
 	// Check for DOM/DOW AND logic warning
 	result.checkDomDowWarning()
@@ -207,32 +220,10 @@ func AnalyzeSpec(spec string, options ...ParseOption) SpecAnalysis {
 //	    log.Printf("Next run: %v", result.NextRun)
 //	}
 func AnalyzeSpecWithHash(spec string, options ParseOption, hashSeed string) SpecAnalysis {
-	result := SpecAnalysis{
-		Fields: make(map[string]string),
+	if spec == "" { // before the options, which may be invalid
+		return standardParser.AnalyzeSpec(spec)
 	}
-
-	if len(spec) == 0 {
-		result.Error = ErrEmptySpec
-		return result
-	}
-
-	parser := NewParser(options).WithHashKey(hashSeed)
-
-	schedule, err := parser.Parse(spec)
-	if err != nil {
-		result.Error = err
-		return result
-	}
-
-	result.Valid = true
-	result.Schedule = schedule
-	result.Description, result.DescriptionNote, _ = parser.describe(spec)
-
-	result.analyzeSpec(spec)
-	result.checkDomDowWarning()
-	result.NextRun = schedule.Next(time.Now())
-
-	return result
+	return NewParser(options).WithHashKey(hashSeed).AnalyzeSpec(spec)
 }
 
 // checkDomDowWarning adds a warning if both DOM and DOW are restricted.
@@ -257,7 +248,7 @@ func (r *SpecAnalysis) checkDomDowWarning() {
 }
 
 // analyzeSpec extracts metadata from the spec string.
-func (r *SpecAnalysis) analyzeSpec(spec string) {
+func (r *SpecAnalysis) analyzeSpec(spec string, p Parser) {
 	// Extract timezone
 	loc, remaining, _ := parseTimezone(spec)
 	r.Location = loc
@@ -270,7 +261,7 @@ func (r *SpecAnalysis) analyzeSpec(spec string) {
 	}
 
 	// Parse fields for non-descriptor specs
-	r.parseFields(remaining)
+	r.parseFields(remaining, p)
 }
 
 // analyzeDescriptor extracts information from descriptor-style specs. The
@@ -285,47 +276,44 @@ func (r *SpecAnalysis) analyzeDescriptor() {
 	}
 }
 
-// parseFields extracts individual field values from a standard cron expression.
-func (r *SpecAnalysis) parseFields(spec string) {
-	fields := strings.Fields(spec)
+// fieldNames are the Fields keys of places, in the same order.
+var fieldNames = []string{unitSecond, unitMinute, unitHour, "day_of_month", unitMonth, "day_of_week"}
 
-	// Map fields based on count
-	// 5 fields: minute hour dom month dow
-	// 6 fields: second minute hour dom month dow (or minute hour dom month dow year)
-	// 7 fields: second minute hour dom month dow year
-	switch len(fields) {
-	case 5:
-		r.Fields["minute"] = fields[0]
-		r.Fields["hour"] = fields[1]
-		r.Fields["day_of_month"] = fields[2]
-		r.Fields["month"] = fields[3]
-		r.Fields["day_of_week"] = fields[4]
-	case 6:
-		// Could be either with seconds or with year (without seconds)
-		// We detect year by checking if the last field looks like a year (4 digits, 1970-2099 range)
-		if looksLikeYear(fields[5]) {
-			r.Fields["minute"] = fields[0]
-			r.Fields["hour"] = fields[1]
-			r.Fields["day_of_month"] = fields[2]
-			r.Fields["month"] = fields[3]
-			r.Fields["day_of_week"] = fields[4]
-			r.Fields["year"] = fields[5]
-		} else {
-			r.Fields["second"] = fields[0]
-			r.Fields["minute"] = fields[1]
-			r.Fields["hour"] = fields[2]
-			r.Fields["day_of_month"] = fields[3]
-			r.Fields["month"] = fields[4]
-			r.Fields["day_of_week"] = fields[5]
+// parseFields names the fields of spec as p parses them: the year as p's
+// options split it off (handleYearExtraction), then p's places in order,
+// less an optional field the spec left out (writtenPlaces).
+func (r *SpecAnalysis) parseFields(spec string, p Parser) {
+	fields, year, _ := p.handleYearExtraction(strings.Fields(spec))
+	written := writtenPlaces(p.options, len(fields))
+	var names []string
+	for i, place := range places {
+		if written&place != 0 {
+			names = append(names, fieldNames[i])
 		}
-	case 7:
-		r.Fields["second"] = fields[0]
-		r.Fields["minute"] = fields[1]
-		r.Fields["hour"] = fields[2]
-		r.Fields["day_of_month"] = fields[3]
-		r.Fields["month"] = fields[4]
-		r.Fields["day_of_week"] = fields[5]
-		r.Fields["year"] = fields[6]
+	}
+	if len(names) != len(fields) {
+		return
+	}
+	for i, name := range names {
+		r.Fields[name] = fields[i]
+	}
+	if year != "" {
+		r.Fields["year"] = year
+	}
+}
+
+// writtenPlaces returns the places a spec of n fields writes under options:
+// all configured places, or, one short, all but the optional field that
+// normalizeFields fills in (the day of week before the second, as there).
+func writtenPlaces(options ParseOption, n int) ParseOption {
+	all, optionals, _ := processOptionalFlags(options)
+	switch {
+	case optionals == 0 || countConfiguredFields(all) == n:
+		return all
+	case options&DowOptional > 0:
+		return all &^ Dow
+	default:
+		return all &^ Second
 	}
 }
 
