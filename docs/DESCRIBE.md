@@ -228,7 +228,7 @@ The examples are for 2027.
 | Z5 | A written zone is always named, also when it moves no run: `TZ="America/New_York" */15 * * * *` reads "at minutes 0, 15, 30, and 45 past the hour New York time, 5 hours behind UTC, 4 hours from March to November" |
 | Z6 | A spec with no prefix reads as it did, and so does `TZ=Local`: both run in the scheduler's zone |
 | Z7 | The zone follows the schedule and the alternatives of a fixed value, and precedes the short-month and hash key clauses (G7): "at midnight on the 1st, 11th, 21st, and 31st of the month Berlin time, 1 hour ahead of UTC, 2 hours from March to October; the 31st runs only in months that have one". A descriptor takes it as its cron equivalent does, and so does a description given field by field. "never runs", "only when triggered" and an interval take no zone |
-| Z8 | The shifts, months and dates are those of the current year in the spec's zone, also for a spec that writes years. For a zone with a steady rule the description is the same every year; the dates in the note change with the year |
+| Z8 | The shifts, months and dates are those of the current year in the spec's zone, also for a spec that writes years. For a zone with a steady rule the shift from UTC and its months are the same every year. The shift from the scheduler's zone can differ between years when both zones change with the season, as the shift in force for most of the year (Z3) can be another: `CRON_TZ=Europe/Berlin 0 0 * * *` on a Santiago scheduler reads "4 hours ahead of Santiago time" in 2026 and "6 hours ahead of Santiago time" in 2027. The dates in the note change with the year |
 | Z9 | The scheduler's zone has no default: without `WithSchedulerLocation`, and for nil, the description gives the shift from UTC only, as the caller may describe a scheduler that runs in another process and zone: "at 2:30 am every day New York time, 5 hours behind UTC, 4 hours from March to November". A caller passes `time.Local` to name the host's zone. `time.Local` has a name only when the `TZ` environment variable gives it one; without one, as any zone with no name, it reads "the scheduler's time": "at midnight every day UTC, 8 hours ahead of the scheduler's time" |
 
 ### Notes (`DescribeSpecNote`)
@@ -635,8 +635,8 @@ after the next clock change, and a description is read long after it is made.
 So it gives the January shift, the other value, and the months the other value
 holds. Months, not dates, go in the description: a zone's months hold from year
 to year, and its dates do not. Where two zones change on different dates the
-description keeps one shift, and the note gives the windows by date, exactly,
-for the current year. A window under a day is left out, so that two zones that
+description keeps one shift, the one in force for most of that year, and the
+note gives the windows by date, exactly, for the current year. A window under a day is left out, so that two zones that
 change on one date, as New York and Los Angeles do, get no note every year. A
 run inside such a window is an hour off the stated shift, and can fall on
 another date: at 3:30 am New York time on March 14, 2027, Los Angeles is at
