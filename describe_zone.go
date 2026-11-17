@@ -346,8 +346,8 @@ func schedShift(spec, sched zoneYear, name, sname string, generic bool) (clause,
 // space, and the note for the windows off those shifts (Z4). Both are "" for a
 // spec with no zone and for TZ=Local, which reads as no zone does (Z6). The
 // scheduler's shift is left out when sched is nil, as the scheduler may run in
-// another process and zone than the caller (Z9), and when the scheduler runs on UTC, under any name, or has the spec zone's
-// offsets all year.
+// another process and zone than the caller (Z9), and when the scheduler runs
+// on UTC, under any name, or has the spec zone's offsets all year (Z3).
 func zoneClause(spec, sched *time.Location, now time.Time) (clause, note string) {
 	if spec == nil || spec == time.Local {
 		return "", ""
