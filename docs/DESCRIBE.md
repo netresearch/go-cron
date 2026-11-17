@@ -56,7 +56,12 @@ func WithSchedulerLocation(loc *time.Location) DescribeOption
   and `TZ=Local`, carries no time zone (Z6); callers show the location
   beside it. The shifts are those of the year the description is made in, so
   a description can change at the end of a year, and its months between
-  years when a zone's rules change (Z8).
+  years when a zone's rules change (Z8). A description is text made when it
+  is asked for and does not follow a later change: describe the spec again
+  after the scheduler's zone or the zone data changes. A Cron's zone is set
+  when it is made, with `WithLocation` or `time.Local` by default, and does
+  not change; a scheduler in another zone is a new Cron. A spec without a
+  prefix then runs at other instants while its description stays the same.
 - `DescribeSpecNote` spells out the values the hash key picks, which the
   description leaves as "a fixed …": "at minutes h, h+15, h+30, and h+45
   past the hour, where h is a fixed minute from 0 to 14". For a written
