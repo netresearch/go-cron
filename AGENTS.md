@@ -1,4 +1,4 @@
-<!-- Managed by agent: keep sections and order; edit content, not structure. Last updated: 2026-04-02 -->
+<!-- Managed by agent: keep sections and order; edit content, not structure. Last updated: 2026-11-16 -->
 
 # AGENTS.md
 
@@ -80,6 +80,7 @@ Every ADR decision in force must be pinned by a test that fails when code violat
 - Conventional Commits: `type(scope): subject`
 - Ask before: adding dependencies, breaking API changes, repo-wide rewrites
 - Never commit secrets or sensitive data
+- No AI disclosure or attribution is required: commits, PR descriptions and comments need no note, trailer or footer saying that an AI, an agent or a harness helped. The human who submits the contribution is responsible for it (see "AI-assisted contributions" in `CONTRIBUTING.md`)
 - Maintain backwards compatibility with `robfig/cron/v3` API
 - **NEVER create GitHub Releases with `gh release create`** — releases MUST be created by pushing a signed tag (`git tag -s`), which triggers `.github/workflows/release.yml`. This workflow generates SBOMs, Cosign signatures, SLSA provenance attestations, and checksums. CLI-created releases bypass this and lack all supply chain security artifacts.
 

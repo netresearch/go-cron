@@ -47,10 +47,18 @@ entry before draining**:
    If absent, create via `ScheduleJob` (no stale schedule ⇒ no window).
 2. `PauseEntry(id)` — atomic with respect to the run loop.
 3. `WaitForJobByName(name)` — drain any in-flight invocation.
-4. `UpdateEntry(id, schedule, cmd)` — swap schedule and job while paused.
-5. `ResumeEntry(id)` — only if the caller had not already paused the entry.
+4. Swap schedule and job while paused, resume — only if the caller had not
+   already paused the entry — and then apply the job options, so that
+   `WithPaused` keeps the entry paused.
 
-The method **composes existing public methods**; it does not add a new run-loop
+Amendment (issue #456): steps 4 and 5 were `UpdateEntry` followed by a
+separate `ResumeEntry`. Since upserts apply their job options on an update,
+the swap and the resume are one run-loop request (the update request carries
+the options and a resume flag). With a separate resume, the run loop could
+skip a `WithRunImmediately` run while the entry was still paused. This does not
+change the no-stale-fire guarantee: the entry stays paused until the swap.
+
+The method **composes existing methods**; it does not add a new run-loop
 request type or a monolithic locked operation. Each composed call acquires and
 releases `runningMu` independently, so the blocking drain in step 3 never holds
 a cron lock and never stalls the run loop or other mutators.
@@ -76,9 +84,9 @@ scheduler, all verified in `cron.go`:
    `processDueEntries`, before the `go func()` that runs the job), so
    `WaitForJobByName` provably observes and joins it.
 
-`updateSchedule` does not touch `Paused`, so the entry stays paused across the
-swap; the resume in step 5 re-enables the **new** schedule, whose `Next` was
-computed at swap time.
+`updateSchedule` changes `Paused` only in the same step as the swap of schedule
+and job, so the entry stays paused until the swap is complete; the resume in
+step 4 re-enables the **new** schedule, whose `Next` was computed at swap time.
 
 ### Explicit non-guarantee
 
@@ -97,15 +105,16 @@ cannot cause an ABA.
 ### Positive
 - Closes the stale-fire window for the common graceful-reschedule use case with
   a single call.
-- No new run-loop machinery, no new struct fields, no lock held across the
-  blocking drain — low risk, easy to reason about.
+- No new run-loop request type and no lock held across the blocking drain — low
+  risk, easy to reason about. (Since issue #456 the existing update request
+  carries the job options and a resume flag.)
 - Mirrors `UpsertJob`'s contract exactly (same options, same errors), so it is a
   drop-in replacement for the two-step pattern.
 
 ### Negative
-- Composes four run-loop round trips (lookup, pause, swap, resume) plus the
-  drain, versus `UpsertJob`'s one. The extra round trips are O(1) and dwarfed by
-  the drain wait; not a concern in practice.
+- Composes three run-loop round trips (lookup, pause, swap with resume) plus
+  the drain, versus `UpsertJob`'s two (lookup, swap). The extra round trip is
+  O(1) and dwarfed by the drain wait; not a concern in practice.
 - The windowless guarantee depends on the run loop incrementing the job tracker
   **synchronously before** launching the job goroutine. A future refactor that
   moved `start()` into the goroutine would reopen the window. Flagged here and

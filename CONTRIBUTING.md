@@ -173,6 +173,16 @@ git commit -S -s -m "feat(parser): add timezone alias support"
 git rebase --exec 'git commit --amend --no-edit -S -s' main
 ```
 
+### AI-assisted contributions
+
+You may use AI tools, coding agents or agent harnesses for your contribution.
+Commits, pull requests and comments need no disclosure or attribution of that
+use: no note in the description, no trailer and no footer.
+
+The person who submits the contribution is responsible for it, whatever tool
+helped to write it. Your DCO sign-off certifies that you have the right to
+submit the code, and you answer for its content in review.
+
 ### Testing
 
 - Write tests for new functionality

@@ -11,7 +11,7 @@ import (
 )
 
 // describeNow gives the instant whose year the zone clauses are computed
-// for (Z8). Tests replace it.
+// for. Tests replace it.
 var describeNow = time.Now
 
 // zoneShift is a change of a zone's offset from UTC: the instant and the
@@ -34,23 +34,31 @@ type zoneYear struct {
 // changes its offset monthly.
 const maxZoneBounds = 12
 
-// zoneYearOf walks loc's offset changes through year. A bound that leaves
-// the offset as it was is skipped: Go reports year-end bounds past a zone's
-// stored transitions.
+// zoneYearOf walks loc's offset changes through year of its own calendar.
 func zoneYearOf(loc *time.Location, year int) zoneYear {
-	t := time.Date(year, time.January, 1, 0, 0, 0, 0, loc)
+	start := time.Date(year, time.January, 1, 0, 0, 0, 0, loc)
+	return zoneYearOver(loc, year, start, start.AddDate(1, 0, 0))
+}
+
+// zoneYearOver walks loc's offset changes from start up to end, the instants
+// another zone's year spans; year is that year. A bound that leaves the
+// offset as it was is skipped: Go reports year-end bounds past a zone's
+// stored transitions, and some not after the instant asked about, which
+// zoneEndAfter steps past.
+func zoneYearOver(loc *time.Location, year int, start, end time.Time) zoneYear {
+	t := start.In(loc)
 	z := zoneYear{loc: loc, year: year, base: offsetOf(t)}
 	prev := z.base
 	for range maxZoneBounds {
-		_, end := t.ZoneBounds()
-		if end.IsZero() || end.In(loc).Year() > year {
+		bound := zoneEndAfter(t)
+		if bound.IsZero() || !bound.Before(end) {
 			break
 		}
-		if off := offsetOf(end); off != prev {
-			z.shifts = append(z.shifts, zoneShift{at: end, off: off})
+		if off := offsetOf(bound); off != prev {
+			z.shifts = append(z.shifts, zoneShift{at: bound, off: off})
 			prev = off
 		}
-		t = end
+		t = bound
 	}
 	return z
 }
@@ -74,7 +82,7 @@ var tzAreas = []string{
 	"Atlantic", "Australia", "Europe", "Indian", "Pacific",
 }
 
-// zoneName returns the name a description gives loc (Z1): for a name under
+// zoneName returns the name a description gives loc: for a name under
 // one of the tz areas its last part with spaces, "New York"; any other name
 // as written, "UTC", "Etc/GMT+5", "US/Eastern". generic is true for a zone
 // with no name of its own, time.Local or an unnamed one, which reads "the
@@ -144,10 +152,10 @@ func monthsWords(a, b time.Time, loc *time.Location) string {
 	return " from " + a.In(loc).Month().String() + " to " + b.In(loc).Month().String()
 }
 
-// utcShift names a zone's offset from UTC over the year (Z2): "5 hours
-// behind UTC", and for a zone that changes with the season "5 hours behind
-// UTC, 4 hours from March to November". A zone that changes in another way
-// gets its January offset, and the note names the rest of the year (Z4).
+// utcShift names a zone's offset from UTC over the year: "5 hours behind UTC",
+// and for a zone that changes with the season "5 hours behind UTC, 4 hours
+// from March to November". A zone that changes in another way gets its January
+// offset, and the note names the rest of the year (windowNote).
 func utcShift(z zoneYear, name string) (clause, note string) {
 	clause = shiftWords(z.base, "UTC")
 	switch {
@@ -168,32 +176,40 @@ func dateWords(t time.Time, sameMonth bool) string {
 	return t.Month().String() + " " + strconv.Itoa(t.Day())
 }
 
+// windowWords names a window by the dates of its first and last instant:
+// "from March 14 to 28", "from October 31 to November 7", or "on September
+// 30" for a window within one date.
+func windowWords(from, last time.Time) string {
+	if from.Month() == last.Month() && from.Day() == last.Day() {
+		return "on " + dateWords(from, false)
+	}
+	return "from " + dateWords(from, false) + " to " + dateWords(last, from.Month() == last.Month())
+}
+
 // windowNote names the windows in which subject's zone is off the steady
-// shift the description states (Z4), by the dates, in loc, of each window's
+// shift the description states, by the dates, in loc, of each window's
 // first and last instant: "Berlin is 5 hours ahead of New York from March 14
-// to 28 and from October 31 to November 7". Each shift gets one sentence. A
-// window under a day is left out (Z4), although a run inside it is off the
-// stated shift. tail says that the windows lie between two
-// zones' clock changes.
+// to 28 and from October 31 to November 7", a list as G8 has it. Each shift
+// gets one sentence. A window under a day is left out. tail says that the
+// windows lie between two zones' clock changes (betweenChanges).
 func windowNote(subject, object string, spans []zoneSpan, steady time.Duration, loc *time.Location, tail bool) string {
 	var order []time.Duration
 	windows := map[time.Duration][]string{}
 	for _, s := range spans {
-		if s.off == steady || s.to.Sub(s.from) < 24*time.Hour {
+		if !s.named(steady) {
 			continue
 		}
 		if windows[s.off] == nil {
 			order = append(order, s.off)
 		}
-		from, last := s.from.In(loc), s.to.Add(-1).In(loc)
-		windows[s.off] = append(windows[s.off], "from "+dateWords(from, false)+" to "+dateWords(last, from.Month() == last.Month()))
+		windows[s.off] = append(windows[s.off], windowWords(s.from.In(loc), s.to.Add(-1).In(loc)))
 	}
 	if len(order) == 0 {
 		return ""
 	}
 	sentences := make([]string, len(order))
 	for i, off := range order {
-		sentences[i] = subject + " is " + shiftWords(off, object) + " " + strings.Join(windows[off], " and ")
+		sentences[i] = subject + " is " + shiftWords(off, object) + " " + andList(windows[off])
 	}
 	note := strings.Join(sentences, "; ")
 	if tail {
@@ -219,6 +235,31 @@ func (z zoneYear) same(o zoneYear) bool {
 type zoneSpan struct {
 	from, to time.Time
 	off      time.Duration
+}
+
+// named reports whether a note names s as a window off the steady shift: it
+// has another offset and lasts a day or more.
+func (s zoneSpan) named(steady time.Duration) bool {
+	return s.off != steady && s.to.Sub(s.from) >= 24*time.Hour
+}
+
+// changesAt reports whether the zone's offset changes at t.
+func (z zoneYear) changesAt(t time.Time) bool {
+	return slices.ContainsFunc(z.shifts, func(s zoneShift) bool { return s.at.Equal(t) })
+}
+
+// betweenChanges reports whether every window the note names starts at a
+// clock change of one zone and ends at a clock change of the other, as
+// Berlin's and New York's spring and autumn gaps do. A window from January 1
+// or to December 31, or one between two changes of one zone, is not.
+func betweenChanges(spans []zoneSpan, steady time.Duration, spec, sched zoneYear) bool {
+	for _, s := range spans {
+		fromTo := func(a, b zoneYear) bool { return a.changesAt(s.from) && b.changesAt(s.to) }
+		if s.named(steady) && !fromTo(spec, sched) && !fromTo(sched, spec) {
+			return false
+		}
+	}
+	return true
 }
 
 // zoneSpans splits spec's year, in its own zone, at each offset change of
@@ -270,11 +311,11 @@ func steadyOf(spans []zoneSpan, bothSeasonal bool) time.Duration {
 	return best
 }
 
-// schedShift names a spec zone's shift from the scheduler's zone (Z3): one
+// schedShift names a spec zone's shift from the scheduler's zone: one
 // value when it holds all year; the months form when one zone changes with
 // the season and the other does not, "8 hours ahead of Los Angeles time, 7
 // hours from March to November"; otherwise the steady value, and the note
-// names the windows off it (Z4). name is the spec zone's name; sname is the
+// names the windows off it (windowNote). name is the spec zone's name; sname is the
 // scheduler's, generic when it has none of its own.
 func schedShift(spec, sched zoneYear, name, sname string, generic bool) (clause, note string) {
 	other := sname + " time"
@@ -296,16 +337,17 @@ func schedShift(spec, sched zoneYear, name, sname string, generic bool) (clause,
 	if generic {
 		object = other
 	}
-	return shiftWords(steady, other), windowNote(name, object, spans, steady, spec.loc, !oneMoves)
+	return shiftWords(steady, other), windowNote(name, object, spans, steady, spec.loc, betweenChanges(spans, steady, spec, sched))
 }
 
 // zoneClause returns the clause that names the zone a spec wrote, its shift
-// from UTC and its shift from the scheduler's zone (Z1–Z3), with its leading
-// space, and the note for the windows off those shifts (Z4). Both are "" for
-// a spec with no zone and for TZ=Local, which reads as no zone does (Z6). The
-// scheduler's shift is left out when sched is nil, as the scheduler may run
-// in another process and zone than the caller (Z9), and when the scheduler
-// runs on UTC, under any name, or has the spec zone's offsets all year.
+// from UTC and its shift from the scheduler's zone (zoneName, utcShift,
+// schedShift), with its leading space, and the note for the windows off those
+// shifts (windowNote). Both are "" for a spec with no zone and for TZ=Local,
+// which reads as no zone does. The scheduler's shift is left out when sched is
+// nil, as the scheduler may run in another process and zone than the caller,
+// and when the scheduler runs on UTC, under any name, or has the spec zone's
+// offsets all year.
 func zoneClause(spec, sched *time.Location, now time.Time) (clause, note string) {
 	if spec == nil || spec == time.Local {
 		return "", ""
@@ -321,7 +363,8 @@ func zoneClause(spec, sched *time.Location, now time.Time) (clause, note string)
 		return clause, note
 	}
 	sname, generic := zoneName(sched)
-	if s := zoneYearOf(sched, z.year); !s.utc() && !s.same(z) {
+	start := time.Date(z.year, time.January, 1, 0, 0, 0, 0, spec)
+	if s := zoneYearOver(sched, z.year, start, start.AddDate(1, 0, 0)); !s.utc() && !s.same(z) {
 		shift, n := schedShift(z, s, name, sname, generic)
 		clause, note = clause+join+shift, joinNote(note, n)
 	}

@@ -23,14 +23,24 @@ Originally based on [robfig/cron](https://github.com/robfig/cron).
 - `DescribeSpecNote` and `Parser.DescribeSpecNote` spell out the values the
   hash key picks; `SpecAnalysis.Description` and `SpecAnalysis.DescriptionNote`
   carry the description and the note (#205)
-- `DescribeSpec` names a spec's `TZ=`/`CRON_TZ=` zone and its shift from UTC
-  and from the scheduler's zone, given with `WithSchedulerLocation`: "at 2:30
-  am every day New York time, 5 hours behind UTC, 4 hours from March to
-  November"; `DescribeSpecNote` names the windows where two moving zones
-  differ (#205)
+- `DescribeSpec` names a zone written with `TZ=` or `CRON_TZ=` and its shift
+  from UTC: "at 9 am every day Kolkata time, 5 hours 30 minutes ahead of UTC"
+  (#205)
+- `WithSchedulerLocation` names the scheduler's zone, so `DescribeSpec` also
+  gives a written zone's shift from it: "…, and 3 hours ahead of Los Angeles
+  time"; `DescribeSpecNote` names the windows in which the zone is off that
+  shift. Without it the description gives the shift from UTC only (#205)
 - `Parser.AnalyzeSpec` analyzes a spec with the parser's own settings and
-  takes `WithSchedulerLocation`, so `SpecAnalysis.Description` also gives a
-  written zone's shift from the Cron's zone (#205)
+  takes `WithSchedulerLocation` (#205)
+
+### Fixed
+- `AnalyzeSpec` splits the year off `Fields` as the parser does. With `Year`,
+  `0 9 * * 1 *` reported the `*` year as the day of the week and the `9` as
+  the minute; a year counted only when it held a number of 100 or more
+- `AnalyzeSpec` names `Fields` by the parser's fields. With `Second` and
+  `DowOptional`, `30 0 9 15 6` reported `30` as the minute and `15` as the
+  month; a parser without the time fields (`Dom | Month | Dow`) left
+  `Fields` empty
 
 ### Planned for v2
 - Context-aware Job interface with graceful shutdown support

@@ -5,17 +5,17 @@ package cron
 
 import (
 	"errors"
+	"os"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
 
-// mustZone loads a zone the tests name, or panics.
-func mustZone(name string) *time.Location {
-	loc, err := time.LoadLocation(name)
-	if err != nil {
-		panic(err)
-	}
+// goldenZone loads a scheduler zone the golden tables pass. A host without
+// it gets nil, so the goldens that pass it fail and the other tests run.
+func goldenZone(name string) *time.Location {
+	loc, _ := time.LoadLocation(name)
 	return loc
 }
 
@@ -23,15 +23,15 @@ func mustZone(name string) *time.Location {
 // gives the shift from UTC only. schedLocal is a zone named "Local", as time.Local is.
 var (
 	schedUTC   = WithSchedulerLocation(time.UTC)
-	schedNY    = WithSchedulerLocation(mustZone("America/New_York"))
-	schedLA    = WithSchedulerLocation(mustZone("America/Los_Angeles"))
-	schedLon   = WithSchedulerLocation(mustZone("Europe/London"))
-	schedKol   = WithSchedulerLocation(mustZone("Asia/Kolkata"))
+	schedNY    = WithSchedulerLocation(goldenZone("America/New_York"))
+	schedLA    = WithSchedulerLocation(goldenZone("America/Los_Angeles"))
+	schedLon   = WithSchedulerLocation(goldenZone("Europe/London"))
+	schedKol   = WithSchedulerLocation(goldenZone("Asia/Kolkata"))
 	schedLocal = WithSchedulerLocation(time.FixedZone("Local", -8*3600))
 )
 
 func TestWithSchedulerLocation(t *testing.T) {
-	la := mustZone("America/Los_Angeles")
+	la := loadLocation(t, "America/Los_Angeles")
 	if c := newDescribeConfig([]DescribeOption{WithSchedulerLocation(la)}); c.sched != la {
 		t.Errorf("sched = %v, want Los Angeles", c.sched)
 	}
@@ -49,18 +49,18 @@ func TestZoneName(t *testing.T) {
 		want    string
 		generic bool
 	}{
-		{mustZone("America/New_York"), "New York", false},
-		{mustZone("Europe/Berlin"), "Berlin", false},
-		{mustZone("America/Argentina/Buenos_Aires"), "Buenos Aires", false},
+		{loadLocation(t, "America/New_York"), "New York", false},
+		{loadLocation(t, "Europe/Berlin"), "Berlin", false},
+		{loadLocation(t, "America/Argentina/Buenos_Aires"), "Buenos Aires", false},
 		{time.UTC, "UTC", false},
-		{mustZone("Etc/UTC"), "Etc/UTC", false},
-		{mustZone("Etc/GMT+5"), "Etc/GMT+5", false},
-		{mustZone("EST5EDT"), "EST5EDT", false},
+		{loadLocation(t, "Etc/UTC"), "Etc/UTC", false},
+		{loadLocation(t, "Etc/GMT+5"), "Etc/GMT+5", false},
+		{loadLocation(t, "EST5EDT"), "EST5EDT", false},
 		// A name outside the tz areas is often one of several alike.
-		{mustZone("US/Eastern"), "US/Eastern", false},
-		{mustZone("Canada/Central"), "Canada/Central", false},
-		{mustZone("Australia/Sydney"), "Sydney", false},
-		{mustZone("Pacific/Auckland"), "Auckland", false},
+		{loadLocation(t, "US/Eastern"), "US/Eastern", false},
+		{loadLocation(t, "Canada/Central"), "Canada/Central", false},
+		{loadLocation(t, "Australia/Sydney"), "Sydney", false},
+		{loadLocation(t, "Pacific/Auckland"), "Auckland", false},
 		// time.Local is named "Local" unless the TZ variable names it.
 		{time.FixedZone("Local", 0), "the scheduler's", true},
 		{time.FixedZone("", 3600), "the scheduler's", true},
@@ -131,7 +131,7 @@ func TestZoneYearOf(t *testing.T) {
 		{"Asia/Kolkata", 5*time.Hour + 30*time.Minute, nil, false},
 		{"Australia/Lord_Howe", 11 * time.Hour, []zoneShift{{utc(4, 3, 15, 0), 10*time.Hour + 30*time.Minute}, {utc(10, 2, 15, 30), 11 * time.Hour}}, true},
 	} {
-		z := zoneYearOf(mustZone(tt.zone), 2027)
+		z := zoneYearOf(loadLocation(t, tt.zone), 2027)
 		if z.base != tt.base || len(z.shifts) != len(tt.shifts) || z.seasonal() != tt.seasonal {
 			t.Errorf("%s: base %v, %d shifts, seasonal %v; want %v, %d, %v", tt.zone, z.base, len(z.shifts), z.seasonal(), tt.base, len(tt.shifts), tt.seasonal)
 			continue
@@ -139,6 +139,21 @@ func TestZoneYearOf(t *testing.T) {
 		for i, s := range tt.shifts {
 			if got := z.shifts[i]; !got.at.Equal(s.at) || got.off != s.off {
 				t.Errorf("%s: shift %d = %v %v, want %v %v", tt.zone, i, got.at.UTC(), got.off, s.at, s.off)
+			}
+		}
+	}
+}
+
+// TestZoneYearOfEveryYear walks zones that change with the season in every
+// year through 2050. Go can report a year-end bound that is not after the
+// instant asked about (TestNextAcrossYearEnds); the walk must step past it
+// rather than stop with no shifts.
+func TestZoneYearOfEveryYear(t *testing.T) {
+	for _, zone := range []string{"Europe/Berlin", "Australia/Lord_Howe", "Australia/Adelaide", "America/New_York"} {
+		loc := loadLocation(t, zone)
+		for y := 2026; y <= 2050; y++ {
+			if z := zoneYearOf(loc, y); !z.seasonal() {
+				t.Errorf("%s %d: %d shifts, not seasonal", zone, y, len(z.shifts))
 			}
 		}
 	}
@@ -153,7 +168,7 @@ func TestUTCShift(t *testing.T) {
 		"Asia/Kolkata":        "5 hours 30 minutes ahead of UTC",
 		"Etc/UTC":             "the same as UTC",
 	} {
-		if got, note := utcShift(zoneYearOf(mustZone(zone), 2027), "X"); got != want || note != "" {
+		if got, note := utcShift(zoneYearOf(loadLocation(t, zone), 2027), "X"); got != want || note != "" {
 			t.Errorf("%s: utcShift = %q, note %q; want %q and no note", zone, got, note, want)
 		}
 	}
@@ -168,8 +183,8 @@ func TestJoinNote(t *testing.T) {
 }
 
 func TestZoneSpans(t *testing.T) {
-	berlin := mustZone("Europe/Berlin")
-	spans := zoneSpans(zoneYearOf(berlin, 2027), zoneYearOf(mustZone("America/New_York"), 2027))
+	berlin := loadLocation(t, "Europe/Berlin")
+	spans := zoneSpans(zoneYearOf(berlin, 2027), zoneYearOf(loadLocation(t, "America/New_York"), 2027))
 	var offs []time.Duration
 	for _, s := range spans {
 		offs = append(offs, s.off)
@@ -197,14 +212,14 @@ func TestZoneSpans(t *testing.T) {
 // TestZoneSpansJoinsEqualOffsets: two zones that change at the same instant
 // keep one span, and so read as one value all year.
 func TestZoneSpansJoinsEqualOffsets(t *testing.T) {
-	spans := zoneSpans(zoneYearOf(mustZone("Europe/Berlin"), 2027), zoneYearOf(mustZone("Europe/London"), 2027))
+	spans := zoneSpans(zoneYearOf(loadLocation(t, "Europe/Berlin"), 2027), zoneYearOf(loadLocation(t, "Europe/London"), 2027))
 	if len(spans) != 1 || spans[0].off != time.Hour {
 		t.Errorf("spans %v, want one of 1h", spans)
 	}
 }
 
 func TestSteadyOf(t *testing.T) {
-	year := func(name string) zoneYear { return zoneYearOf(mustZone(name), 2027) }
+	year := func(name string) zoneYear { return zoneYearOf(loadLocation(t, name), 2027) }
 	if got := steadyOf(zoneSpans(year("Europe/Berlin"), year("America/New_York")), true); got != 6*time.Hour {
 		t.Errorf("Berlin on New York: %v, want 6h", got)
 	}
@@ -219,7 +234,7 @@ func TestSteadyOf(t *testing.T) {
 
 // TestSchedulerDefaultIsNone checks that with no scheduler zone given a
 // description states the shift from UTC only, on every host, for the package
-// functions, AnalyzeSpec and the Parser methods alike (Z9).
+// functions, AnalyzeSpec and the Parser methods alike.
 func TestSchedulerDefaultIsNone(t *testing.T) {
 	pinDescribeYear(t)
 	const spec = "CRON_TZ=Europe/Berlin 0 9 * * *"
@@ -240,14 +255,14 @@ func TestSchedulerDefaultIsNone(t *testing.T) {
 		t.Errorf("AnalyzeSpec: %q, want %q", got, want)
 	}
 	const la = want + ", and 9 hours ahead of Los Angeles time"
-	if got, _ := p.DescribeSpec(spec, schedLA); len(got) < len(la) || got[:len(la)] != la {
+	if got, _ := p.DescribeSpec(spec, schedLA); !strings.HasPrefix(got, la) {
 		t.Errorf("scheduler in Los Angeles: %q, want it to start %q", got, la)
 	}
 }
 
 func TestWindowNote(t *testing.T) {
-	year := func(name string) zoneYear { return zoneYearOf(mustZone(name), 2027) }
-	berlin, h := mustZone("Europe/Berlin"), time.Hour
+	year := func(name string) zoneYear { return zoneYearOf(loadLocation(t, name), 2027) }
+	berlin, h := loadLocation(t, "Europe/Berlin"), time.Hour
 	at := func(m time.Month, d, hour int) time.Time { return time.Date(2027, m, d, hour, 0, 0, 0, berlin) }
 	const tail = ", between the two zones' clock changes"
 	for _, tt := range []struct {
@@ -260,14 +275,14 @@ func TestWindowNote(t *testing.T) {
 		want            string
 	}{
 		{
-			"one zone against UTC", "New York", "UTC", zoneSpans(year("America/New_York"), year("UTC")), -5 * h, mustZone("America/New_York"), false,
+			"one zone against UTC", "New York", "UTC", zoneSpans(year("America/New_York"), year("UTC")), -5 * h, loadLocation(t, "America/New_York"), false,
 			"New York is 4 hours behind UTC from March 14 to November 7",
 		},
 		{
 			"two windows of one value", "Berlin", "New York", zoneSpans(year("Europe/Berlin"), year("America/New_York")), 6 * h, berlin, true,
 			"Berlin is 5 hours ahead of New York from March 14 to 28 and from October 31 to November 7" + tail,
 		},
-		{"windows under a day", "New York", "Los Angeles", zoneSpans(year("America/New_York"), year("America/Los_Angeles")), 3 * h, mustZone("America/New_York"), true, ""},
+		{"windows under a day", "New York", "Los Angeles", zoneSpans(year("America/New_York"), year("America/Los_Angeles")), 3 * h, loadLocation(t, "America/New_York"), true, ""},
 		{
 			"two values", "X", "the scheduler's time",
 			[]zoneSpan{
@@ -280,9 +295,90 @@ func TestWindowNote(t *testing.T) {
 			6 * h, berlin, true,
 			"X is 5 hours ahead of the scheduler's time from March 14 to 28; X is 7 hours ahead of the scheduler's time from October 31 to November 7" + tail,
 		},
+		{
+			"three windows of one value", "X", "UTC",
+			[]zoneSpan{
+				{at(1, 1, 0), at(2, 15, 3), h},
+				{at(2, 15, 3), at(3, 22, 3), 0},
+				{at(3, 22, 3), at(3, 29, 3), h},
+				{at(3, 29, 3), at(9, 20, 3), 0},
+				{at(9, 20, 3), at(10, 25, 3), h},
+				{at(10, 25, 3), at(12, 31, 23), 0},
+			},
+			h, berlin, false,
+			"X is the same as UTC from February 15 to March 22, from March 29 to September 20, and from October 25 to December 31",
+		},
 	} {
 		if got := windowNote(tt.subject, tt.object, tt.spans, tt.steady, tt.loc, tt.tail); got != tt.want {
 			t.Errorf("%s:\n got %q\nwant %q", tt.name, got, tt.want)
+		}
+	}
+}
+
+// TestZoneYearOverSpan: a scheduler zone's changes are taken over the
+// instants of the spec zone's year, not over its own calendar year, which
+// can start up to a day apart.
+func TestZoneYearOverSpan(t *testing.T) {
+	berlin := loadLocation(t, "Europe/Berlin")
+	start := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	z := zoneYearOver(berlin, 2027, start, start.AddDate(1, 0, 0))
+	if z.base != time.Hour || len(z.shifts) != 2 || !z.seasonal() {
+		t.Fatalf("base %v, shifts %v; want 1h and two changes", z.base, z.shifts)
+	}
+	for i, want := range []time.Time{
+		time.Date(2027, 3, 28, 1, 0, 0, 0, time.UTC),
+		time.Date(2027, 10, 31, 1, 0, 0, 0, time.UTC),
+	} {
+		if !z.shifts[i].at.Equal(want) {
+			t.Errorf("change %d at %v, want %v", i, z.shifts[i].at, want)
+		}
+	}
+	// Berlin does not change between November 1, 2026 and January 1, 2027.
+	if z := zoneYearOver(berlin, 2027, start, time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)); len(z.shifts) != 0 {
+		t.Errorf("November thru December 2026: shifts %v, want none", z.shifts)
+	}
+}
+
+func TestWindowWords(t *testing.T) {
+	at := func(m time.Month, d, hour int) time.Time { return time.Date(2027, m, d, hour, 0, 0, 0, time.UTC) }
+	for _, tt := range []struct {
+		from, last time.Time
+		want       string
+	}{
+		{at(3, 14, 2), at(3, 28, 1), "from March 14 to 28"},
+		{at(10, 31, 1), at(11, 7, 1), "from October 31 to November 7"},
+		{at(9, 30, 0), at(9, 30, 23), "on September 30"},
+	} {
+		if got := windowWords(tt.from, tt.last); got != tt.want {
+			t.Errorf("windowWords(%v, %v) = %q, want %q", tt.from, tt.last, got, tt.want)
+		}
+	}
+}
+
+func TestBetweenChanges(t *testing.T) {
+	day := func(d int) time.Time { return time.Date(2027, 1, d, 0, 0, 0, 0, time.UTC) }
+	shifts := func(days ...int) zoneYear {
+		var z zoneYear
+		for _, d := range days {
+			z.shifts = append(z.shifts, zoneShift{at: day(d)})
+		}
+		return z
+	}
+	spec, sched := shifts(5, 20), shifts(10)
+	for _, tt := range []struct {
+		name  string
+		spans []zoneSpan
+		want  bool
+	}{
+		{"one zone's change to the other's", []zoneSpan{{day(5), day(10), time.Hour}}, true},
+		{"the other way round", []zoneSpan{{day(10), day(20), time.Hour}}, true},
+		{"two changes of one zone", []zoneSpan{{day(5), day(20), time.Hour}}, false},
+		{"from the start of the year", []zoneSpan{{day(1), day(10), time.Hour}}, false},
+		{"a steady span is not named", []zoneSpan{{day(1), day(5), 0}, {day(5), day(10), time.Hour}}, true},
+		{"a span under a day is not named", []zoneSpan{{day(5), day(5).Add(time.Hour), time.Hour}}, true},
+	} {
+		if got := betweenChanges(tt.spans, 0, spec, sched); got != tt.want {
+			t.Errorf("%s: %v, want %v", tt.name, got, tt.want)
 		}
 	}
 }
@@ -291,7 +387,7 @@ func TestWindowNote(t *testing.T) {
 // offset, and the note names the rest of the year. Pyongyang moved from 8
 // hours 30 minutes to 9 hours ahead of UTC on May 5, 2018, and stayed.
 func TestUTCShiftNote(t *testing.T) {
-	clause, note := utcShift(zoneYearOf(mustZone("Asia/Pyongyang"), 2018), "Pyongyang")
+	clause, note := utcShift(zoneYearOf(loadLocation(t, "Asia/Pyongyang"), 2018), "Pyongyang")
 	if want := "8 hours 30 minutes ahead of UTC"; clause != want {
 		t.Errorf("clause %q, want %q", clause, want)
 	}
@@ -304,8 +400,9 @@ func TestUTCShiftNote(t *testing.T) {
 }
 
 // TestZoneOffsetsBehindGoldens asserts, against Zone() directly, every
-// month, date and offset the zoned goldens name (G1). A host with other zone
-// data fails here, with the zone and date named.
+// month, date and offset the zoned goldens name (G1), in the year each is
+// described in. A host with other zone data fails here, with the zone and
+// date named.
 func TestZoneOffsetsBehindGoldens(t *testing.T) {
 	const h, m = time.Hour, time.Minute
 	type day struct {
@@ -313,20 +410,35 @@ func TestZoneOffsetsBehindGoldens(t *testing.T) {
 		day   int
 		want  time.Duration
 	}
-	for zone, days := range map[string][]day{
-		"America/New_York":               {{3, 13, -5 * h}, {3, 14, -4 * h}, {11, 6, -4 * h}, {11, 7, -5 * h}},
-		"America/Los_Angeles":            {{3, 13, -8 * h}, {3, 14, -7 * h}, {11, 7, -8 * h}},
-		"America/Detroit":                {{3, 14, -4 * h}, {11, 7, -5 * h}},
-		"Europe/Berlin":                  {{3, 27, h}, {3, 28, 2 * h}, {10, 30, 2 * h}, {10, 31, h}},
-		"Europe/London":                  {{3, 27, 0}, {3, 28, h}, {10, 31, 0}},
-		"Australia/Lord_Howe":            {{4, 3, 11 * h}, {4, 4, 10*h + 30*m}, {10, 2, 10*h + 30*m}, {10, 3, 11 * h}},
-		"Asia/Kolkata":                   {{1, 1, 5*h + 30*m}, {7, 1, 5*h + 30*m}},
-		"America/Argentina/Buenos_Aires": {{1, 1, -3 * h}, {7, 1, -3 * h}},
+	type zoneYear struct {
+		zone string
+		year int
+	}
+	for zy, days := range map[zoneYear][]day{
+		// The goldens of other years (setDescribeYear)
+		{"Europe/Istanbul", 2016}:  {{3, 26, 2 * h}, {3, 27, 3 * h}, {11, 6, 3 * h}, {12, 31, 3 * h}},
+		{"America/New_York", 2016}: {{3, 12, -5 * h}, {3, 13, -4 * h}, {11, 5, -4 * h}, {11, 6, -5 * h}},
+		{"Asia/Pyongyang", 2018}:   {{1, 1, 8*h + 30*m}, {5, 4, 8*h + 30*m}, {5, 5, 9 * h}, {12, 31, 9 * h}},
+		{"Asia/Kolkata", 2018}:     {{1, 1, 5*h + 30*m}, {7, 1, 5*h + 30*m}},
+		{"Pacific/Fakaofo", 2011}:  {{1, 1, -11 * h}, {12, 29, -11 * h}, {12, 31, 13 * h}},
+		{"Asia/Almaty", 2024}:      {{1, 1, 6 * h}, {2, 29, 6 * h}, {3, 1, 5 * h}, {12, 31, 5 * h}},
+		{"Asia/Kolkata", 2024}:     {{1, 1, 5*h + 30*m}, {7, 1, 5*h + 30*m}},
+		// 2027
+		{"Pacific/Tongatapu", 2027}:              {{1, 1, 13 * h}, {7, 1, 13 * h}},
+		{"America/New_York", 2027}:               {{3, 13, -5 * h}, {3, 14, -4 * h}, {11, 6, -4 * h}, {11, 7, -5 * h}},
+		{"America/Los_Angeles", 2027}:            {{3, 13, -8 * h}, {3, 14, -7 * h}, {11, 7, -8 * h}},
+		{"America/Detroit", 2027}:                {{3, 14, -4 * h}, {11, 7, -5 * h}},
+		{"Europe/Berlin", 2027}:                  {{3, 27, h}, {3, 28, 2 * h}, {10, 30, 2 * h}, {10, 31, h}},
+		{"Europe/London", 2027}:                  {{3, 27, 0}, {3, 28, h}, {10, 31, 0}},
+		{"Australia/Lord_Howe", 2027}:            {{4, 3, 11 * h}, {4, 4, 10*h + 30*m}, {10, 2, 10*h + 30*m}, {10, 3, 11 * h}},
+		{"Asia/Kolkata", 2027}:                   {{1, 1, 5*h + 30*m}, {7, 1, 5*h + 30*m}},
+		{"Australia/Sydney", 2027}:               {{4, 3, 11 * h}, {4, 4, 10 * h}, {10, 2, 10 * h}, {10, 3, 11 * h}},
+		{"America/Argentina/Buenos_Aires", 2027}: {{1, 1, -3 * h}, {7, 1, -3 * h}},
 	} {
 		for _, d := range days {
-			noon := time.Date(2027, d.month, d.day, 12, 0, 0, 0, mustZone(zone))
+			noon := time.Date(zy.year, d.month, d.day, 12, 0, 0, 0, loadLocation(t, zy.zone))
 			if got := offsetOf(noon); got != d.want {
-				t.Errorf("%s at noon on %s %d, 2027: offset %v, want %v", zone, d.month, d.day, got, d.want)
+				t.Errorf("%s at noon on %s %d, %d: offset %v, want %v", zy.zone, d.month, d.day, zy.year, got, d.want)
 			}
 		}
 	}
@@ -356,5 +468,37 @@ func TestParserAnalyzeSpec(t *testing.T) {
 	}
 	if got := standardParser.AnalyzeSpec("not a spec"); got.Valid || got.Error == nil {
 		t.Errorf("bad spec: %+v", got)
+	}
+}
+
+// TestSchedShiftUnnamedWindows checks the windows against a scheduler zone
+// with no name of its own that changes in the year, as time.Local can: New
+// York's rules under the name "Local".
+func TestSchedShiftUnnamedWindows(t *testing.T) {
+	pinDescribeYear(t)
+	data, err := os.ReadFile("/usr/share/zoneinfo/America/New_York")
+	if err != nil {
+		t.Skipf("no zoneinfo file: %v", err)
+	}
+	local, err := time.LoadLocationFromTZData("Local", data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const spec = "CRON_TZ=Europe/Berlin 0 0 * * *"
+	opt := WithSchedulerLocation(local)
+	for _, tt := range []struct {
+		name string
+		get  func(string, ...DescribeOption) (string, error)
+		want string
+	}{
+		{"DescribeSpec", DescribeSpec, "at midnight every day Berlin time, 1 hour ahead of UTC, 2 hours from March to October, and 6 hours ahead of the scheduler's time"},
+		{"DescribeSpecNote", DescribeSpecNote, "Berlin is 5 hours ahead of the scheduler's time from March 14 to 28 and from October 31 to November 7, between the two zones' clock changes"},
+	} {
+		if got, err := tt.get(spec, opt); err != nil || got != tt.want {
+			t.Errorf("%s(%q) = %q, %v; want %q", tt.name, spec, got, err, tt.want)
+		}
+	}
+	if !checkSpecNamesRuns(t, standardParser, spec, opt) {
+		t.Errorf("%q: not checked", spec)
 	}
 }

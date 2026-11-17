@@ -388,17 +388,10 @@ func placeAlternatives(s string) string {
 		}
 		start := strings.LastIndex(s[:end], ", either ")
 		rest := s[end+len(altEnd):]
-		clause, tail, semi := strings.Cut(rest, ";")
-		if semi {
-			tail = ";" + tail
-		}
-		switch {
-		case clause == "":
-			s = s[:end] + rest
-		case strings.Contains(clause, "fixed"):
+		if strings.Contains(rest, "fixed") {
 			s = s[:end] + "," + rest
-		default:
-			s = s[:start] + clause + s[start:end] + tail
+		} else {
+			s = s[:start] + rest + s[start:end]
 		}
 	}
 }

@@ -29,6 +29,11 @@ jobs:
       enable-license-check: true
       enable-codecov: true
       coverage-threshold: 80.0
+      # Under -race and atomic coverage the package's tests take 7 to 10
+      # minutes on a hosted runner, so go test's default limit of 10 minutes
+      # stops a slow run. The job limit stays 5 minutes above the test limit.
+      test-flags: "-race -coverprofile=coverage.out -covermode=atomic -timeout=20m"
+      timeout-minutes: 25
     permissions:
       contents: read
       security-events: write

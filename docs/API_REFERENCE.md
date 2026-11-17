@@ -353,6 +353,14 @@ UpsertJob creates or updates a named job entry. If an entry with the given
 name already exists, its schedule and job are atomically replaced via
 `UpdateEntry`. If no entry exists, a new one is created via `ScheduleJob`.
 
+On an update, the options passed are applied to the existing entry in the same
+step, as on a create. A field whose option is not passed keeps its value: an
+update with only `WithName` leaves the tags, priority, `Prev` and paused state
+as they are. An option takes effect where the scheduler reads it:
+`WithRunImmediately` runs the job once more as soon as the scheduler is running,
+`WithPaused` pauses the entry, and `WithMissedPolicy` and `WithPrev` matter for
+the catch-up when the scheduler starts.
+
 A `WithName` option is required. Returns `ErrNameRequired` if no name is provided.
 
 This eliminates the common "try update, fallback to add" boilerplate:
@@ -381,7 +389,9 @@ Pausing before the drain guarantees the old schedule cannot fire again between
 the wait and the replacement — closing the gap present in the two-step
 `WaitForJobByName` + `UpsertJob` sequence. If no entry with the given name
 exists it creates one (no stale schedule ⇒ no window). Same options and errors
-as `UpsertJob`; a `WithName` option is required.
+as `UpsertJob`; a `WithName` option is required. The entry stays paused after
+the update if it was paused before the call or if the options include
+`WithPaused`.
 
 It blocks for as long as the in-flight invocation runs but holds no cron lock
 while draining, so it never blocks the run loop or other mutators. It is not
@@ -1457,8 +1467,8 @@ Actual execution and completion order is decided by the Go scheduler, and chain
 wrappers such as `Jitter` or `SkipIfStillRunning` decouple it further.
 
 Priority is applied at add time. `UpdateEntry` and `UpdateSchedule` preserve
-it; `UpsertJob`'s update path ignores `JobOption`s, which is the existing
-behavior for every option.
+it; `UpsertJob` and `DrainAndUpsertJob` apply it on an update too, like every
+option.
 
 **Example:**
 ```go
@@ -2007,13 +2017,14 @@ func WithParseOptions(o ParseOption) DescribeOption
 func WithSchedulerLocation(loc *time.Location) DescribeOption
 ```
 
-DescribeOption configures `DescribeSpec` and `DescribeSpecNote`. `WithParseOptions`
-sets the parse options of the package functions; several calls OR together. The `Parser` methods use the
+DescribeOption configures `DescribeSpec`, `DescribeSpecNote` and
+`Parser.AnalyzeSpec`. `WithParseOptions` sets the parse options of the
+package-level functions; several calls OR together. The `Parser` methods use the
 parser's own settings and ignore it. `WithSchedulerLocation` names the zone the
-scheduler runs in, so a description can give a written zone's shift from it.
-There is no default: without it, and for nil, a description gives the shift from
-UTC only. Both the package functions and
-the `Parser` methods honor it.
+scheduler runs in, so a description can give a written zone's shift from it; a
+caller in a running scheduler passes `c.Location()`. Without it, and for nil, a
+description gives the shift from UTC only. Both the package functions and the
+`Parser` methods honor it.
 
 ---
 
@@ -2979,6 +2990,15 @@ func AnalyzeSpec(spec string, options ...ParseOption) SpecAnalysis
 AnalyzeSpec provides detailed analysis of a cron expression including validation
 status, next run time, parsed fields, timezone, and warnings.
 
+```go
+func (p Parser) AnalyzeSpec(spec string, opts ...DescribeOption) SpecAnalysis
+```
+
+The `Parser` method analyzes spec with the parser's own settings and hash key.
+It takes `WithSchedulerLocation`, so `Description` can give a written zone's
+shift from the scheduler's zone; `WithParseOptions` is ignored. `AnalyzeSpec`
+and `AnalyzeSpecWithHash` describe with no scheduler zone.
+
 **Example:**
 ```go
 result := cron.AnalyzeSpec("0 9 * * MON-FRI")
@@ -2997,9 +3017,9 @@ func AnalyzeSpecWithHash(spec string, options ParseOption, hashSeed string) Spec
 
 AnalyzeSpecWithHash analyzes a cron expression containing H hash expressions.
 The seed (e.g., job name) produces deterministic, distributed scheduling times.
-`options` must include `Hash`. For a spec of five, six or seven fields,
-`Fields` holds the spec's text (`H`), not the values chosen for the seed;
-for other field counts it is empty. `NextRun` reflects the chosen values. See
+`options` must include `Hash`. `Fields` holds the spec's text (`H`) for
+each field it writes, not the values chosen for the seed. `NextRun` reflects
+the chosen values. See
 [Hash expressions](#hash-expressions-h).
 
 ### Parser.AnalyzeSpec
@@ -3032,10 +3052,13 @@ func WithSchedulerLocation(loc *time.Location) DescribeOption
 DescribeSpec returns an English description of a cron expression, or the parse
 error. The package function parses as `AnalyzeSpec` does (the standard parser
 unless `WithParseOptions` is given; several calls OR together); the `Parser`
-method uses the parser's own settings and ignores `WithParseOptions`. Times are on the 12-hour clock. A spec with a
-`TZ=`/`CRON_TZ=` prefix names its zone, the zone's shift from UTC and its shift
-from the scheduler's zone (`WithSchedulerLocation`). A
-valid spec always gets a description; one that never runs is "never runs",
+method uses the parser's own settings and ignores `WithParseOptions`. Times are on the 12-hour clock. Time zone support starts with the zone a
+spec writes: a spec with a `TZ=`/`CRON_TZ=` prefix names its zone and the
+zone's shift from UTC, and with `WithSchedulerLocation` its shift from the
+scheduler's zone; one without a prefix, and `TZ=Local`, carries no time
+zone. The shifts are those of the year the description is made in, so the
+text can change at the end of a year, and its months between years when a
+zone's rules change. A valid spec always gets a description; one that never runs is "never runs",
 but past 8,192 hash values each `H` is tested on its own, so a spec whose `H`
 values never fit together can read as running.
 Combinations of `H` without a form get each written field by name ("minute
@@ -3070,11 +3093,11 @@ func (p Parser) DescribeSpecNote(spec string, opts ...DescribeOption) (string, e
 ```
 
 DescribeSpecNote spells out the values the hash key picks, which the
-description of a hashed step or fixed day leaves as "a fixed …". For a spec
-with a written zone it names the windows in which that zone is off the shift
-the description states. It is "" unless a
-field has a hashed step or a fixed day of the month, or the zone has such a
-window, and parses as
+description of a hashed step or fixed day leaves as "a fixed …", and the windows
+in which a written zone is off the shift the description states ("Berlin is 5
+hours ahead of New York from March 14 to 28 and from October 31 to November 7,
+between the two zones' clock changes"). It is "" unless a field has a hashed
+step or a fixed day of the month, or the zone has such a window, and parses as
 `DescribeSpec` does. The note rules and grammar are in
 [DESCRIBE.md](DESCRIBE.md).
 
