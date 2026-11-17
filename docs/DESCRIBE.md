@@ -115,7 +115,7 @@ which form a spec gets. Each has an ID, which the grammar cites.
 
 | ID | Rule |
 |---|---|
-| G1 | A description says what the scheduler runs: each golden in `describe_test.go` was checked against the runs `Next()` computes, and `TestDescribeSpecNamesRuns` checks the times and dates a description names against those runs (see the Grammar section). It is the wall-clock schedule in the spec's zone, or the scheduler's when none is written. On a day the clock changes, the runs follow `docs/DST_HANDLING.md`: the times the clock skips run once, at the earliest of them shifted by the length of the gap, so 2:30 runs at 3:30, and 2:00, 2:15, 2:30, and 2:45 run once at 3:00; a time the clock repeats runs once, unless the spec also matches the time one repeat length earlier or later, as a job that runs every hour or more often does where the clock repeats an hour: such a job keeps its rhythm; with the DSTSkip parse option a skipped time does not run |
+| G1 | A description says what the scheduler runs: each golden in `describe_test.go` was checked against the runs `Next()` computes, and `TestDescribeSpecNamesRuns` checks the times and dates a description names against those runs (see the Grammar section). It is the wall-clock schedule in the spec's zone, or the scheduler's when none is written. On a day the clock changes, the scheduler runs the times the clock skips and the times it repeats as `docs/DST_HANDLING.md` says; `Next()` gives a repeated time twice, and the scheduler's guard runs it once where that file says so |
 | G2 | A parser oddity is described as it runs |
 | G3 | The description is built from the spec text as the parser splits it, and its values follow the parser's options |
 | G6 | Wording is for people |
