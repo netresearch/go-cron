@@ -3022,24 +3022,6 @@ each field it writes, not the values chosen for the seed. `NextRun` reflects
 the chosen values. See
 [Hash expressions](#hash-expressions-h).
 
-### Parser.AnalyzeSpec
-
-```go
-func (p Parser) AnalyzeSpec(spec string, opts ...DescribeOption) SpecAnalysis
-```
-
-Parser.AnalyzeSpec analyzes a spec as the parser parses it, with the parser's
-own settings, as its hash key. `AnalyzeSpec` and `AnalyzeSpecWithHash` call it
-with no scheduler zone, so `Description` gives a written zone's shift from UTC
-only. Pass `WithSchedulerLocation` with the zone of the Cron the spec will run
-in, so that `Description` also gives the shift from that zone.
-`WithParseOptions` is ignored.
-
-```go
-result := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow).
-	AnalyzeSpec("CRON_TZ=Europe/Berlin 0 0 * * *", cron.WithSchedulerLocation(c.Location()))
-```
-
 ### DescribeSpec
 
 ```go
