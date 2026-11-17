@@ -3062,8 +3062,9 @@ desc, err = cron.DescribeSpec("0 9 13 * 5")
 // "at 9 am on the 13th of the month when it falls on Friday"
 desc, err = cron.DescribeSpec("@weekly")
 // "at 12 am on Sunday"
-desc, err = cron.DescribeSpec("CRON_TZ=America/New_York 30 2 * * *", cron.WithSchedulerLocation(time.UTC))
-// "at 2:30 am every day New York time, 5 hours behind UTC, 4 hours from March to November"
+losAngeles, _ := time.LoadLocation("America/Los_Angeles")
+desc, err = cron.DescribeSpec("CRON_TZ=America/New_York 30 2 * * *", cron.WithSchedulerLocation(losAngeles))
+// "at 2:30 am every day New York time, 5 hours behind UTC, 4 hours from March to November, and 3 hours ahead of Los Angeles time"
 ```
 
 ### DescribeSpecNote
