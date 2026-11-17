@@ -314,9 +314,9 @@ func steadyOf(spans []zoneSpan, bothSeasonal bool) time.Duration {
 
 // schedShift names a spec zone's shift from the scheduler's zone (Z3): one
 // value when it holds all year; the months form when one zone changes with
-// the season and the other does not, "8 hours ahead of Los Angeles time, 7
-// hours from March to November"; otherwise the steady value, and the note
-// names the windows off it (Z4). name is the spec zone's name; sname is the
+// the season and the other has no clock change in the year, "8 hours ahead of
+// Los Angeles time, 7 hours from March to November"; otherwise the steady
+// value, and the note names the windows off it (Z4). name is the spec zone's name; sname is the
 // scheduler's, generic when it has none of its own.
 func schedShift(spec, sched zoneYear, name, sname string, generic bool) (clause, note string) {
 	other := sname + " time"
