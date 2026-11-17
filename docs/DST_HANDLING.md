@@ -186,7 +186,13 @@ older. Go reads the variable once, at the first lookup.
 A running entry keeps the `Location` it was parsed with until it is parsed
 again or the process restarts. A parser made with `WithCache` returns the
 schedule it parsed before, `Location` included, for the same spec, so parse
-again with a parser that has a new cache, or none. `DescribeSpec` and `Next` read the same data.
+again with a parser that has a new cache, or none. A spec without a prefix runs
+in the Cron's zone, given with `WithLocation` or `time.Local` by default, and
+parsing it again does not reload that zone: a new Cron made with a zone loaded
+again picks up new data, and `time.Local` changes only with a restart.
+`DescribeSpec` loads a written zone each time it is called, so after the data
+changes it can give other offsets than an entry still running with the old
+`Location`.
 
 ### Interaction with SpecSchedule.Location
 
