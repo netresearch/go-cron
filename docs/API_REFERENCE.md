@@ -3034,8 +3034,7 @@ func WithSchedulerLocation(loc *time.Location) DescribeOption
 DescribeSpec returns an English description of a cron expression, or the parse
 error. The package function parses as `AnalyzeSpec` does (the standard parser
 unless `WithParseOptions` is given; several calls OR together); the `Parser`
-method uses the parser's own settings and ignores `WithParseOptions`. Times are on the 12-hour clock. Time zone support starts with the zone a
-spec writes: a spec with a `TZ=`/`CRON_TZ=` prefix names its zone and the
+method uses the parser's own settings and ignores `WithParseOptions`. Times are on the 12-hour clock. A spec with a `TZ=`/`CRON_TZ=` prefix names its zone and the
 zone's shift from UTC, and with `WithSchedulerLocation` its shift from the
 scheduler's zone; one without a prefix, and `TZ=Local`, carries no time
 zone. The shifts are those of the year the description is made in, so the

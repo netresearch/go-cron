@@ -45,19 +45,18 @@ func WithSchedulerLocation(loc *time.Location) DescribeOption
 - The description is made from the spec text as the parser splits it, not
   from the parsed schedule, because the parsed bits have lost what was
   written (`*/15` and `0,15,30,45` parse the same, but only one has a step).
-- Time zone support starts with the zone a spec writes: a spec with a
-  `TZ=`/`CRON_TZ=` prefix names its zone and the zone's shift from UTC
-  ("Kolkata time, 5 hours 30 minutes ahead of UTC"), and with
+- A spec with a `TZ=`/`CRON_TZ=` prefix names its zone and the zone's shift
+  from UTC ("Kolkata time, 5 hours 30 minutes ahead of UTC"), and with
   `WithSchedulerLocation` its shift from the scheduler's zone ("…, and 3
-  hours ahead of Los Angeles time"). Without that option, and for nil, the
-  description gives no shift from the scheduler's zone, as the scheduler may
-  run in another process and zone than the caller; a caller in a running
-  scheduler passes `c.Location()`. "never runs", "only when triggered" and
-  the intervals name no zone. A spec without a prefix, and `TZ=Local`,
-  carries no time zone; callers show the location beside it. The shifts are
-  those of the year the description is made in, so a description can change
-  at the end of a year, and its months between years when a zone's rules
-  change.
+  hours ahead of Los Angeles time") (Z1–Z3). Without that option, and for
+  nil, the description gives no shift from the scheduler's zone, as the
+  scheduler may run in another process and zone than the caller; a caller in
+  a running scheduler passes `c.Location()` (Z9). "never runs", "only when
+  triggered" and the intervals name no zone (Z7). A spec without a prefix,
+  and `TZ=Local`, carries no time zone (Z6); callers show the location
+  beside it. The shifts are those of the year the description is made in, so
+  a description can change at the end of a year, and its months between
+  years when a zone's rules change (Z8).
 - `DescribeSpecNote` spells out the values the hash key picks, which the
   description leaves as "a fixed …": "at minutes h, h+15, h+30, and h+45
   past the hour, where h is a fixed minute from 0 to 14". For a written
