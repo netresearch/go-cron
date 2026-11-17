@@ -741,8 +741,8 @@ var literalNames = []string{seconds.name, minutes.name, hours.name, dom.name, mo
 
 // describeLiteral names each field spec wrote, as written. fields and
 // yearField are spec's fields from specFields, which fill in the fields
-// spec left out. zone, the clause zoneClause gives a written zone, follows
-// as one more item.
+// spec left out. zone, the clause of a written zone, follows as one more
+// item (Z7).
 func (p Parser) describeLiteral(spec string, fields []string, yearField, zone string) string {
 	// The spec parsed, so neither step can fail.
 	_, rest, _ := parseTimezone(spec)

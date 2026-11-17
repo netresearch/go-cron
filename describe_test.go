@@ -1545,8 +1545,8 @@ func describeGrammars() (descRe, noteRe *regexp.Regexp) {
 	)
 
 	hashkey := "; the hash key fixes " + list(alt("the "+unit, "both "+units)) // H1, H6
-	// zoneClause: a written zone and its shift from UTC
-	plain := `[A-Za-z0-9][A-Za-z0-9 +/:_-]*` // zoneName: the name as derived, or as written
+	// Z1, Z2: a written zone and its shift from UTC
+	plain := `[A-Za-z0-9][A-Za-z0-9 +/:_-]*` // Z1: the name as derived, or as written
 	offset := alt(num+" hours?", num+" hours? "+num+" minutes?", num+" minutes?")
 	shiftTo := func(other string) string {
 		return alt(offset+" "+alt("behind", "ahead of")+" "+other, "the same as "+other)
@@ -1554,8 +1554,8 @@ func describeGrammars() (descRe, noteRe *regexp.Regexp) {
 	second := func(other string) string { return alt(offset, offset+" "+alt("behind", "ahead"), "the same as "+other) }
 	months := " from " + monthname + " to " + monthname
 	utcShift := shiftTo("UTC") + opt(", "+second("UTC")+months)
-	// schedShift: its shift from the scheduler's zone
-	zname := alt(plain, "the scheduler's") // an unnamed time.Local
+	// Z3: its shift from the scheduler's zone
+	zname := alt(plain, "the scheduler's") // Z3, Z9: an unnamed time.Local
 	schedName := zname + " time"
 	schedShift := shiftTo(schedName) + opt(", "+second(schedName)+months)
 	zone := " " + alt("UTC"+opt(", "+schedShift), plain+" time, "+utcShift+opt(", and "+schedShift))
@@ -1601,7 +1601,7 @@ func describeGrammars() (descRe, noteRe *regexp.Regexp) {
 		"on "+outcome+ofDays) // N3: one outcome left
 	nmonth := alt("in months "+vals+where+opt(tail), "in "+outcomes+", depending on the hash key")
 	nclause := alt(ntime, nday, nmonth)
-	// windowNote: the windows where a zone is off its stated shift, by date
+	// Z4: the windows where a zone is off its stated shift, by date
 	zdate := monthname + ` \d+`
 	window := alt("from "+zdate+" to "+alt(zdate, num), "on "+zdate)
 	zsent := plain + " is " + shiftTo(alt(plain, "the scheduler's time")) + " " + list(window) // G8
