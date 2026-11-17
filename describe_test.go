@@ -646,7 +646,7 @@ var describeGoldens = []struct {
 	{spec: "30 H(20-23),H(1-5) * * *", opts: []DescribeOption{withHash}, want: "minute 30, hour H(20-23),H(1-5), day of month *, month *, day of week *", literal: true},
 	{spec: "0 H/6,9 * * *", opts: []DescribeOption{withHash}, want: "minute 0, hour H/6,9, day of month *, month *, day of week *", literal: true},
 	{spec: "H(59-0) H/6 * * *", opts: []DescribeOption{withHash}, want: "minute H(59-0), hour H/6, day of month *, month *, day of week *", literal: true},
-	// Time zones: the zone's name, its shift from UTC and from the scheduler's zone (zoneClause)
+	// Time zones: the zone's name, its shift from UTC and from the scheduler's zone (Z1–Z3)
 	{spec: "CRON_TZ=America/New_York 30 2 * * *", want: "at 2:30 am every day New York time, 5 hours behind UTC, 4 hours from March to November"},
 	{spec: "TZ=Asia/Kolkata 0 9 * * *", want: "at 9 am every day Kolkata time, 5 hours 30 minutes ahead of UTC"},
 	{spec: "CRON_TZ=Australia/Lord_Howe 0 0 1 1 * 2027", opts: []DescribeOption{withYear}, want: "at midnight on the 1st of the month in January in year 2027 Lord Howe time, 11 hours ahead of UTC, 10 hours 30 minutes from April to October"},
@@ -663,11 +663,11 @@ var describeGoldens = []struct {
 	{spec: "CRON_TZ=Europe/Berlin H(50-10) * * * *", opts: []DescribeOption{withHash}, want: "at a fixed minute past the hour, either between minutes 0 and 10 or between minutes 50 and 59 Berlin time, 1 hour ahead of UTC, 2 hours from March to October; the hash key fixes the minute"},
 	{spec: "CRON_TZ=Europe/Berlin 0 0 1/10 * *", want: "at midnight on the 1st, 11th, 21st, and 31st of the month Berlin time, 1 hour ahead of UTC, 2 hours from March to October; the 31st runs only in months that have one"},
 	{spec: "CRON_TZ=Europe/Berlin 0 0 H/10 * 1", opts: []DescribeOption{withHash}, want: "minute 0, hour 0, day of month H/10, month *, day of week 1, Berlin time, 1 hour ahead of UTC, 2 hours from March to October", literal: true},
-	// Field by field, the zone follows as one more item (zoneClause)
+	// Field by field, the zone follows as one more item (Z7, G10)
 	{spec: "CRON_TZ=Europe/Berlin H/15,H/20 * * * *", opts: []DescribeOption{withHash}, want: "minute H/15,H/20, hour *, day of month *, month *, day of week *, Berlin time, 1 hour ahead of UTC, 2 hours from March to October", literal: true},
 	{spec: "TZ=UTC 30 H(20-23),H(1-5) * * *", opts: []DescribeOption{withHash}, want: "minute 30, hour H(20-23),H(1-5), day of month *, month *, day of week *, UTC", literal: true},
 	{spec: "TZ=Local H/15,H/20 * * * *", opts: []DescribeOption{withHash}, want: "minute H/15,H/20, hour *, day of month *, month *, day of week *", literal: true},
-	// The shift from the scheduler's zone (schedShift, WithSchedulerLocation)
+	// The shift from the scheduler's zone (Z3, WithSchedulerLocation)
 	{spec: "CRON_TZ=UTC 0 0 * * *", opts: []DescribeOption{schedLA}, want: "at midnight every day UTC, 8 hours ahead of Los Angeles time, 7 hours from March to November"},
 	{spec: "CRON_TZ=Europe/Berlin 0 0 * * *", opts: []DescribeOption{schedNY}, want: "at midnight every day Berlin time, 1 hour ahead of UTC, 2 hours from March to October, and 6 hours ahead of New York time"},
 	{spec: "CRON_TZ=America/New_York 30 2 * * *", opts: []DescribeOption{schedNY}, want: "at 2:30 am every day New York time, 5 hours behind UTC, 4 hours from March to November"},
@@ -682,7 +682,7 @@ var describeGoldens = []struct {
 	{spec: "CRON_TZ=Australia/Sydney 0 9 * * *", opts: []DescribeOption{schedNY}, want: "at 9 am every day Sydney time, 11 hours ahead of UTC, 10 hours from April to October, and 14 hours ahead of New York time"},
 	{spec: "CRON_TZ=Europe/Berlin 0 0 H/10 * 1", opts: []DescribeOption{withHash, schedNY}, want: "minute 0, hour 0, day of month H/10, month *, day of week 1, Berlin time, 1 hour ahead of UTC, 2 hours from March to October, and 6 hours ahead of New York time", literal: true},
 	// A zone that changes once in the year gives its January shift; the note
-	// names the rest (utcShift, windowNote)
+	// names the rest (Z2, Z4)
 	{spec: "CRON_TZ=Europe/Istanbul 0 9 * * *", year: 2016, want: "at 9 am every day Istanbul time, 2 hours ahead of UTC"},
 	{spec: "CRON_TZ=Asia/Pyongyang 0 9 * * *", year: 2018, want: "at 9 am every day Pyongyang time, 8 hours 30 minutes ahead of UTC"},
 	{spec: "CRON_TZ=Europe/Istanbul 0 9 * * *", opts: []DescribeOption{schedNY}, year: 2016, want: "at 9 am every day Istanbul time, 2 hours ahead of UTC, and 7 hours ahead of New York time"},
@@ -690,7 +690,7 @@ var describeGoldens = []struct {
 	{spec: "CRON_TZ=Pacific/Fakaofo 0 9 * * *", year: 2011, want: "at 9 am every day Fakaofo time, 11 hours behind UTC"},
 	// Almaty's change of 2024 is at 11:30 pm on February 29 in Kolkata
 	{spec: "CRON_TZ=Asia/Kolkata 45 23 * * *", opts: []DescribeOption{WithSchedulerLocation(goldenZone("Asia/Almaty"))}, year: 2024, want: "at 11:45 pm every day Kolkata time, 5 hours 30 minutes ahead of UTC, and 30 minutes behind Almaty time"},
-	// A scheduler on UTC under another name adds no shift (zoneClause)
+	// A scheduler on UTC under another name adds no shift (Z3)
 	{spec: "CRON_TZ=Europe/Berlin 0 0 * * *", opts: []DescribeOption{WithSchedulerLocation(goldenZone("Etc/UTC"))}, want: "at midnight every day Berlin time, 1 hour ahead of UTC, 2 hours from March to October"},
 	{spec: "CRON_TZ=Europe/Berlin 0 0 * * *", opts: []DescribeOption{WithSchedulerLocation(time.FixedZone("Local", 0))}, want: "at midnight every day Berlin time, 1 hour ahead of UTC, 2 hours from March to October"},
 	{spec: "CRON_TZ=Asia/Kolkata 0 0 * * *", opts: []DescribeOption{WithSchedulerLocation(time.FixedZone("", 3600))}, want: "at midnight every day Kolkata time, 5 hours 30 minutes ahead of UTC, and 4 hours 30 minutes ahead of the scheduler's time"},
@@ -829,7 +829,7 @@ var describeNoteGoldens = []struct {
 	{spec: "0 0 H * MON", opts: []DescribeOption{withHash}, want: "on day h of every month, where h is a fixed day from 1 to 31; a month without day h is skipped"},
 	{spec: "0 0 H/10,H * H/3", opts: []DescribeOption{withHash}, want: ""},
 	{spec: "CRON_TZ=Europe/Berlin 0 0 H/10,H * H/3", opts: []DescribeOption{withHash, schedNY}, want: "Berlin is 5 hours ahead of New York from March 14 to 28 and from October 31 to November 7, between the two zones' clock changes"}, // N1: the zone's windows stay
-	// Time zones: the windows off the stated shift (windowNote)
+	// Time zones: the windows off the stated shift (Z4)
 	{spec: "CRON_TZ=Europe/Berlin 0 0 * * *", opts: []DescribeOption{schedNY}, want: "Berlin is 5 hours ahead of New York from March 14 to 28 and from October 31 to November 7, between the two zones' clock changes"},
 	{spec: "CRON_TZ=America/New_York 30 2 * * *", opts: []DescribeOption{schedLA}, want: ""},
 	{spec: "CRON_TZ=Europe/Berlin H/15 9 * * *", opts: []DescribeOption{withHash, schedNY}, want: "at minutes h, h+15, h+30, and h+45 during the 9 am hour, where h is a fixed minute from 0 to 14; Berlin is 5 hours ahead of New York from March 14 to 28 and from October 31 to November 7, between the two zones' clock changes"},
@@ -839,11 +839,11 @@ var describeNoteGoldens = []struct {
 	{spec: "CRON_TZ=Asia/Pyongyang 0 9 * * *", year: 2018, want: "Pyongyang is 9 hours ahead of UTC from May 5 to December 31"},
 	{spec: "CRON_TZ=Europe/Istanbul 0 9 * * *", opts: []DescribeOption{schedNY}, year: 2016, want: "Istanbul is 3 hours ahead of UTC from March 27 to December 31; Istanbul is 6 hours ahead of New York from March 13 to 27; Istanbul is 8 hours ahead of New York from November 6 to December 31"},
 	{spec: "CRON_TZ=Asia/Pyongyang 0 9 * * *", opts: []DescribeOption{schedKol}, year: 2018, want: "Pyongyang is 9 hours ahead of UTC from May 5 to December 31; Pyongyang is 3 hours 30 minutes ahead of Kolkata from May 5 to December 31"},
-	{spec: "CRON_TZ=Pacific/Fakaofo 0 9 * * *", year: 2011, want: "Fakaofo is 13 hours ahead of UTC on December 31"}, // a window within one date (windowWords)
+	{spec: "CRON_TZ=Pacific/Fakaofo 0 9 * * *", year: 2011, want: "Fakaofo is 13 hours ahead of UTC on December 31"}, // a window within one date (Z4)
 	// Almaty's change of 2024 is at 11:30 pm on February 29 in Kolkata
 	{spec: "CRON_TZ=Asia/Kolkata 45 23 * * *", opts: []DescribeOption{WithSchedulerLocation(goldenZone("Asia/Almaty"))}, year: 2024, want: "Kolkata is 30 minutes ahead of Almaty from February 29 to December 31"},
 	// Windows that run from January 1 or to December 31 do not lie between the
-	// two zones' clock changes (betweenChanges)
+	// two zones' clock changes (Z4)
 	{spec: "CRON_TZ=Australia/Sydney 0 9 * * *", opts: []DescribeOption{schedNY}, want: "Sydney is 16 hours ahead of New York from January 1 to March 14 and from November 7 to December 31; Sydney is 15 hours ahead of New York from March 14 to April 4 and from October 3 to November 7"},
 	{spec: "CRON_TZ=Europe/Berlin 0 0 H/10 * 1", opts: []DescribeOption{withHash, schedNY}, want: "on days h, h+10, h+20, and h+30 of every month, where h is a fixed day from 1 to 10; h+30 runs only when h is below 2; h+20 and h+30 run only in months that have them; Berlin is 5 hours ahead of New York from March 14 to 28 and from October 31 to November 7, between the two zones' clock changes"},
 }
@@ -1869,7 +1869,7 @@ func FuzzDescribeSpec(f *testing.F) {
 		FullParser(),
 	}
 	// No scheduler zone, and two that change with the season in opposite
-	// halves of the year, so a written zone gets windows (schedShift).
+	// halves of the year, so a written zone gets windows (Z3, Z4).
 	scheds := [][]DescribeOption{nil, {schedNY}, {WithSchedulerLocation(goldenZone("Australia/Sydney"))}}
 	f.Fuzz(func(t *testing.T, spec string) {
 		if wideRange(spec) {

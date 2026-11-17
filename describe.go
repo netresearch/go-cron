@@ -102,7 +102,7 @@ func (p Parser) DescribeSpec(spec string, opts ...DescribeOption) (string, error
 // key picks in spec's description, as p parses it: "at minutes h, h+15,
 // h+30, and h+45 past the hour, where h is a fixed minute from 0 to 14".
 // For a spec with a written zone it names the windows in which that zone is
-// off the shift the description states (windowNote). It is "" unless a field has a
+// off the shift the description states (Z4). It is "" unless a field has a
 // hashed step or a fixed day of the month, or the zone has such a window. A
 // description given field by field still gets its note. See docs/DESCRIBE.md.
 func (p Parser) DescribeSpecNote(spec string, opts ...DescribeOption) (string, error) {

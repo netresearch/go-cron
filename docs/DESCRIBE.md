@@ -62,7 +62,7 @@ func WithSchedulerLocation(loc *time.Location) DescribeOption
   description leaves as "a fixed …": "at minutes h, h+15, h+30, and h+45
   past the hour, where h is a fixed minute from 0 to 14". For a written
   zone it also names the windows in which the zone is off the shift the
-  description states (windowNote): "Berlin is 5 hours ahead of New York
+  description states (Z4): "Berlin is 5 hours ahead of New York
   from March 14 to 28 and from October 31 to November 7, between the two
   zones' clock changes". It is "" unless a field has a hashed step or a
   fixed day of the month, or the zone has such a window (N1–N8).
@@ -236,7 +236,7 @@ The examples are for 2027.
 
 | ID | Rule |
 |---|---|
-| N1 | The note is "" unless a field has a hashed step or a fixed day of the month (`H`, `H(1-15)`, `1,H`), or a written zone has a window off the shift its description states (windowNote), which follows the hashed values after "; "; a fixed second, minute, hour, day of the week or month needs none. A description rendered field by field still gets its note. A field whose hashed items have no note form leaves out all the hashed values: the note is then the zone window alone, or "" with none |
+| N1 | The note is "" unless a field has a hashed step or a fixed day of the month (`H`, `H(1-15)`, `1,H`), or a written zone has a window off the shift its description states (Z4), which follows the hashed values after "; "; a fixed second, minute, hour, day of the week or month needs none. A description rendered field by field still gets its note. A field whose hashed items have no note form leaves out all the hashed values: the note is then the zone window alone, or "" with none |
 | N2 | A hashed step in the second or minute field reads as its values with a variable, unit first (R5), in the hours of the description (R6, R9, R11, R12, C1), or of the written fields when the description is field by field: "at minutes h, h+15, h+30, and h+45 past the hour, where h is a fixed minute from 0 to 14"; "at seconds h, h+15, h+30, and h+45 within minutes 0 thru 10 and 50 thru 59 in every hour, …". Minutes cut short carry their note (T1): "within minutes 0, 7, 14, … 56 in every hour (every 7 minutes, starting over each hour), where h is …". A wrapped hashed range lists its outcomes as N4 does: "at minutes 50, 55, 0, 5, and 10; 51, 56, 1, and 6; 52, 57, 2, and 7; 53, 58, 3, and 8; or 54, 59, 4, and 9 past the hour, depending on the hash key" |
 | N3 | The values run to the last one any h has; past the T1 limit, the first 3, "…", the last ("h, h+5, h+10, … h+55"). When only some h have the last value, a clause says which: "at minutes h and h+40 past the hour, where h is a fixed minute from 0 to 39; h+40 runs only when h is below 20". A hashed day step past the shortest month it runs in keeps its values, and a clause in the form of D3 names the ones some month lacks: "on days h, h+10, h+20, and h+30 of the month in April, …; h+30 runs only in months that have one"; "…, depending on the hash key; the 31st runs only in months that have one". With no month written the clause follows the one for the last value: "…; h+30 runs only when h is below 2; h+20 and h+30 run only in months that have them". Beside a hashed month it names the values that a month its hash picks with them lacks, and one day takes N5's "; a month without day h is skipped". A hashed day step beside a hashed month stops at the last day the months its hash picks with it have, as one hash picks both; past 8,192 hash values it keeps its values: "on days h, h+10, and h+20 of the month, where h is a fixed day from 1 to 10" for `0 0 H/10 H(2-3) * 2028`. An outcome no pair leaves a day in drops out, and a lone outcome names no hash: "on the 30th of the month" |
 | N4 | The day of the week always lists its outcomes; the day of the month and the month list up to 3, and a wrapped range, otherwise the variable form. Outcomes are ordered by h: "on Sunday, Tuesday, Thursday, and Saturday; or Monday, Wednesday, and Friday, depending on the hash key". Each outcome reads in the order it runs ("on Friday and Sunday; or Saturday and Monday"). A wrapped day of the month ends "; a short month skips the days it lacks and changes the last step", as the last step across a short month's end can be cut; the clause is left out when every written month has 31 days (`0 0 H(25-5)/3 1 *`). A whole range written from another start (`H(1-7)/2`, `H(5-4)/7`) walks from that start, as the parser does: when the step does not divide the range, a day of the week or month lists, an hour reads "at the top of a fixed hour between 5 am and 11 am and every 7 hours after it thru 4 am", and a second or minute has no note; when it divides, the plain form stays |
@@ -299,7 +299,7 @@ start: schedule
      | "only" "when" "triggered"                                          // P2
      | interval                                                           // P3
 
-schedule: time [day] [month] [year] [note] [alts | domalts] [zone] short* [hashkey]        // G7, H1
+schedule: time [day] [month] [year] [note] [alts | domalts] [zone] short* [hashkey]        // G7, H1, Z7
 
 time: clocktime | span | hourstep | parts | hashed | counted
 
@@ -439,19 +439,19 @@ year: "in" "year" INT | "in" "years" vlist                                // D6
 short: ";" "the" list{ORD} ("runs" | "run") "only" "in" "months" "that" "have" ("one" | "them")   // D3, X5
      | ";" ("it" | beforeitem) "runs" "only" "in" "months" "of" INT "days" ["or" "more"]           // X6
 
-// a written zone, its shift from UTC and from the scheduler's zone (zoneClause)
-zone: "UTC" ["," schedshift]                                              // zoneName, schedShift
-    | zonename "time" "," utcshift ["," "and" schedshift]                 // zoneName, utcShift, schedShift
-utcshift: offset ("behind" | "ahead" "of") "UTC" ["," second months]      // utcShift
+// Z1–Z3: a written zone, its shift from UTC and from the scheduler's zone
+zone: "UTC" ["," schedshift]                                              // Z1, Z3
+    | zonename "time" "," utcshift ["," "and" schedshift]                 // Z1, Z2, Z3
+utcshift: offset ("behind" | "ahead" "of") "UTC" ["," second months]      // Z2
         | "the" "same" "as" "UTC" ["," second months]
-schedshift: offset ("behind" | "ahead" "of") schedname ["," second months]   // schedShift
+schedshift: offset ("behind" | "ahead" "of") schedname ["," second months]   // Z3
           | "the" "same" "as" schedname ["," second months]
-second: offset ["behind" | "ahead"] | "the" "same" "as" ("UTC" | schedname)  // utcShift, schedShift
-months: "from" MONTHNAME "to" MONTHNAME                                   // utcShift, schedShift
-schedname: zonename "time" | "the" "scheduler's" "time"                   // zoneName: a zone with no name of its own
-offset: INT ("hour" | "hours") [INT ("minute" | "minutes")]               // utcShift
+second: offset ["behind" | "ahead"] | "the" "same" "as" ("UTC" | schedname)  // Z2, Z3
+months: "from" MONTHNAME "to" MONTHNAME                                   // Z2, Z3
+schedname: zonename "time" | "the" "scheduler's" "time"                   // Z3, Z9
+offset: INT ("hour" | "hours") [INT ("minute" | "minutes")]               // Z2
       | INT ("minute" | "minutes")
-zonename: ZONEWORD+                                                       // zoneName: "New York", "Etc/GMT+5", "US/Eastern"
+zonename: ZONEWORD+                                                       // Z1: "New York", "Etc/GMT+5", "US/Eastern"
 ZONEWORD: /[A-Za-z0-9][A-Za-z0-9+\/:_-]*/
 
 interval: "every" DURATION ("from" "when" "scheduling" "started"         // P3
@@ -480,14 +480,14 @@ MONTHNAME: "January" | "February" | "March" | "April" | "May" | "June" | "July"
 
 // ---------------- notes (DescribeSpecNote) ----------------
 // A note is its own text, not a description: it starts at notetext.
-notetext: nclause ("," nclause)* [";" znote] | znote                        // N6, windowNote
+notetext: nclause ("," nclause)* [";" znote] | znote                        // N6, Z4
 
-// the windows in which a written zone is off the shift its description states
-znote: zsent (";" zsent)* ["," "between" "the" "two" "zones'" "clock" "changes"]   // windowNote, betweenChanges
-zsent: zonename "is" zshift list{window}                                    // windowNote, G8
+// Z4: the windows in which a written zone is off the shift its description states
+znote: zsent (";" zsent)* ["," "between" "the" "two" "zones'" "clock" "changes"]   // Z4
+zsent: zonename "is" zshift list{window}                                    // Z4, G8
 zshift: offset ("behind" | "ahead" "of") zobject | "the" "same" "as" zobject
 zobject: zonename | "the" "scheduler's" "time"
-window: "from" MONTHNAME INT "to" [MONTHNAME] INT | "on" MONTHNAME INT     // windowNote: the dates of its first and last instant
+window: "from" MONTHNAME INT "to" [MONTHNAME] INT | "on" MONTHNAME INT     // Z4: the dates of its first and last instant
 
 nclause: ntime | nday | nmonth
 
