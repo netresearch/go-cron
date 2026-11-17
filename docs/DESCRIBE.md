@@ -45,24 +45,28 @@ func WithSchedulerLocation(loc *time.Location) DescribeOption
 - The description is made from the spec text as the parser splits it, not
   from the parsed schedule, because the parsed bits have lost what was
   written (`*/15` and `0,15,30,45` parse the same, but only one has a step).
-- Time zone support starts with the zone a spec writes: a spec with a
-  `TZ=`/`CRON_TZ=` prefix names its zone and the zone's shift from UTC
-  ("Kolkata time, 5 hours 30 minutes ahead of UTC"), and with
+- A spec with a `TZ=`/`CRON_TZ=` prefix names its zone and the zone's shift
+  from UTC ("Kolkata time, 5 hours 30 minutes ahead of UTC"), and with
   `WithSchedulerLocation` its shift from the scheduler's zone ("…, and 3
-  hours ahead of Los Angeles time"). Without that option, and for nil, the
-  description gives no shift from the scheduler's zone, as the scheduler may
-  run in another process and zone than the caller; a caller in a running
-  scheduler passes `c.Location()`. "never runs", "only when triggered" and
-  the intervals name no zone. A spec without a prefix, and `TZ=Local`,
-  carries no time zone; callers show the location beside it. The shifts are
-  those of the year the description is made in, so a description can change
-  at the end of a year, and its months between years when a zone's rules
-  change.
+  hours ahead of Los Angeles time") (Z1–Z3). Without that option, and for
+  nil, the description gives no shift from the scheduler's zone, as the
+  scheduler may run in another process and zone than the caller; a caller in
+  a running scheduler passes `c.Location()` (Z9). "never runs", "only when
+  triggered" and the intervals name no zone (Z7). A spec without a prefix,
+  and `TZ=Local`, carries no time zone (Z6); callers show the location
+  beside it. The shifts are those of the year the description is made in, so
+  a description can change at the end of a year, and its months between
+  years when a zone's rules change (Z8). A description is text made when it
+  is asked for and does not follow a later change: describe the spec again
+  after the scheduler's zone or the zone data changes. A Cron's zone is set
+  when it is made, with `WithLocation` or `time.Local` by default, and does
+  not change; a scheduler in another zone is a new Cron. A spec without a
+  prefix then runs at other instants while its description stays the same.
 - `DescribeSpecNote` spells out the values the hash key picks, which the
   description leaves as "a fixed …": "at minutes h, h+15, h+30, and h+45
   past the hour, where h is a fixed minute from 0 to 14". For a written
   zone it also names the windows in which the zone is off the shift the
-  description states (windowNote): "Berlin is 5 hours ahead of New York
+  description states (Z4): "Berlin is 5 hours ahead of New York
   from March 14 to 28 and from October 31 to November 7, between the two
   zones' clock changes". It is "" unless a field has a hashed step or a
   fixed day of the month, or the zone has such a window (N1–N8).
@@ -103,6 +107,9 @@ These words mean one thing across the rules, the grammar and the notes.
 | starting from, with, at | Where a step starts. "from" takes a fixed value, "with" a named hour, "at" a clock time: "starting from a fixed minute", "starting with the midnight hour", "starting at 12:30 am" | T9, R8, R11, H2, H5, H14, H19, H22, H23, H24 | The word follows what comes after it |
 | field by field | The form for a combination the grammar has none for: "minute 0, hour 0, day of month H/10, month *, day of week *" | G10, H17, H20, N1, N2 | A valid spec always gets a description, and this one is exact |
 | never runs | A spec no date can satisfy, read from the calendar | G11 | A description of a schedule that never fires would mislead |
+| New York time | A zone, named by the last part of its IANA name: `America/New_York` is "New York time". UTC reads "UTC"; a name outside the tz areas reads as written, "US/Eastern time". The note names the zone without "time": "Berlin is …" (Z4) | Z1, Z2, Z3, Z4, Z5 | The reader knows the city, not the IANA path. Outside the areas the last part is not one place: `US/Eastern` and `Canada/Eastern` would both read "Eastern" |
+| the scheduler's time | The zone the scheduler runs in, when that zone has no name of its own | Z3, Z4, Z9 | The shift from the clock the job runs on is still given when Go names that zone only "Local" |
+| behind, ahead of, the same as | A zone's shift from UTC or from the scheduler's zone: "5 hours behind UTC", "3 hours ahead of Los Angeles time", "the same as UTC" | Z2, Z3, Z4 | A reader adds or subtracts hours; a signed offset needs the sign convention explained |
 
 ## Rules
 
@@ -113,7 +120,7 @@ which form a spec gets. Each has an ID, which the grammar cites.
 
 | ID | Rule |
 |---|---|
-| G1 | A description says what the scheduler runs: each golden in `describe_test.go` was checked against the runs `Next()` computes, and `TestDescribeSpecNamesRuns` checks the times and dates a description names against those runs (see the Grammar section) |
+| G1 | A description says what the scheduler runs: each golden in `describe_test.go` was checked against the runs `Next()` computes, and `TestDescribeSpecNamesRuns` checks the times and dates a description names against those runs (see the Grammar section). It is the wall-clock schedule in the spec's zone, or the scheduler's when none is written. On a day the clock changes, the scheduler runs the times the clock skips and the times it repeats as `docs/DST_HANDLING.md` says; `Next()` gives a repeated time twice, and the scheduler's guard runs it once where that file says so |
 | G2 | A parser oddity is described as it runs |
 | G3 | The description is built from the spec text as the parser splits it, and its values follow the parser's options |
 | G6 | Wording is for people |
@@ -213,11 +220,27 @@ which form a spec gets. Each has an ID, which the grammar cites.
 | P2 | A descriptor reads as its cron equivalent: `@weekly` as `0 0 * * 0`, "at 12 am on Sunday"; `@hourly` as `0 * * * *`, "at the top of every hour". `@triggered`, `@manual` and `@none` read "only when triggered" |
 | P3 | An interval reads as it runs, after the parser's minimum and the cut to whole seconds, from its anchor: "every 1h30m from when scheduling started" (`@every`, `@every_start`), "every 15m from Unix epoch" (`@every_aligned`, and `@every` under `AlignEvery`). A written duration that changed is named in a note: "(written as 500ms, rounded up to the 1s minimum)" (`EveryRoundUp`), "(written as 1.5s, cut to whole seconds)", "(written as 1.7s, rounded up to whole seconds)" (a fractional minimum). `90m` reads "1h30m" |
 
+### Time zones
+
+The examples are for 2027.
+
+| ID | Rule |
+|---|---|
+| Z1 | A zone written with `TZ=` or `CRON_TZ=` under one of the tz areas (`Africa`, `America`, `Antarctica`, `Arctic`, `Asia`, `Atlantic`, `Australia`, `Europe`, `Indian`, `Pacific`) is named by the last part of its name as written, with spaces for `_`, and "time": `America/New_York` reads "New York time", `America/Argentina/Buenos_Aires` "Buenos Aires time". `UTC` reads "UTC" alone. Any other name reads as written: "Etc/UTC time", "EST5EDT time", "US/Eastern time" |
+| Z2 | The zone's shift from UTC follows its name: "at 9 am every day Kolkata time, 5 hours 30 minutes ahead of UTC". It is the shift on January 1 in that zone. A zone that leaves it once in the year and returns names the other value and the months, in the zone, of the two changes: "at 2:30 am every day New York time, 5 hours behind UTC, 4 hours from March to November"; "Lord Howe time, 11 hours ahead of UTC, 10 hours 30 minutes from April to October". The second value names its side only when the side differs: "London time, the same as UTC, 1 hour ahead from March to October". A zone that changes in another way gives the January shift alone, and the note names the rest against UTC (Z4): "Istanbul is 3 hours ahead of UTC from March 27 to December 31" in 2016. A spec written `UTC` gives no shift from UTC; `Etc/UTC` reads "Etc/UTC time, the same as UTC" |
+| Z3 | The shift from the scheduler's zone (`WithSchedulerLocation`) follows, after ", and", or after ", " for a spec written `UTC`: "at 2:30 am every day New York time, 5 hours behind UTC, 4 hours from March to November, and 3 hours ahead of Los Angeles time". It is left out when the scheduler runs on UTC, under any name, or has the spec zone's shifts all year (`America/Detroit` on a New York scheduler). When one of the two zones changes with the season and the other has no clock change in the year, it takes the months form: "at midnight every day UTC, 8 hours ahead of Los Angeles time, 7 hours from March to November"; "UTC, the same as London time, 1 hour behind from March to October". When both change with the season, it is the shift in force for most of the year, or the January shift on a tie: "Berlin time, 1 hour ahead of UTC, 2 hours from March to October, and 6 hours ahead of New York time". In any other case it is the January shift. The note names the windows off it (Z4) |
+| Z4 | The note names the windows in which a zone is off the shift the description states, by the dates, in the spec's zone, of each window's first and last instant: "Berlin is 5 hours ahead of New York from March 14 to 28 and from October 31 to November 7, between the two zones' clock changes". A window within one date reads "on" it: "Fakaofo is 13 hours ahead of UTC on December 31" in 2011. Zones are named without "time"; a scheduler's zone with no name of its own reads "the scheduler's time". Each shift gets one sentence that lists its windows (G8), and sentences join with "; ". The closing ", between the two zones' clock changes" is given only when every window starts at a clock change of one zone and ends at one of the other; a window from January 1 or to December 31, or between two changes of one zone, is not: "Sydney is 16 hours ahead of New York from January 1 to March 14 and from November 7 to December 31; Sydney is 15 hours ahead of New York from March 14 to April 4 and from October 3 to November 7". A window under a day is left out, although a run inside it is off the stated shift: New York and Los Angeles change on one date, 3 hours apart, and get no note. The sentence follows a note for hashed values after "; " |
+| Z5 | A written zone is always named, also when it moves no run: `TZ="America/New_York" */15 * * * *` reads "at minutes 0, 15, 30, and 45 past the hour New York time, 5 hours behind UTC, 4 hours from March to November" |
+| Z6 | A spec with no prefix reads as it did, and so does `TZ=Local`: both run in the scheduler's zone |
+| Z7 | The zone follows the schedule and the alternatives of a fixed value, and precedes the short-month and hash key clauses (G7): "at midnight on the 1st, 11th, 21st, and 31st of the month Berlin time, 1 hour ahead of UTC, 2 hours from March to October; the 31st runs only in months that have one". A descriptor takes it as its cron equivalent does, and so does a description given field by field. "never runs", "only when triggered" and an interval take no zone |
+| Z8 | The shifts, months and dates are those of the current year in the spec's zone, also for a spec that writes years. For a zone with a steady rule the shift from UTC and its months are the same every year. The shift from the scheduler's zone can differ between years when both zones change with the season, as the shift in force for most of the year (Z3) can be another: `CRON_TZ=Europe/Berlin 0 0 * * *` on a Santiago scheduler reads "4 hours ahead of Santiago time" in 2026 and "6 hours ahead of Santiago time" in 2027. The dates in the note change with the year |
+| Z9 | The scheduler's zone has no default: without `WithSchedulerLocation`, and for nil, the description gives the shift from UTC only, as the caller may describe a scheduler that runs in another process and zone: "at 2:30 am every day New York time, 5 hours behind UTC, 4 hours from March to November". A caller passes `time.Local` to name the host's zone, and Go names `time.Local` from the `TZ` environment variable. With `TZ` unset it has no name of its own and reads "the scheduler's time", as any zone with no name does: "at midnight every day UTC, 8 hours ahead of the scheduler's time". `TZ=America/Los_Angeles` reads "Los Angeles time", and a path reads as written (Z1). With `TZ=""`, `TZ=UTC`, a zone Go cannot load, or no `/etc/localtime`, as in a minimal container, Go sets `time.Local` to UTC, and the shift is left out (Z3) |
+
 ### Notes (`DescribeSpecNote`)
 
 | ID | Rule |
 |---|---|
-| N1 | The note is "" unless a field has a hashed step or a fixed day of the month (`H`, `H(1-15)`, `1,H`), or a written zone has a window off the shift its description states (windowNote), which follows the hashed values after "; "; a fixed second, minute, hour, day of the week or month needs none. A description rendered field by field still gets its note. A field whose hashed items have no note form leaves out all the hashed values: the note is then the zone window alone, or "" with none |
+| N1 | The note is "" unless a field has a hashed step or a fixed day of the month (`H`, `H(1-15)`, `1,H`), or a written zone has a window off the shift its description states (Z4), which follows the hashed values after "; "; a fixed second, minute, hour, day of the week or month needs none. A description rendered field by field still gets its note. A field whose hashed items have no note form leaves out all the hashed values: the note is then the zone window alone, or "" with none |
 | N2 | A hashed step in the second or minute field reads as its values with a variable, unit first (R5), in the hours of the description (R6, R9, R11, R12, C1), or of the written fields when the description is field by field: "at minutes h, h+15, h+30, and h+45 past the hour, where h is a fixed minute from 0 to 14"; "at seconds h, h+15, h+30, and h+45 within minutes 0 thru 10 and 50 thru 59 in every hour, …". Minutes cut short carry their note (T1): "within minutes 0, 7, 14, … 56 in every hour (every 7 minutes, starting over each hour), where h is …". A wrapped hashed range lists its outcomes as N4 does: "at minutes 50, 55, 0, 5, and 10; 51, 56, 1, and 6; 52, 57, 2, and 7; 53, 58, 3, and 8; or 54, 59, 4, and 9 past the hour, depending on the hash key" |
 | N3 | The values run to the last one any h has; past the T1 limit, the first 3, "…", the last ("h, h+5, h+10, … h+55"). When only some h have the last value, a clause says which: "at minutes h and h+40 past the hour, where h is a fixed minute from 0 to 39; h+40 runs only when h is below 20". A hashed day step past the shortest month it runs in keeps its values, and a clause in the form of D3 names the ones some month lacks: "on days h, h+10, h+20, and h+30 of the month in April, …; h+30 runs only in months that have one"; "…, depending on the hash key; the 31st runs only in months that have one". With no month written the clause follows the one for the last value: "…; h+30 runs only when h is below 2; h+20 and h+30 run only in months that have them". Beside a hashed month it names the values that a month its hash picks with them lacks, and one day takes N5's "; a month without day h is skipped". A hashed day step beside a hashed month stops at the last day the months its hash picks with it have, as one hash picks both; past 8,192 hash values it keeps its values: "on days h, h+10, and h+20 of the month, where h is a fixed day from 1 to 10" for `0 0 H/10 H(2-3) * 2028`. An outcome no pair leaves a day in drops out, and a lone outcome names no hash: "on the 30th of the month" |
 | N4 | The day of the week always lists its outcomes; the day of the month and the month list up to 3, and a wrapped range, otherwise the variable form. Outcomes are ordered by h: "on Sunday, Tuesday, Thursday, and Saturday; or Monday, Wednesday, and Friday, depending on the hash key". Each outcome reads in the order it runs ("on Friday and Sunday; or Saturday and Monday"). A wrapped day of the month ends "; a short month skips the days it lacks and changes the last step", as the last step across a short month's end can be cut; the clause is left out when every written month has 31 days (`0 0 H(25-5)/3 1 *`). A whole range written from another start (`H(1-7)/2`, `H(5-4)/7`) walks from that start, as the parser does: when the step does not divide the range, a day of the week or month lists, an hour reads "at the top of a fixed hour between 5 am and 11 am and every 7 hours after it thru 4 am", and a second or minute has no note; when it divides, the plain form stays |
@@ -280,7 +303,7 @@ start: schedule
      | "only" "when" "triggered"                                          // P2
      | interval                                                           // P3
 
-schedule: time [day] [month] [year] [note] [alts | domalts] [zone] short* [hashkey]        // G7, H1
+schedule: time [day] [month] [year] [note] [alts | domalts] [zone] short* [hashkey]        // G7, H1, Z7
 
 time: clocktime | span | hourstep | parts | hashed | counted
 
@@ -420,19 +443,19 @@ year: "in" "year" INT | "in" "years" vlist                                // D6
 short: ";" "the" list{ORD} ("runs" | "run") "only" "in" "months" "that" "have" ("one" | "them")   // D3, X5
      | ";" ("it" | beforeitem) "runs" "only" "in" "months" "of" INT "days" ["or" "more"]           // X6
 
-// a written zone, its shift from UTC and from the scheduler's zone (zoneClause)
-zone: "UTC" ["," schedshift]                                              // zoneName, schedShift
-    | zonename "time" "," utcshift ["," "and" schedshift]                 // zoneName, utcShift, schedShift
-utcshift: offset ("behind" | "ahead" "of") "UTC" ["," second months]      // utcShift
+// Z1–Z3: a written zone, its shift from UTC and from the scheduler's zone
+zone: "UTC" ["," schedshift]                                              // Z1, Z3
+    | zonename "time" "," utcshift ["," "and" schedshift]                 // Z1, Z2, Z3
+utcshift: offset ("behind" | "ahead" "of") "UTC" ["," second months]      // Z2
         | "the" "same" "as" "UTC" ["," second months]
-schedshift: offset ("behind" | "ahead" "of") schedname ["," second months]   // schedShift
+schedshift: offset ("behind" | "ahead" "of") schedname ["," second months]   // Z3
           | "the" "same" "as" schedname ["," second months]
-second: offset ["behind" | "ahead"] | "the" "same" "as" ("UTC" | schedname)  // utcShift, schedShift
-months: "from" MONTHNAME "to" MONTHNAME                                   // utcShift, schedShift
-schedname: zonename "time" | "the" "scheduler's" "time"                   // zoneName: a zone with no name of its own
-offset: INT ("hour" | "hours") [INT ("minute" | "minutes")]               // utcShift
+second: offset ["behind" | "ahead"] | "the" "same" "as" ("UTC" | schedname)  // Z2, Z3
+months: "from" MONTHNAME "to" MONTHNAME                                   // Z2, Z3
+schedname: zonename "time" | "the" "scheduler's" "time"                   // Z3, Z9
+offset: INT ("hour" | "hours") [INT ("minute" | "minutes")]               // Z2
       | INT ("minute" | "minutes")
-zonename: ZONEWORD+                                                       // zoneName: "New York", "Etc/GMT+5", "US/Eastern"
+zonename: ZONEWORD+                                                       // Z1: "New York", "Etc/GMT+5", "US/Eastern"
 ZONEWORD: /[A-Za-z0-9][A-Za-z0-9+\/:_-]*/
 
 interval: "every" DURATION ("from" "when" "scheduling" "started"         // P3
@@ -461,14 +484,14 @@ MONTHNAME: "January" | "February" | "March" | "April" | "May" | "June" | "July"
 
 // ---------------- notes (DescribeSpecNote) ----------------
 // A note is its own text, not a description: it starts at notetext.
-notetext: nclause ("," nclause)* [";" znote] | znote                        // N6, windowNote
+notetext: nclause ("," nclause)* [";" znote] | znote                        // N6, Z4
 
-// the windows in which a written zone is off the shift its description states
-znote: zsent (";" zsent)* ["," "between" "the" "two" "zones'" "clock" "changes"]   // windowNote, betweenChanges
-zsent: zonename "is" zshift list{window}                                    // windowNote, G8
+// Z4: the windows in which a written zone is off the shift its description states
+znote: zsent (";" zsent)* ["," "between" "the" "two" "zones'" "clock" "changes"]   // Z4
+zsent: zonename "is" zshift list{window}                                    // Z4, G8
 zshift: offset ("behind" | "ahead" "of") zobject | "the" "same" "as" zobject
 zobject: zonename | "the" "scheduler's" "time"
-window: "from" MONTHNAME INT "to" [MONTHNAME] INT | "on" MONTHNAME INT     // windowNote: the dates of its first and last instant
+window: "from" MONTHNAME INT "to" [MONTHNAME] INT | "on" MONTHNAME INT     // Z4: the dates of its first and last instant
 
 nclause: ntime | nday | nmonth
 
@@ -610,6 +633,19 @@ It says so with no month written as well, since most schedules write none.
 
 "fixed" replaced "hashed" because it says what a reader can rely
 on.
+
+A written zone reads the same all year. The description could give the shift
+in force when it is produced ("4 hours behind UTC"), but that sentence is wrong
+after the next clock change, and a description is read long after it is made.
+So it gives the January shift, the other value, and the months the other value
+holds. Months, not dates, go in the description: a zone's months hold from year
+to year, and its dates do not. Where both zones change with the season, on
+different dates, the description keeps one shift, the one in force for most of that year, and the
+note gives the windows by date, exactly, for the current year. A window under a day is left out, so that two zones that
+change on one date, as New York and Los Angeles do, get no note every year. A
+run inside such a window is an hour off the stated shift, and can fall on
+another date: at 3:30 am New York time on March 14, 2027, Los Angeles is at
+11:30 pm on March 13, not at 12:30 am on March 14.
 
 ## Extending the wording
 

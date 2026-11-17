@@ -2708,7 +2708,9 @@ type SpecAnalysis struct {
 SpecAnalysis contains detailed information about a parsed cron specification.
 Returned by `AnalyzeSpec`. `Description` and `DescriptionNote` are what
 `DescribeSpec` and `DescribeSpecNote` give for the spec; both are empty when
-it is invalid.
+it is invalid. For a spec with a written zone they give its shift from UTC;
+`Parser.AnalyzeSpec` takes `WithSchedulerLocation` to add the shift from the
+scheduler's zone.
 
 ---
 
@@ -3026,13 +3028,13 @@ the chosen values. See
 func DescribeSpec(spec string, opts ...DescribeOption) (string, error)
 func (p Parser) DescribeSpec(spec string, opts ...DescribeOption) (string, error)
 func WithParseOptions(o ParseOption) DescribeOption
+func WithSchedulerLocation(loc *time.Location) DescribeOption
 ```
 
 DescribeSpec returns an English description of a cron expression, or the parse
 error. The package function parses as `AnalyzeSpec` does (the standard parser
 unless `WithParseOptions` is given; several calls OR together); the `Parser`
-method uses the parser's own settings and ignores `WithParseOptions`. Times are on the 12-hour clock. Time zone support starts with the zone a
-spec writes: a spec with a `TZ=`/`CRON_TZ=` prefix names its zone and the
+method uses the parser's own settings and ignores `WithParseOptions`. Times are on the 12-hour clock. A spec with a `TZ=`/`CRON_TZ=` prefix names its zone and the
 zone's shift from UTC, and with `WithSchedulerLocation` its shift from the
 scheduler's zone; one without a prefix, and `TZ=Local`, carries no time
 zone. The shifts are those of the year the description is made in, so the
@@ -3060,6 +3062,9 @@ desc, err = cron.DescribeSpec("0 9 13 * 5")
 // "at 9 am on the 13th of the month when it falls on Friday"
 desc, err = cron.DescribeSpec("@weekly")
 // "at 12 am on Sunday"
+losAngeles, _ := time.LoadLocation("America/Los_Angeles")
+desc, err = cron.DescribeSpec("CRON_TZ=America/New_York 30 2 * * *", cron.WithSchedulerLocation(losAngeles))
+// "at 2:30 am every day New York time, 5 hours behind UTC, 4 hours from March to November, and 3 hours ahead of Los Angeles time"
 ```
 
 ### DescribeSpecNote
@@ -3084,6 +3089,9 @@ note, err := cron.DescribeSpecNote("H/15 * * * *", cron.WithParseOptions(cron.Mi
 // "at minutes h, h+15, h+30, and h+45 past the hour, where h is a fixed minute from 0 to 14"
 note, err = cron.DescribeSpecNote("0 9 * * H/2", cron.WithParseOptions(cron.Minute|cron.Hour|cron.Dom|cron.Month|cron.Dow|cron.Hash))
 // "on Sunday, Tuesday, Thursday, and Saturday; or Monday, Wednesday, and Friday, depending on the hash key"
+newYork, _ := time.LoadLocation("America/New_York")
+note, err = cron.DescribeSpecNote("CRON_TZ=Europe/Berlin 0 0 * * *", cron.WithSchedulerLocation(newYork))
+// "Berlin is 5 hours ahead of New York from March 14 to 28 and from October 31 to November 7, between the two zones' clock changes" (in 2027)
 ```
 
 ### WorkflowExecutionID

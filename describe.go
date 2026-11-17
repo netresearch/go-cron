@@ -102,7 +102,7 @@ func (p Parser) DescribeSpec(spec string, opts ...DescribeOption) (string, error
 // key picks in spec's description, as p parses it: "at minutes h, h+15,
 // h+30, and h+45 past the hour, where h is a fixed minute from 0 to 14".
 // For a spec with a written zone it names the windows in which that zone is
-// off the shift the description states (windowNote). It is "" unless a field has a
+// off the shift the description states (Z4). It is "" unless a field has a
 // hashed step or a fixed day of the month, or the zone has such a window. A
 // description given field by field still gets its note. See docs/DESCRIBE.md.
 func (p Parser) DescribeSpecNote(spec string, opts ...DescribeOption) (string, error) {
@@ -138,8 +138,12 @@ func (p Parser) describe(spec string, sched *time.Location) (desc, note string, 
 	if err != nil {
 		return "", "", err
 	}
-	// The spec parsed, so the split cannot fail.
-	loc, descriptor, fields, yearField, _ := p.specFields(spec)
+	// The split loads a written zone again: with WithCache, Parse can return a
+	// schedule whose zone no longer loads.
+	loc, descriptor, fields, yearField, err := p.specFields(spec)
+	if err != nil {
+		return "", "", err
+	}
 	fields, text := p.expandDescriptor(descriptor, fields)
 	if text != "" {
 		return text, "", nil
@@ -157,10 +161,7 @@ func (p Parser) describe(spec string, sched *time.Location) (desc, note string, 
 	if p.dayMissing(sch, fields) {
 		return "never runs", "", nil
 	}
-	var h [3]hashField
-	for i, r := range []bounds{seconds, minutes, hours} {
-		h[i] = splitHash(fields[i], r)
-	}
+	h := [3]hashField{splitHash(fields[0], seconds), splitHash(fields[1], minutes), splitHash(fields[2], hours)}
 	hd, dates, ok := p.splitDates(fields)
 	units := hashUnits(append(h[:], hd[:]...), []string{unitSecond, unitMinute, unitHour, unitDay, unitDay, unitMonth})
 	d := p.dayDescriber(sch, fields)
@@ -741,8 +742,8 @@ var literalNames = []string{seconds.name, minutes.name, hours.name, dom.name, mo
 
 // describeLiteral names each field spec wrote, as written. fields and
 // yearField are spec's fields from specFields, which fill in the fields
-// spec left out. zone, the clause zoneClause gives a written zone, follows
-// as one more item.
+// spec left out. zone, the clause of a written zone, follows as one more
+// item (Z7).
 func (p Parser) describeLiteral(spec string, fields []string, yearField, zone string) string {
 	// The spec parsed, so neither step can fail.
 	_, rest, _ := parseTimezone(spec)

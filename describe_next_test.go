@@ -494,7 +494,7 @@ func namesNotRunSpec(p Parser, spec, desc, note string, sched *time.Location) ([
 }
 
 // shiftPattern matches the shift a zone clause gives from object, "UTC" or
-// "<name> time" (utcShift, schedShift): "5 hours behind UTC", "the same as
+// "<name> time" (Z2, Z3): "5 hours behind UTC", "the same as
 // UTC", and for a shift that changes with the season a second value and its
 // months, "…, 4 hours from March to November", "…, 1 hour ahead from March to
 // October".
@@ -509,10 +509,10 @@ var (
 )
 
 // zoneMisses checks the zone clause of desc for the written zone loc
-// (zoneName, utcShift, schedShift) and returns desc without the clause, and
+// (Z1–Z3) and returns desc without the clause, and
 // each shift that is not what Next() gives in loc, or "no <name> time" when
 // desc does not name loc. A shift is read with the windows note names off it
-// (windowNote). sched is the scheduler's zone, nil when none is given. It
+// (Z4). sched is the scheduler's zone, nil when none is given. It
 // reads nothing for no zone, TZ=Local and "never runs", which name no zone.
 func zoneMisses(loc, sched *time.Location, desc, note string) (string, []string) {
 	if loc == nil || loc == time.Local || desc == "never runs" {
@@ -594,7 +594,7 @@ type zoneWindow struct {
 }
 
 // zoneWindows reads the windows note gives subject's zone off its shift from
-// object (windowNote): "Berlin is 5 hours ahead of New York from March 14 to
+// object (Z4): "Berlin is 5 hours ahead of New York from March 14 to
 // 28 and from October 31 to November 7", "… on December 31".
 func zoneWindows(note, subject, object string) []zoneWindow {
 	sentence := regexp.MustCompile(`^` + regexp.QuoteMeta(subject) + ` is (?:the same as ` + regexp.QuoteMeta(object) +

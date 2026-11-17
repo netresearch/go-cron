@@ -167,6 +167,37 @@ c.AddFunc(`CRON_TZ='Europe/London' 0 9 * * *`, job)
 2. `WithLocation()` option on Cron instance
 3. `time.Local` (system default)
 
+### Where time zone data comes from
+
+go-cron loads a zone with Go's `time.LoadLocation`, which reads the first of
+these that has the zone:
+
+1. The directory or uncompressed zip file named by the `ZONEINFO` environment
+   variable
+2. The system's directories (`/usr/share/zoneinfo/` first on Unix)
+3. The copy embedded in a program that imports `time/tzdata` or is built with
+   `-tags timetzdata`; go-cron does neither
+4. `$GOROOT/lib/time/zoneinfo.zip`
+
+The order is that of Go's code (`loadLocation` in `zoneinfo_read.go`); the
+`time.LoadLocation` doc comment lists the zip before the embedded copy.
+
+`ZONEINFO` gives a program current zone data without a rebuild. It must hold a
+complete set: a zone missing there is read from the next source, which can be
+older. Go reads the variable once, at the first lookup.
+
+A running entry keeps the `Location` it was parsed with until `UpdateSchedule`
+(or `UpdateEntry`, `UpsertJob`) gives it a new schedule or the process
+restarts. A parser made with `WithCache` returns the schedule it parsed
+before, `Location` included, for the same spec, so parse again with a parser
+that has a new cache, or none. A spec without a prefix runs
+in the Cron's zone, given with `WithLocation` or `time.Local` by default, and
+parsing it again does not reload that zone: a new Cron made with a zone loaded
+again picks up new data, and `time.Local` changes only with a restart.
+`DescribeSpec` loads a written zone each time it is called, so after the data
+changes it can give other offsets than an entry still running with the old
+`Location`.
+
 ### Interaction with SpecSchedule.Location
 
 When a schedule is parsed:
