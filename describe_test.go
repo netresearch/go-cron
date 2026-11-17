@@ -1688,6 +1688,28 @@ func TestDescribeSpecParseError(t *testing.T) {
 	}
 }
 
+// A parser made WithCache returns the schedule it parsed before, but describe
+// loads the written zone again. A zone that loaded then and is gone now gives
+// an error, not a panic. The cache entry stands in for the earlier parse.
+func TestDescribeCachedSpecZoneGone(t *testing.T) {
+	const spec = "CRON_TZ=Gone/Zone 0 9 * * *"
+	p := NewParser(Minute | Hour | Dom | Month | Dow | Descriptor).WithCache()
+	sch, err := p.Parse("0 9 * * *")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.cache.Store(p.cacheKey(spec), cacheEntry{schedule: sch})
+	if got, err := p.DescribeSpec(spec); err == nil {
+		t.Errorf("DescribeSpec(%q) = %q, want a zone error", spec, got)
+	}
+	if got, err := p.DescribeSpecNote(spec); err == nil {
+		t.Errorf("DescribeSpecNote(%q) = %q, want a zone error", spec, got)
+	}
+	if a := p.AnalyzeSpec(spec); a.Description != "" {
+		t.Errorf("AnalyzeSpec(%q).Description = %q, want none", spec, a.Description)
+	}
+}
+
 func TestParserDescribeSpec(t *testing.T) {
 	p := NewParser(Second | Minute | Hour | Dom | Month | Dow)
 	// The parser's own settings apply; WithParseOptions is for the package function.

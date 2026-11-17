@@ -138,8 +138,12 @@ func (p Parser) describe(spec string, sched *time.Location) (desc, note string, 
 	if err != nil {
 		return "", "", err
 	}
-	// The spec parsed, so the split cannot fail.
-	loc, descriptor, fields, yearField, _ := p.specFields(spec)
+	// The split loads a written zone again: with WithCache, Parse can return a
+	// schedule whose zone no longer loads.
+	loc, descriptor, fields, yearField, err := p.specFields(spec)
+	if err != nil {
+		return "", "", err
+	}
 	fields, text := p.expandDescriptor(descriptor, fields)
 	if text != "" {
 		return text, "", nil
@@ -157,10 +161,7 @@ func (p Parser) describe(spec string, sched *time.Location) (desc, note string, 
 	if p.dayMissing(sch, fields) {
 		return "never runs", "", nil
 	}
-	var h [3]hashField
-	for i, r := range []bounds{seconds, minutes, hours} {
-		h[i] = splitHash(fields[i], r)
-	}
+	h := [3]hashField{splitHash(fields[0], seconds), splitHash(fields[1], minutes), splitHash(fields[2], hours)}
 	hd, dates, ok := p.splitDates(fields)
 	units := hashUnits(append(h[:], hd[:]...), []string{unitSecond, unitMinute, unitHour, unitDay, unitDay, unitMonth})
 	d := p.dayDescriber(sch, fields)
