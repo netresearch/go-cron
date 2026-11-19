@@ -605,6 +605,7 @@ if cron.Matches(schedule, now) {
 - [API Reference](docs/API_REFERENCE.md) — Complete type and method documentation
 - [Cookbook](docs/COOKBOOK.md) — Recipes for common patterns
 - [Migration Guide](docs/MIGRATION.md) — Migrating from robfig/cron
+- [Cron Spec Migration](docs/CRON_SPEC_MIGRATION.md) — Moving cron specs from other schedulers
 - [DST Handling](docs/DST_HANDLING.md) — Daylight Saving Time behavior
 - [Persistence Guide](docs/PERSISTENCE_GUIDE.md) — Storing and restoring job state
 - [Changelog](CHANGELOG.md) — Release history
