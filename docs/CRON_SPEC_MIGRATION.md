@@ -720,6 +720,7 @@ Reference: [APScheduler 3.x cron trigger](https://apscheduler.readthedocs.io/en/
 | `from_crontab('0 9 * * 0-4')` (0 = Monday in APScheduler; its docs warn) | Monday to Friday | Sunday to Thursday | `0 9 * * 1-5`: add 1 to every day number (Sunday becomes 0 or 7); or use day names |
 | `CronTrigger(hour=3)` (fields below the smallest given default to their minimum) | 03:00 once a day | `* 3 * * *`: every minute of hour 3 | `0 3 * * *` |
 | `CronTrigger(day='1,3rd fri')` (a union inside the day field) | the 1st and the third Friday | `0 0 1 * FRI#3`: never (both fields must match) | `DowOrDom`, or two entries |
+| `CronTrigger(year='2026/2', day=15, hour=9)` (year step) | 2026, 2028, … | `0 9 15 * * 2026/2`: 2026 only | write an end year: `2026-9998/2` |
 
 **Fails to parse in go-cron**
 
@@ -736,7 +737,8 @@ Reference: [APScheduler 3.x cron trigger](https://apscheduler.readthedocs.io/en/
 - Day numbers: 0 is Monday; see above.
 - Day of month and day of week: AND, as go-cron.
 - Special characters: `*` `*/n` `a-b` `a-b/n` `a/n` `,` and three-letter names, as
-  go-cron; `xth y`, `last x` and `last` in the day field, as above.
+  go-cron, except `a/n` in the year; `xth y`, `last x` and `last` in the day
+  field, as above.
 - `@` shortcuts: none.
 - Time zones: `timezone=` on the trigger, or the scheduler's `timezone`. The
   docs say a trigger defaults to the scheduler's zone; the code does that only
@@ -757,6 +759,7 @@ Reference: [APScheduler 3.x cron trigger](https://apscheduler.readthedocs.io/en/
 | `CronTrigger(second='*/10')` | `*/10 * * * * *` | Wed 2026-11-18 00:00:10: every 10 seconds (`Second`) |
 | `CronTrigger(day='last sun')` | `0 0 * * SUN#L` | Sun 2026-11-29 00:00: last Sunday |
 | `CronTrigger(day='1,3rd fri')` | `0 0 1 * FRI#3` | Fri 2026-11-20 00:00: the 1st and the third Friday (`DowOrDom`) |
+| `CronTrigger(year='2026/2', day=15, hour=9)` | `0 9 15 * * 2026-9998/2` | Tue 2026-12-15 09:00, then 2028-01-15: every second year (`Year`). `2026/2` would stop after 2026 |
 | `CronTrigger(week='*/2')` | no go-cron spec | go-cron has no ISO-week field |
 | `from_crontab('0 9 * * *', timezone='America/New_York')` | `CRON_TZ=America/New_York 0 9 * * *` | Wed 2026-11-18 14:00: 09:00 in New York |
 
@@ -822,6 +825,9 @@ Reference: [croniter README](https://github.com/pallets-eco/croniter/blob/7.0.0/
 | `0 9 13 * 5` (both day fields restricted, `day_or=True`, the default) | the 13th and every Friday | Friday the 13th only | `DowOrDom`, or two entries |
 | `5-5 * * * *` (an equal range is the whole cycle) | every minute | minute 5 of each hour | `* * * * *` |
 | `0 9 * * *`, naive or no start time | 09:00 UTC | 09:00 local time | `CRON_TZ=UTC 0 9 * * *` |
+| `0 9 15 * * 0 2026/2` (year step) | 2026, 2028, … | with the seconds moved first (`0 0 9 15 * * 2026/2`), 2026 only | write an end year: `0 0 9 15 * * 2026-2098/2` |
+| `0 9 31W * *` | in a month without a 31st, the weekday nearest its last day | only months with a 31st | `0 9 LW * *` |
+| `@daily` with `hash_id` (every `@` shortcut) | a hashed time each day: croniter reads it as `H H * * * H` | 00:00 every day | `H H H * * *` (`Second` and `Hash`); go-cron picks its own minute, hour and second, so write fixed values if the time must stay the same |
 
 With `day_or=False`, croniter needs both day fields, as go-cron. With
 `implement_cron_bug=True`, a field starting with `*` counts as unrestricted,
@@ -845,7 +851,8 @@ which is go-cron's `StepWildcard`.
 - Special characters: `*` `/` `,` `-` `?` `l` (last day of the month) `nW` `n#k`
   `Ln`, names, `H` and `R`. Ranges wrap.
 - `@` shortcuts: `@midnight`, `@hourly`, `@daily`, `@weekly`, `@monthly`,
-  `@yearly`, `@annually` in any case, as go-cron with `Descriptor` in lower case.
+  `@yearly`, `@annually` in any case, as go-cron with `Descriptor` in lower case;
+  with `hash_id`, croniter hashes them (see above).
 - Time zones: above.
 - Parser setup: `Minute | Hour | Dom | Month | Dow | DowOrDom` for the default
   `day_or=True` (no `StepWildcard`); add `Second`, `Year`, `Extended`,
@@ -857,6 +864,9 @@ which is go-cron's `StepWildcard`.
 | `0 9 13 * 5` | `0 9 13 * *` and `0 9 * * 5` | Sun 2026-12-13 09:00 for the first entry; the second runs every Friday; on a Friday the 13th both run |
 | `* * * * * 15,25` | `15,25 * * * * *` | Wed 2026-11-18 00:00:15: seconds 15 and 25 of each minute (`Second`) |
 | `0 0 1 1 * 0 2027-2029` | `0 0 0 1 1 * 2027-2029` | Fri 2027-01-01 00:00 (`Second` and `Year`) |
+| `0 9 15 * * 0 2026/2` | `0 0 9 15 * * 2026-2098/2` | Tue 2026-12-15 09:00, then 2028-01-15: every second year. `2026/2` would stop after 2026 |
+| `0 9 31W * *` | `0 9 LW * *` | Mon 2026-11-30 09:00: the last weekday, as croniter ran it |
+| `@daily` with `hash_id` | `H H H * * *` | Wed 2026-11-18 23:11:11: a hashed time each day (`Second` and `Hash`) |
 | `0 0 * * L5` | `0 0 * * 5#L` | Fri 2026-11-27 00:00: last Friday |
 | `0 0 * * 5#3,L5` | `0 0 * * 5#3,5#L` | Fri 2026-11-20 00:00: third and last Friday |
 | `0 0 l * *` | `0 0 L * *` | Mon 2026-11-30 00:00: last day of the month |
