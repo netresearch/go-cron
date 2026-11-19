@@ -209,6 +209,7 @@ than chasing it.
 | `docs/ARCHITECTURE.md` | Internal design, data structures, algorithms |
 | `docs/COOKBOOK.md` | Practical recipes for common patterns |
 | `docs/MIGRATION.md` | Migration guide from robfig/cron |
+| `docs/CRON_SPEC_MIGRATION.md` | Moving cron specs from other schedulers |
 | `docs/API_REFERENCE.md` | Public API documentation |
 | `docs/DST_HANDLING.md` | Daylight saving time behavior |
 | `docs/DESCRIBE.md` | `DescribeSpec` wording, grammar (EBNF), reader-trial method |

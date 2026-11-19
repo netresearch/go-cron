@@ -122,6 +122,7 @@ c := cron.New(cron.WithParser(parser))
 4. Use `FakeClock` for deterministic testing
 
 See [MIGRATION.md](MIGRATION.md) for a complete migration guide.
+For cron specs from other schedulers (Quartz, Kubernetes, Jenkins, systemd and others), see [CRON_SPEC_MIGRATION.md](CRON_SPEC_MIGRATION.md).
 
 ---
 

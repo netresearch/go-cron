@@ -8,6 +8,7 @@ Welcome to the go-cron documentation. This guide helps you find the right docume
 |-------------------|---------|
 | Get started quickly | [README.md](../README.md) |
 | Migrate from robfig/cron | [MIGRATION.md](MIGRATION.md) |
+| Move cron specs from another scheduler | [CRON_SPEC_MIGRATION.md](CRON_SPEC_MIGRATION.md) |
 | See practical examples | [COOKBOOK.md](COOKBOOK.md) |
 | Understand the API | [API_REFERENCE.md](API_REFERENCE.md) |
 
@@ -19,6 +20,7 @@ Welcome to the go-cron documentation. This guide helps you find the right docume
 |----------|-------------|
 | [COOKBOOK.md](COOKBOOK.md) | Practical recipes for common patterns |
 | [MIGRATION.md](MIGRATION.md) | Step-by-step migration from robfig/cron |
+| [CRON_SPEC_MIGRATION.md](CRON_SPEC_MIGRATION.md) | Cron specs from other schedulers, rewritten for go-cron |
 | [FAQ.md](FAQ.md) | Frequently asked questions |
 | [DST_HANDLING.md](DST_HANDLING.md) | How daylight saving time transitions are handled |
 
