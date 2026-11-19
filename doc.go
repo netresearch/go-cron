@@ -77,8 +77,12 @@ parser you saw earlier, except that its seconds field is REQUIRED:
 
 	cron.New(cron.WithSeconds())
 
-That emulates Quartz, the most popular alternative Cron schedule format:
+Its six fields are in the same order as those of Quartz, the most popular
+alternative Cron schedule format:
 http://www.quartz-scheduler.org/documentation/quartz-2.x/tutorials/crontrigger.html
+A Quartz spec with a year, or with L, W or #, also needs the YearOptional and
+Extended options, and Quartz numbers the days of the week from 1 = Sunday;
+docs/CRON_SPEC_MIGRATION.md lists the differences and the rewrites.
 
 # Special Characters
 
