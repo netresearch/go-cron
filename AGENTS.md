@@ -105,7 +105,7 @@ go test -tags=integration -v -run "^TestRealTime"
 ## Code style
 
 ### Enforced by golangci-lint
-- **gocyclo**: Max complexity 25 (relaxed for tests)
+- **gocyclo**, **cyclop**, **gocognit**: max complexity 15; test files are excluded (gocognit uses the same threshold as SonarCloud `go:S3776`, which also reports test files)
 - **misspell**: US English spelling
 - **staticcheck**: All checks except S1000, S1037
 - **Formatters**: gofmt, gofumpt, goimports, gci
