@@ -23,6 +23,14 @@ rules part by part, then a rewrite table.
   ```
 
   A table row that needs an option beyond the section's setup names it.
+- **Search window.** `Next()` searches through the fifth calendar year after
+  the year it starts in. A spec whose runs are further apart is added with no
+  error, but once its next run is out of reach, `Next()` returns the zero time
+  and the entry does not run again: without `DowOrDom`, `0 9 13 2 FRI` (Friday
+  13 February) runs in 2026 and never in 2032. Give the parser a window as
+  long as the longest gap between runs. A fixed date on a fixed day of the
+  week can be 11 years apart, so this spec needs
+  `cron.WithParser(parser.WithMaxSearchYears(11))`.
 - **"Runs differently without an error"** tables have four columns: the
   spec; what the source runs; what go-cron runs with the spec as written,
   under only the options it needs to parse (`Second`, `Year`, `Extended`,
