@@ -172,7 +172,7 @@ at 1_36_1.
 | `0 9 13 * FRI` (both day fields restricted) | the 13th and every Friday | Friday the 13th only | `DowOrDom`, or two entries |
 | `0 0 */5 * *` (day-of-month step) | days 5, 10, …, 30 (counts from 0) | days 1, 6, 11, … | `5-30/5` |
 | `5/10 * * * *` | minute 5 only | minutes 5, 15, 25, … | `5` |
-| `0 0 1 * 0-6` (a field with every value counts as `*`) | the 1st only | the 1st only (same); with `DowOrDom`, every day | with `DowOrDom`, write `*` for the full field |
+| `0 0 1 * 0-6` (a day of week with every day counts as `*`) | the 1st only | the 1st only (same); with `DowOrDom`, every day | with `DowOrDom`, write `*` for the full field |
 | `0 0 * * 7` | every day (BusyBox logs a parse error but loads the line with every day set) | Sundays | `0 0 * * 0`, or `*` for every day |
 
 **Fails to parse in go-cron**
@@ -183,8 +183,10 @@ at 1_36_1.
 
 - Fields: five, no seconds or year.
 - Day numbers: 0 is Sunday; 7 is not accepted (above).
-- Day of month and day of week: OR when both are restricted, where restricted
-  means "does not select every value".
+- Day of month and day of week: OR when both are restricted. The day of week
+  is restricted when it does not select all seven days. The day of month is
+  restricted unless it also selects a day-0 slot that BusyBox keeps, which
+  `*` and `*/1` do: `1-31` is restricted, so `0 9 1-31 * MON` runs every day.
 - Special characters: `*` `,` `-` `/` and three-letter names. A range written
   high to low wraps (`22-2`), as go-cron. No `L`, `W`, `#`, `?` or `H`.
 - `@` shortcuts: as Vixie cron (when built with them, the default).
