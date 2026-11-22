@@ -156,3 +156,14 @@ func BenchmarkChainWrappers(b *testing.B) {
 		wrapped.Run()
 	}
 }
+
+// BenchmarkJobTrackerStartFinish measures the per-run bookkeeping of an
+// entry's job tracker when nobody waits for the entry.
+func BenchmarkJobTrackerStartFinish(b *testing.B) {
+	tr := &jobTracker{}
+	b.ReportAllocs()
+	for b.Loop() {
+		tr.start()
+		tr.finish()
+	}
+}

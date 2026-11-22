@@ -6085,3 +6085,93 @@ func TestIdleSchedulerSleepsFiniteDuration(t *testing.T) {
 		t.Errorf("idle timer duration = %v, want %v", got, want)
 	}
 }
+
+// trackerNotReturnedFor is how long a jobTracker wait must stay blocked for
+// the tests to count it as blocked.
+const trackerNotReturnedFor = 50 * time.Millisecond
+
+// waitAsync calls tr.wait in a goroutine and returns a channel that is closed
+// when it returns.
+func waitAsync(tr *jobTracker) <-chan struct{} {
+	returned := make(chan struct{})
+	go func() {
+		tr.wait()
+		close(returned)
+	}()
+	return returned
+}
+
+func mustStayBlocked(t *testing.T, returned <-chan struct{}, why string) {
+	t.Helper()
+	select {
+	case <-returned:
+		t.Fatalf("wait returned while %s", why)
+	case <-time.After(trackerNotReturnedFor):
+	}
+}
+
+func mustHaveReturned(t *testing.T, returned <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-returned:
+	case <-time.After(5 * time.Second):
+		t.Fatal("wait did not return after the last execution finished")
+	}
+}
+
+// TestJobTrackerWait pins the wait semantics of jobTracker: a wait returns at
+// once when nothing is in flight, and otherwise returns when the count of the
+// executions in flight next reaches zero, also in a later busy period and with
+// several waiters.
+func TestJobTrackerWait(t *testing.T) {
+	t.Run("idle", func(t *testing.T) {
+		tr := &jobTracker{}
+		mustHaveReturned(t, waitAsync(tr))
+		if err := tr.waitContext(context.Background()); err != nil {
+			t.Fatalf("waitContext on an idle tracker = %v, want nil", err)
+		}
+		tr.start()
+		tr.finish() // no waiter: must not close a channel nobody made
+		mustHaveReturned(t, waitAsync(tr))
+	})
+
+	t.Run("busy periods", func(t *testing.T) {
+		tr := &jobTracker{}
+		for period := range 2 {
+			tr.start()
+			tr.start()
+			first, second := waitAsync(tr), waitAsync(tr)
+			mustStayBlocked(t, first, "two executions run")
+			tr.finish()
+			mustStayBlocked(t, first, "one execution still runs")
+			mustStayBlocked(t, second, "one execution still runs")
+			tr.finish()
+			mustHaveReturned(t, first)
+			mustHaveReturned(t, second)
+			if tr.isRunning() {
+				t.Fatalf("period %d: isRunning after the last finish", period)
+			}
+		}
+	})
+
+	t.Run("waitContext", func(t *testing.T) {
+		tr := &jobTracker{}
+		tr.start()
+		ctx, cancel := context.WithTimeout(context.Background(), trackerNotReturnedFor)
+		defer cancel()
+		if err := tr.waitContext(ctx); !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("waitContext while running = %v, want DeadlineExceeded", err)
+		}
+		returned := make(chan error, 1)
+		go func() { returned <- tr.waitContext(context.Background()) }()
+		tr.finish()
+		select {
+		case err := <-returned:
+			if err != nil {
+				t.Fatalf("waitContext after finish = %v, want nil", err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("waitContext did not return after finish")
+		}
+	})
+}
