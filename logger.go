@@ -44,6 +44,17 @@ type printfLogger struct {
 	logInfo bool
 }
 
+// infoEnabled reports whether an Info call on l can have an effect. It is false
+// only for a printfLogger that drops Info (PrintfLogger, DefaultLogger,
+// DiscardLogger), so the scheduler's per-run calls can skip building their
+// arguments, which allocates even when Info discards them.
+func infoEnabled(l Logger) bool {
+	if pl, ok := l.(printfLogger); ok {
+		return pl.logInfo
+	}
+	return true
+}
+
 func (pl printfLogger) Info(msg string, keysAndValues ...any) {
 	if pl.logInfo {
 		keysAndValues = formatTimes(keysAndValues)
