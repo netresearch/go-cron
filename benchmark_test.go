@@ -176,35 +176,36 @@ func BenchmarkJobTrackerStartFinish(b *testing.B) {
 // now and is rescheduled.
 func BenchmarkHandleTimeBackwards(b *testing.B) {
 	for _, n := range []int{100, 10000} {
-		for _, moved := range []bool{false, true} {
-			name := fmt.Sprintf("entries=%d/moved=none", n)
-			prevHour := 12 // before now: nothing to reschedule
-			if moved {
-				name = fmt.Sprintf("entries=%d/moved=all", n)
-				prevHour = 13 // after now: every entry is rescheduled
-			}
-			b.Run(name, func(b *testing.B) {
-				c := New(WithLogger(DiscardLogger))
-				schedule, err := ParseStandard("0 * * * *")
-				if err != nil {
-					b.Fatal(err)
-				}
-				now := time.Date(2026, 1, 1, 12, 30, 0, 0, time.UTC)
-				for i := range n {
-					e := &Entry{
-						ID:        EntryID(i + 1),
-						Schedule:  schedule,
-						Prev:      time.Date(2026, 1, 1, prevHour, 0, 0, 0, time.UTC),
-						Next:      time.Date(2026, 1, 1, 14, 0, 0, 0, time.UTC),
-						heapIndex: -1,
-					}
-					heap.Push(&c.entries, e)
-				}
-				b.ReportAllocs()
-				for b.Loop() {
-					c.handleTimeBackwards(now)
-				}
-			})
-		}
+		b.Run(fmt.Sprintf("entries=%d/moved=none", n), func(b *testing.B) {
+			benchmarkHandleTimeBackwards(b, n, 12) // ran before now: nothing to reschedule
+		})
+		b.Run(fmt.Sprintf("entries=%d/moved=all", n), func(b *testing.B) {
+			benchmarkHandleTimeBackwards(b, n, 13) // ran after now: every entry is rescheduled
+		})
+	}
+}
+
+// benchmarkHandleTimeBackwards runs handleTimeBackwards at 12:30 over n hourly
+// entries that last ran at prevHour:00.
+func benchmarkHandleTimeBackwards(b *testing.B, n, prevHour int) {
+	b.Helper()
+	c := New(WithLogger(DiscardLogger))
+	schedule, err := ParseStandard("0 * * * *")
+	if err != nil {
+		b.Fatal(err)
+	}
+	now := time.Date(2026, 1, 1, 12, 30, 0, 0, time.UTC)
+	for i := range n {
+		heap.Push(&c.entries, &Entry{
+			ID:        EntryID(i + 1),
+			Schedule:  schedule,
+			Prev:      time.Date(2026, 1, 1, prevHour, 0, 0, 0, time.UTC),
+			Next:      time.Date(2026, 1, 1, 14, 0, 0, 0, time.UTC),
+			heapIndex: -1,
+		})
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		c.handleTimeBackwards(now)
 	}
 }
