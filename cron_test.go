@@ -4037,6 +4037,53 @@ func TestHandleTimeBackwards(t *testing.T) {
 	}
 }
 
+// TestHandleTimeBackwardsReschedulesOnlyLaterPrev pins which entries a
+// backwards clock reschedules: every entry that last ran after now, and no
+// entry that ran before now or never ran. The untouched entries hold a Next
+// that the schedule would not produce from now, so a reschedule would show.
+func TestHandleTimeBackwardsReschedulesOnlyLaterPrev(t *testing.T) {
+	c := New(WithLogger(DiscardLogger))
+	schedule, err := ParseStandard("0 * * * *")
+	if err != nil {
+		t.Fatalf("ParseStandard failed: %v", err)
+	}
+	now := time.Date(2024, 6, 15, 12, 30, 0, 0, time.UTC)
+	far := time.Date(2024, 6, 15, 15, 45, 0, 0, time.UTC) // not on the hourly grid
+
+	at := func(hour int) time.Time { return time.Date(2024, 6, 15, hour, 0, 0, 0, time.UTC) }
+	ranLater1 := &Entry{ID: 1, Schedule: schedule, heapIndex: -1, immediateDue: true, Prev: at(13), Next: at(14)}
+	ranBefore := &Entry{ID: 2, Schedule: schedule, heapIndex: -1, immediateDue: true, Prev: at(12), Next: far}
+	neverRan := &Entry{ID: 3, Schedule: schedule, heapIndex: -1, Next: far}
+	ranLater2 := &Entry{ID: 4, Schedule: schedule, heapIndex: -1, Prev: at(14), Next: at(15)}
+	for _, e := range []*Entry{ranLater1, ranBefore, neverRan, ranLater2} {
+		heap.Push(&c.entries, e)
+		c.entryIndex[e.ID] = e
+	}
+
+	c.handleTimeBackwards(now)
+
+	want := at(13) // schedule.Next(now)
+	for _, e := range []*Entry{ranLater1, ranLater2} {
+		if !e.Next.Equal(want) {
+			t.Errorf("entry %d ran after now: Next = %v, want %v", e.ID, e.Next, want)
+		}
+		if e.immediateDue {
+			t.Errorf("entry %d ran after now: immediateDue still set", e.ID)
+		}
+	}
+	for _, e := range []*Entry{ranBefore, neverRan} {
+		if !e.Next.Equal(far) {
+			t.Errorf("entry %d did not run after now: Next = %v, want it unchanged at %v", e.ID, e.Next, far)
+		}
+	}
+	if !ranBefore.immediateDue {
+		t.Error("entry 2 did not run after now: immediateDue was cleared")
+	}
+	if top := c.entries.Peek(); top == nil || !top.Next.Equal(want) {
+		t.Errorf("heap top after reschedule = %v, want an entry due at %v", top, want)
+	}
+}
+
 // TestRemoveNamedEntryByID tests that removeEntry() cleans up nameIndex when removing by ID.
 func TestRemoveNamedEntryByID(t *testing.T) {
 	c := New()

@@ -1379,13 +1379,15 @@ func isDSTFallBackDuplicate(prev, next time.Time, loc *time.Location) bool {
 // handleTimeBackwards reschedules entries when system time moves backwards.
 // This can happen due to NTP correction or VM snapshot restore.
 func (c *Cron) handleTimeBackwards(now time.Time) {
-	// Iterate over a copy since Update() reorders the heap.
-	entriesCopy := make([]*Entry, len(c.entries))
-	copy(entriesCopy, c.entries)
-	for _, e := range entriesCopy {
-		if e.Prev.IsZero() || !e.Prev.After(now) {
-			continue
+	// Collect the affected entries before rescheduling them, since Update()
+	// reorders the heap. Most wakes find none and allocate nothing.
+	var moved []*Entry
+	for _, e := range c.entries {
+		if !e.Prev.IsZero() && e.Prev.After(now) {
+			moved = append(moved, e)
 		}
+	}
+	for _, e := range moved {
 		e.immediateDue = false
 		e.Next = e.Schedule.Next(now)
 		c.skipFallBackRepeats(e)
