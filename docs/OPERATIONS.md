@@ -368,7 +368,7 @@ func main() {
 
 go-cron does not set `GOMAXPROCS` and does not read cgroup limits. Each job run is its own goroutine, so `GOMAXPROCS` in your binary bounds how many runs execute on CPUs at the same time.
 
-Since Go 1.25 the runtime takes a container's CPU limit into account: on Linux, `GOMAXPROCS` defaults to the cgroup CPU bandwidth limit when that is lower than the number of logical CPUs, and the runtime updates it when the limit changes. In Kubernetes this is the CPU limit; CPU requests are not considered. The default depends on the `go` line of your main module's `go.mod` (1.25 or later). Setting `GOMAXPROCS` in the environment or calling `runtime.GOMAXPROCS` turns it off, as does `GODEBUG=containermaxprocs=0`. See the [Go 1.25 release notes](https://go.dev/doc/go1.25#container-aware-gomaxprocs).
+Since Go 1.25 the runtime takes a container's CPU limit into account: on Linux, `GOMAXPROCS` defaults to the cgroup CPU bandwidth limit when that is lower than the number of logical CPUs, and the runtime updates it when the limit changes. In Kubernetes this is the CPU limit; CPU requests are not considered. The default applies when the `go` line of your main module's `go.mod` is 1.25 or later; an older `go` line keeps the previous behaviour (see [GODEBUG](https://go.dev/doc/godebug), settings `containermaxprocs` and `updatemaxprocs`). Setting `GOMAXPROCS` in the environment or calling `runtime.GOMAXPROCS` turns it off, as does `GODEBUG=containermaxprocs=0`. See the [Go 1.25 release notes](https://go.dev/doc/go1.25#container-aware-gomaxprocs).
 
 ### Profile-Guided Optimization
 
