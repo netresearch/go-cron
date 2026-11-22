@@ -106,13 +106,17 @@ and [`cron.c`](https://github.com/vixie/cron/blob/9cc8ab1087bb9ab861dd5595c41200
 
 - `$` in the day of month (Vixie cron 4.3: last day of the month). Write `L`
   with `DomL`.
-- A step at or above the field's size, such as `*/60` in the minute field.
-  What the source runs differs: Vixie cron 4.3 selects the whole range
-  (every minute; `set_range` in
-  [`entry.c`](https://github.com/vixie/cron/blob/9cc8ab1087bb9ab861dd5595c41200683c9f6712/entry.c)),
-  cronie and Cygwin cron select only the first value (minute 0;
-  [cronie `entry.c`](https://github.com/cronie-crond/cronie/blob/cronie-1.7.2/src/entry.c)).
-  Write the schedule out, or set `LenientSteps`, which gives minute 0.
+- A step at or above the field's size, such as `*/60` in the minute field, or
+  larger than its range, such as `0-5/10`. What the source runs differs:
+  Vixie cron 4.3 selects the whole range when the step is larger than the
+  range's end, counted from the field's lowest value (`*/60`: every minute;
+  `0-5/10`: minutes 0 to 5), and otherwise the first value (`10-20/15`:
+  minute 10; `set_range` in
+  [`entry.c`](https://github.com/vixie/cron/blob/9cc8ab1087bb9ab861dd5595c41200683c9f6712/entry.c)).
+  cronie (with a warning) and Cygwin cron select only the first value (minute
+  0; [cronie `entry.c`](https://github.com/cronie-crond/cronie/blob/cronie-1.7.2/src/entry.c)).
+  Write the schedule out. `LenientSteps` gives the first value, as cronie and
+  Cygwin cron do; it does not give Vixie cron's whole range.
 - cronie's `~` (a random value, picked when the crontab is loaded). The
   nearest go-cron feature is `H` with `Hash`: one value per job key, fixed
   rather than picked again on each load.
@@ -178,6 +182,12 @@ at 1_36_1.
 **Fails to parse in go-cron**
 
 - `@reboot`: go-cron has no start-up trigger.
+- A step at or above the field's size (`*/60`) or larger than its range
+  (`0-5/10`); BusyBox runs the first value (minute 0; `ParseField` in
+  [`crond.c`](https://github.com/mirror/busybox/blob/1_36_1/miscutils/crond.c)).
+  Write `0`, or set `LenientSteps`. In the day of month, a `*` step counts
+  from day 0 (above), so `*/31` is day 31 only and `*/32` selects no day;
+  write those out.
 
 **Parts**
 
@@ -275,7 +285,8 @@ the Kubernetes docs do not state them.
 
 **Fails to parse in go-cron** (without `RobfigCompat`)
 
-- A step at or above the field's size (`*/60`); Kubernetes runs it hourly.
+- A step at or above the field's size (`*/60`) or larger than its range
+  (`0-5/10`); Kubernetes runs the first value (minute 0, hourly).
 
 **Parts**
 
@@ -375,8 +386,9 @@ The times in the rewrite table are for the key `example-job`.
 
 **Fails to parse in go-cron**
 
-- A step at or above the field's size (`*/60`; Jenkins runs minute 0). Write
-  `0 * * * *` or set `LenientSteps`.
+- A step at or above the field's size (`*/60`) or larger than its range
+  (`0-5/10`); Jenkins runs the first value (minute 0). Write `0 * * * *` or
+  set `LenientSteps`.
 - A Java-only zone ID in the `TZ=` line (Jenkins takes the Java runtime's IDs,
   go-cron the IANA names Go loads).
 
@@ -451,6 +463,9 @@ text dropped.
   requires a year in every spec.
 - Full month or day names (Quartz.NET reads the first three letters, so
   `JANUARY` works). Write `JAN`.
+- A step larger than its range (`0 0-5/10 * * * ?`); Quartz and Quartz.NET run
+  the first value (minute 0). Both reject a step above the field's largest value
+  (`*/60`), as go-cron does. Write `0`, or set `LenientSteps`.
 
 **Parts**
 
@@ -518,6 +533,9 @@ same way.
 - `dL` / `DDDL` in the day of week (`5L`, `FRIL`: last Friday). Write `5#L` or
   `FRI#L`; the day numbers stay.
 - Upper-case shortcuts (`@DAILY`). Write `@daily`.
+- A step at or above the field's size (`0 */60 * * * *`) or larger than its
+  range (`0 0-5/10 * * * *`); Spring runs the first value (minute 0). Write
+  `0`, or set `LenientSteps`.
 
 **Parts**
 
@@ -569,8 +587,9 @@ The swap is in
 **Fails to parse in go-cron**
 
 - Full day and month names (`Monday`, `January`). Write `MON`, `JAN`.
-- A step as large as the field (`*/90` in the minute field; NCrontab runs
-  minute 0). Write `0`.
+- A step as large as the field (`*/90` in the minute field) or larger than its
+  range (`0-5/10`); NCrontab runs the first value (minute 0). Write `0`, or set
+  `LenientSteps`.
 - Azure's TimeSpan schedule (`"00:05:00"`) is not a cron spec. `@every 5m` is
   the nearest go-cron feature. After a run longer than the interval, Azure
   invokes the function again at once; go-cron starts a run every five minutes
@@ -632,6 +651,9 @@ wraps reversed ranges as go-cron does.
 - `@every_minute` and `@every_second`. Write `* * * * *` and `* * * * * *`
   (`@every 1m` counts from the start, not on the minute).
 - Upper-case shortcuts (`@DAILY`). Write `@daily`.
+- A step larger than its range (`0-5/10`); Cronos runs the first value (minute
+  0). It rejects a step above the field's largest value (`*/60`), as go-cron
+  does. Write `0`, or set `LenientSteps`.
 
 **Parts**
 
@@ -797,9 +819,10 @@ example says the same: "every minute (!)"). For 07:00, set `minute=0`.
 
 - Full day and month names (`sunday`; Celery reads the first three letters).
   Write `SUN`.
-- A step at or above the field's size (`minute='*/60'` is minute 0 in Celery,
+- A step at or above the field's size (`minute='*/60'`) or larger than its
+  range (`minute='0-5/10'`); Celery runs the first value (minute 0,
   [`schedules.py`](https://github.com/celery/celery/blob/v5.7.0/celery/schedules.py)).
-  Write `0`.
+  Write `0`, or set `LenientSteps`.
 
 **Parts**
 
@@ -852,8 +875,9 @@ which is go-cron's `StepWildcard`.
 - `L5` (last Friday, `L` first). Write `5#L` or `FRI#L`.
 - `W15` (`W` first). Write `15W`.
 - Upper-case shortcuts (`@DAILY`). Write `@daily`.
-- A step at or above the field's size (`*/60` is minute 0 in croniter). Write
-  `0`.
+- A step at or above the field's size (`*/60`) or larger than its range
+  (`0-5/10`); croniter runs the first value (minute 0). Write `0`, or set
+  `LenientSteps`.
 - `R` (random per instance): there is no go-cron spec. `H` exists in both
   (`Hash`), but each picks its own values for a name.
 
@@ -910,6 +934,9 @@ Reference: [node-cron cron syntax](https://nodecron.com/cron-syntax.html),
 - `dL` in the day of week (`5L`: last Friday). Write `5#L`.
 - Full day and month names (`Monday`, `January`). Write `MON`, `JAN`.
 - Upper-case shortcuts (`@DAILY`). Write `@daily`.
+- A step at or above the field's size (`*/60`) or larger than its range
+  (`0-5/10`); node-cron runs the first value (minute 0). Write `0`, or set
+  `LenientSteps`.
 
 **Parts**
 
@@ -959,6 +986,9 @@ A stepped star (`*/2`) stays restricted in both, so do not add `StepWildcard`.
 - `@minutely`, `@secondly`, `@weekdays`, `@weekends`. Write `* * * * *`,
   `* * * * * *`, `0 0 * * 1-5` and `0 0 * * 0,6`.
 - Upper-case shortcuts (`@DAILY`). Write `@daily`.
+- A step at or above the field's size (`*/60`) or larger than its range
+  (`0-5/10`); cron runs the first value (minute 0). Write `0`, or set
+  `LenientSteps`.
 
 **Parts**
 
