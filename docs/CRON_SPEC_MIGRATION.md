@@ -517,6 +517,7 @@ same way.
 
 - `dL` / `DDDL` in the day of week (`5L`, `FRIL`: last Friday). Write `5#L` or
   `FRI#L`; the day numbers stay.
+- Upper-case shortcuts (`@DAILY`). Write `@daily`.
 
 **Parts**
 
@@ -527,9 +528,10 @@ same way.
   13th in both.
 - Special characters: `*` `,` `-` `/` `?` `L` `L-n` `W` `LW` `#` and names, as
   go-cron with `Extended`, plus `dL` above. Spring rejects `L` after a range
-  and `#L`, as go-cron does.
+  (`MON-FRIL`), as go-cron does, and `#L`, which go-cron accepts.
 - `@` shortcuts: `@yearly`, `@annually`, `@monthly`, `@weekly`, `@daily`,
-  `@midnight`, `@hourly`, as go-cron with `Descriptor`.
+  `@midnight`, `@hourly` in any case, as go-cron with `Descriptor` in lower
+  case.
 - Time zones: the trigger's zone (`@Scheduled(zone = …)`, `CronTrigger`), by
   default the scheduler's. Write it as a `CRON_TZ=` prefix.
 - Parser setup: `Second | Minute | Hour | Dom | Month | Dow | Descriptor | Extended`.
@@ -629,6 +631,7 @@ wraps reversed ranges as go-cron does.
 - `L-3W` in the day of month. There is no go-cron spec.
 - `@every_minute` and `@every_second`. Write `* * * * *` and `* * * * * *`
   (`@every 1m` counts from the start, not on the minute).
+- Upper-case shortcuts (`@DAILY`). Write `@daily`.
 
 **Parts**
 
@@ -639,7 +642,8 @@ wraps reversed ranges as go-cron does.
 - Special characters: `*` `,` `-` `/` `?` `L` `L-n` `W` `LW` `#` and names, as
   go-cron with `Extended`, plus `dL` above.
 - `@` shortcuts: `@yearly`, `@annually`, `@monthly`, `@weekly`, `@daily`,
-  `@midnight`, `@hourly`, as go-cron with `Descriptor`.
+  `@midnight`, `@hourly` in any case, as go-cron with `Descriptor` in lower
+  case.
 - Time zones: per job (`RecurringJobOptions.TimeZone`, default UTC). Write it
   as a `CRON_TZ=` prefix with an IANA name.
 - Parser setup: `SecondOptional | Minute | Hour | Dom | Month | Dow | Descriptor | Extended`.
