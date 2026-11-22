@@ -6,9 +6,13 @@ package cron
 import (
 	"bytes"
 	"fmt"
+	"log"
 	"log/slog"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestSlogLoggerInfo(t *testing.T) {
@@ -175,6 +179,87 @@ func TestPrintfLoggerError(t *testing.T) {
 		}
 		if !strings.Contains(capture.output, "key=value") {
 			t.Errorf("should contain key=value, got: %q", capture.output)
+		}
+	})
+}
+
+// infoRecorder is a Logger that is not a printfLogger and records its Info
+// messages.
+type infoRecorder struct {
+	mu   sync.Mutex
+	msgs []string
+}
+
+func (r *infoRecorder) Info(msg string, _ ...any) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.msgs = append(r.msgs, msg)
+}
+
+func (r *infoRecorder) Error(error, string, ...any) {}
+
+func (r *infoRecorder) has(msg string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Contains(r.msgs, msg)
+}
+
+// TestRunLoopInfoMessages checks that the "wake" and "run" messages, which
+// the scheduler skips for a logger that drops Info, still reach a verbose
+// printf logger and any other Logger, and that a non-verbose printf logger
+// still prints nothing.
+func TestRunLoopInfoMessages(t *testing.T) {
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	runOnce := func(t *testing.T, logger Logger) {
+		t.Helper()
+		fc := NewFakeClock(start)
+		c := New(WithSeconds(), WithLogger(logger), WithLocation(time.UTC), WithClock(fc))
+		ran := make(chan struct{}, 1)
+		if _, err := c.AddFunc("* * * * * *", func() {
+			select {
+			case ran <- struct{}{}:
+			default:
+			}
+		}); err != nil {
+			t.Fatal(err)
+		}
+		c.Start()
+		fc.BlockUntil(1)
+		fc.Advance(time.Second)
+		select {
+		case <-ran:
+		case <-time.After(5 * time.Second):
+			t.Fatal("job did not run")
+		}
+		<-c.Stop().Done() // the run loop logs "run" before it takes the stop request
+	}
+
+	t.Run("verbose printf logger", func(t *testing.T) {
+		var sw syncWriter
+		runOnce(t, VerbosePrintfLogger(log.New(&sw, "", 0)))
+		out := sw.String()
+		for _, msg := range []string{"wake, now=", "run, now="} {
+			if !strings.Contains(out, msg) {
+				t.Errorf("output lacks %q:\n%s", msg, out)
+			}
+		}
+	})
+
+	t.Run("printf logger without Info", func(t *testing.T) {
+		var sw syncWriter
+		runOnce(t, PrintfLogger(log.New(&sw, "", 0)))
+		if out := sw.String(); out != "" {
+			t.Errorf("non-verbose logger printed:\n%s", out)
+		}
+	})
+
+	t.Run("other logger", func(t *testing.T) {
+		rec := &infoRecorder{}
+		runOnce(t, rec)
+		for _, msg := range []string{"wake", "run"} {
+			if !rec.has(msg) {
+				t.Errorf("Info(%q) not called; got %v", msg, rec.msgs)
+			}
 		}
 	})
 }

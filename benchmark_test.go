@@ -185,6 +185,36 @@ func BenchmarkHandleTimeBackwards(b *testing.B) {
 	}
 }
 
+// BenchmarkProcessDueEntries measures one scheduler tick that dispatches n due
+// entries with the default logger, which drops Info.
+func BenchmarkProcessDueEntries(b *testing.B) {
+	for _, n := range []int{1, 100} {
+		b.Run(fmt.Sprintf("due=%d", n), func(b *testing.B) {
+			now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+			c := New(WithSeconds(), WithLogger(DiscardLogger), WithLocation(time.UTC), WithClock(NewFakeClock(now)))
+			for range n {
+				if _, err := c.AddFunc("* * * * * *", func() {}); err != nil {
+					b.Fatal(err)
+				}
+			}
+			for _, e := range c.entries {
+				c.scheduleEntryNext(e, now)
+			}
+			heap.Init(&c.entries)
+			b.ReportAllocs()
+			i := 0
+			for b.Loop() {
+				now = now.Add(time.Second)
+				c.processDueEntries(now)
+				if i++; i%64 == 0 {
+					c.jobWaiter.Wait()
+				}
+			}
+			c.jobWaiter.Wait()
+		})
+	}
+}
+
 // benchmarkHandleTimeBackwards runs handleTimeBackwards at 12:30 over n hourly
 // entries that last ran at prevHour:00.
 func benchmarkHandleTimeBackwards(b *testing.B, n, prevHour int) {
@@ -207,5 +237,25 @@ func benchmarkHandleTimeBackwards(b *testing.B, n, prevHour int) {
 	b.ReportAllocs()
 	for b.Loop() {
 		c.handleTimeBackwards(now)
+	}
+}
+
+// BenchmarkRunLoopTick drives the run loop through one wake per iteration with
+// a FakeClock and waits until the single due job has run.
+func BenchmarkRunLoopTick(b *testing.B) {
+	fc := NewFakeClock(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+	c := New(WithSeconds(), WithLogger(DiscardLogger), WithLocation(time.UTC), WithClock(fc))
+	ran := make(chan struct{}, 1)
+	if _, err := c.AddFunc("* * * * * *", func() { ran <- struct{}{} }); err != nil {
+		b.Fatal(err)
+	}
+	c.Start()
+	defer c.Stop()
+	fc.BlockUntil(1)
+	b.ReportAllocs()
+	for b.Loop() {
+		fc.Advance(time.Second)
+		<-ran
+		fc.BlockUntil(1)
 	}
 }

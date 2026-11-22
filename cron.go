@@ -1417,7 +1417,9 @@ func (c *Cron) postDispatchScheduled(e *Entry, now time.Time) {
 	c.skipFallBackRepeats(e)
 	c.hooks.callOnSchedule(e.ID, e.Job, e.Next)
 	c.entries.Update(e)
-	c.logger.Info("run", "now", now, "entry", e.ID, "next", e.Next)
+	if infoEnabled(c.logger) {
+		c.logger.Info("run", "now", now, "entry", e.ID, "next", e.Next)
+	}
 }
 
 // skipFallBackRepeats is the DST fall-back guard: while e.Next is the second
@@ -1523,7 +1525,9 @@ func (c *Cron) run() {
 			select {
 			case now = <-timer.C():
 				now = now.In(c.location)
-				c.logger.Info("wake", "now", now)
+				if infoEnabled(c.logger) {
+					c.logger.Info("wake", "now", now)
+				}
 
 				// Handle system time moving backwards (NTP correction, VM snapshot restore).
 				c.handleTimeBackwards(now)
