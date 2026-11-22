@@ -4,6 +4,8 @@
 package cron
 
 import (
+	"container/heap"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -154,5 +156,56 @@ func BenchmarkChainWrappers(b *testing.B) {
 
 	for b.Loop() {
 		wrapped.Run()
+	}
+}
+
+// BenchmarkJobTrackerStartFinish measures the per-run bookkeeping of an
+// entry's job tracker when nobody waits for the entry.
+func BenchmarkJobTrackerStartFinish(b *testing.B) {
+	tr := &jobTracker{}
+	b.ReportAllocs()
+	for b.Loop() {
+		tr.start()
+		tr.finish()
+	}
+}
+
+// BenchmarkHandleTimeBackwards measures the check for a backwards clock that
+// runs on every wake of the scheduler. With moved=none no entry ran after now,
+// which is the case on nearly every wake; with moved=all every entry ran after
+// now and is rescheduled.
+func BenchmarkHandleTimeBackwards(b *testing.B) {
+	for _, n := range []int{100, 10000} {
+		b.Run(fmt.Sprintf("entries=%d/moved=none", n), func(b *testing.B) {
+			benchmarkHandleTimeBackwards(b, n, 12) // ran before now: nothing to reschedule
+		})
+		b.Run(fmt.Sprintf("entries=%d/moved=all", n), func(b *testing.B) {
+			benchmarkHandleTimeBackwards(b, n, 13) // ran after now: every entry is rescheduled
+		})
+	}
+}
+
+// benchmarkHandleTimeBackwards runs handleTimeBackwards at 12:30 over n hourly
+// entries that last ran at prevHour:00.
+func benchmarkHandleTimeBackwards(b *testing.B, n, prevHour int) {
+	b.Helper()
+	c := New(WithLogger(DiscardLogger))
+	schedule, err := ParseStandard("0 * * * *")
+	if err != nil {
+		b.Fatal(err)
+	}
+	now := time.Date(2026, 1, 1, 12, 30, 0, 0, time.UTC)
+	for i := range n {
+		heap.Push(&c.entries, &Entry{
+			ID:        EntryID(i + 1),
+			Schedule:  schedule,
+			Prev:      time.Date(2026, 1, 1, prevHour, 0, 0, 0, time.UTC),
+			Next:      time.Date(2026, 1, 1, 14, 0, 0, 0, time.UTC),
+			heapIndex: -1,
+		})
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		c.handleTimeBackwards(now)
 	}
 }

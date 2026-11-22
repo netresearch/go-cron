@@ -4037,6 +4037,53 @@ func TestHandleTimeBackwards(t *testing.T) {
 	}
 }
 
+// TestHandleTimeBackwardsReschedulesOnlyLaterPrev pins which entries a
+// backwards clock reschedules: every entry that last ran after now, and no
+// entry that ran before now or never ran. The untouched entries hold a Next
+// that the schedule would not produce from now, so a reschedule would show.
+func TestHandleTimeBackwardsReschedulesOnlyLaterPrev(t *testing.T) {
+	c := New(WithLogger(DiscardLogger))
+	schedule, err := ParseStandard("0 * * * *")
+	if err != nil {
+		t.Fatalf("ParseStandard failed: %v", err)
+	}
+	now := time.Date(2024, 6, 15, 12, 30, 0, 0, time.UTC)
+	far := time.Date(2024, 6, 15, 15, 45, 0, 0, time.UTC) // not on the hourly grid
+
+	at := func(hour int) time.Time { return time.Date(2024, 6, 15, hour, 0, 0, 0, time.UTC) }
+	ranLater1 := &Entry{ID: 1, Schedule: schedule, heapIndex: -1, immediateDue: true, Prev: at(13), Next: at(14)}
+	ranBefore := &Entry{ID: 2, Schedule: schedule, heapIndex: -1, immediateDue: true, Prev: at(12), Next: far}
+	neverRan := &Entry{ID: 3, Schedule: schedule, heapIndex: -1, Next: far}
+	ranLater2 := &Entry{ID: 4, Schedule: schedule, heapIndex: -1, Prev: at(14), Next: at(15)}
+	for _, e := range []*Entry{ranLater1, ranBefore, neverRan, ranLater2} {
+		heap.Push(&c.entries, e)
+		c.entryIndex[e.ID] = e
+	}
+
+	c.handleTimeBackwards(now)
+
+	want := at(13) // schedule.Next(now)
+	for _, e := range []*Entry{ranLater1, ranLater2} {
+		if !e.Next.Equal(want) {
+			t.Errorf("entry %d ran after now: Next = %v, want %v", e.ID, e.Next, want)
+		}
+		if e.immediateDue {
+			t.Errorf("entry %d ran after now: immediateDue still set", e.ID)
+		}
+	}
+	for _, e := range []*Entry{ranBefore, neverRan} {
+		if !e.Next.Equal(far) {
+			t.Errorf("entry %d did not run after now: Next = %v, want it unchanged at %v", e.ID, e.Next, far)
+		}
+	}
+	if !ranBefore.immediateDue {
+		t.Error("entry 2 did not run after now: immediateDue was cleared")
+	}
+	if top := c.entries.Peek(); top == nil || !top.Next.Equal(want) {
+		t.Errorf("heap top after reschedule = %v, want an entry due at %v", top, want)
+	}
+}
+
 // TestRemoveNamedEntryByID tests that removeEntry() cleans up nameIndex when removing by ID.
 func TestRemoveNamedEntryByID(t *testing.T) {
 	c := New()
@@ -6084,4 +6131,94 @@ func TestIdleSchedulerSleepsFiniteDuration(t *testing.T) {
 	if got, want := clock.durations[0], 100000*time.Hour; got != want {
 		t.Errorf("idle timer duration = %v, want %v", got, want)
 	}
+}
+
+// trackerNotReturnedFor is how long a jobTracker wait must stay blocked for
+// the tests to count it as blocked.
+const trackerNotReturnedFor = 50 * time.Millisecond
+
+// waitAsync calls tr.wait in a goroutine and returns a channel that is closed
+// when it returns.
+func waitAsync(tr *jobTracker) <-chan struct{} {
+	returned := make(chan struct{})
+	go func() {
+		tr.wait()
+		close(returned)
+	}()
+	return returned
+}
+
+func mustStayBlocked(t *testing.T, returned <-chan struct{}, why string) {
+	t.Helper()
+	select {
+	case <-returned:
+		t.Fatalf("wait returned while %s", why)
+	case <-time.After(trackerNotReturnedFor):
+	}
+}
+
+func mustHaveReturned(t *testing.T, returned <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-returned:
+	case <-time.After(5 * time.Second):
+		t.Fatal("wait did not return after the last execution finished")
+	}
+}
+
+// TestJobTrackerWait pins the wait semantics of jobTracker: a wait returns at
+// once when nothing is in flight, and otherwise returns when the count of the
+// executions in flight next reaches zero, also in a later busy period and with
+// several waiters.
+func TestJobTrackerWait(t *testing.T) {
+	t.Run("idle", func(t *testing.T) {
+		tr := &jobTracker{}
+		mustHaveReturned(t, waitAsync(tr))
+		if err := tr.waitContext(context.Background()); err != nil {
+			t.Fatalf("waitContext on an idle tracker = %v, want nil", err)
+		}
+		tr.start()
+		tr.finish() // no waiter: must not close a channel nobody made
+		mustHaveReturned(t, waitAsync(tr))
+	})
+
+	t.Run("busy periods", func(t *testing.T) {
+		tr := &jobTracker{}
+		for period := range 2 {
+			tr.start()
+			tr.start()
+			first, second := waitAsync(tr), waitAsync(tr)
+			mustStayBlocked(t, first, "two executions run")
+			tr.finish()
+			mustStayBlocked(t, first, "one execution still runs")
+			mustStayBlocked(t, second, "one execution still runs")
+			tr.finish()
+			mustHaveReturned(t, first)
+			mustHaveReturned(t, second)
+			if tr.isRunning() {
+				t.Fatalf("period %d: isRunning after the last finish", period)
+			}
+		}
+	})
+
+	t.Run("waitContext", func(t *testing.T) {
+		tr := &jobTracker{}
+		tr.start()
+		ctx, cancel := context.WithTimeout(context.Background(), trackerNotReturnedFor)
+		defer cancel()
+		if err := tr.waitContext(ctx); !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("waitContext while running = %v, want DeadlineExceeded", err)
+		}
+		returned := make(chan error, 1)
+		go func() { returned <- tr.waitContext(context.Background()) }()
+		tr.finish()
+		select {
+		case err := <-returned:
+			if err != nil {
+				t.Fatalf("waitContext after finish = %v, want nil", err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("waitContext did not return after finish")
+		}
+	})
 }

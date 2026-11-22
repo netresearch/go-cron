@@ -488,6 +488,8 @@ func (p Parser) ParseWithHashKey(spec, hashKey string) (Schedule, error) {
 }
 
 // parse is the internal parsing logic, called by Parse.
+//
+//nolint:gocognit // Predates the threshold of 15; splitting it is a separate change.
 func (p Parser) parse(spec string) (Schedule, error) {
 	if len(spec) == 0 {
 		return nil, errors.New(emptySpecMessage)
@@ -1209,6 +1211,8 @@ func parseDowConstraint(expr string, idx int, r bounds, allowNth, allowLast bool
 //   - "15W" → constraint for nearest weekday to 15th
 //   - "LW" → constraint for last weekday of month
 //   - "1,15,L" → 1st and 15th bitmask + last day constraint
+//
+//nolint:gocognit // Predates the threshold of 15; splitting it is a separate change.
 func getDomFieldWithConstraints(field string, r bounds, allowL, allowW bool, hashKey string, hashEnabled bool) (uint64, []DomConstraint, error) {
 	var bits uint64
 	var constraints []DomConstraint

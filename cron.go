@@ -438,17 +438,17 @@ func (e Entry) copy() Entry {
 
 // jobTracker tracks in-flight executions for a single entry.
 // Safe for concurrent use by startJob (start/finish) and WaitForJob (wait).
+//
+// The done channel is made by the first waiter that finds executions in
+// flight, not by start, so runs that nobody waits for allocate nothing.
 type jobTracker struct {
 	mu   sync.Mutex
 	n    int
-	done chan struct{} // closed when n reaches 0; nil when idle
+	done chan struct{} // closed when n reaches 0; nil when idle or nobody waits
 }
 
 func (t *jobTracker) start() {
 	t.mu.Lock()
-	if t.n == 0 {
-		t.done = make(chan struct{})
-	}
 	t.n++
 	t.mu.Unlock()
 }
@@ -456,11 +456,20 @@ func (t *jobTracker) start() {
 func (t *jobTracker) finish() {
 	t.mu.Lock()
 	t.n--
-	if t.n == 0 {
+	if t.n == 0 && t.done != nil {
 		close(t.done)
 		t.done = nil
 	}
 	t.mu.Unlock()
+}
+
+// doneChan returns the channel that is closed when the executions in flight
+// have finished, or nil if none are. The caller must hold t.mu.
+func (t *jobTracker) doneChan() chan struct{} {
+	if t.n > 0 && t.done == nil {
+		t.done = make(chan struct{})
+	}
+	return t.done
 }
 
 func (t *jobTracker) isRunning() bool {
@@ -471,7 +480,7 @@ func (t *jobTracker) isRunning() bool {
 
 func (t *jobTracker) wait() {
 	t.mu.Lock()
-	ch := t.done // nil if idle
+	ch := t.doneChan() // nil if idle
 	t.mu.Unlock()
 	if ch != nil {
 		<-ch
@@ -482,7 +491,7 @@ func (t *jobTracker) wait() {
 // before the in-flight executions have finished, nil otherwise.
 func (t *jobTracker) waitContext(ctx context.Context) error {
 	t.mu.Lock()
-	ch := t.done // nil if idle
+	ch := t.doneChan() // nil if idle
 	t.mu.Unlock()
 	if ch == nil {
 		return nil
@@ -1370,13 +1379,15 @@ func isDSTFallBackDuplicate(prev, next time.Time, loc *time.Location) bool {
 // handleTimeBackwards reschedules entries when system time moves backwards.
 // This can happen due to NTP correction or VM snapshot restore.
 func (c *Cron) handleTimeBackwards(now time.Time) {
-	// Iterate over a copy since Update() reorders the heap.
-	entriesCopy := make([]*Entry, len(c.entries))
-	copy(entriesCopy, c.entries)
-	for _, e := range entriesCopy {
-		if e.Prev.IsZero() || !e.Prev.After(now) {
-			continue
+	// Collect the affected entries before rescheduling them, since Update()
+	// reorders the heap. Most wakes find none and allocate nothing.
+	var moved []*Entry
+	for _, e := range c.entries {
+		if !e.Prev.IsZero() && e.Prev.After(now) {
+			moved = append(moved, e)
 		}
+	}
+	for _, e := range moved {
 		e.immediateDue = false
 		e.Next = e.Schedule.Next(now)
 		c.skipFallBackRepeats(e)

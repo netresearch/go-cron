@@ -341,6 +341,7 @@ func computeMaxAttempts(maxRetries int) int {
 	return maxRetries + 1
 }
 
+//nolint:gocognit // Predates the threshold of 15; splitting it is a separate change.
 func RetryWithBackoff(logger Logger, maxRetries int, initialDelay, maxDelay time.Duration, multiplier float64, opts ...RetryOption) JobWrapper {
 	cfg := applyRetryOptions(opts)
 	return func(j Job) Job {
@@ -441,6 +442,8 @@ func logRetryExhausted(logger Logger, lastPanic any, maxAttempts int) {
 //	| 3       | 2s    | Retry after delay  |
 //	| 4       | 4s    | Final retry        |
 //	| -       | -     | Log + panic (done) |
+//
+//nolint:gocognit // Predates the threshold of 15; splitting it is a separate change.
 func RetryOnError(logger Logger, maxRetries int, initialDelay, maxDelay time.Duration, multiplier float64, opts ...RetryOption) JobWrapper {
 	cfg := applyRetryOptions(opts)
 	return func(j Job) Job {
@@ -640,6 +643,7 @@ func notifyRecovery(cb func(CircuitBreakerEvent)) {
 	cb(CircuitBreakerEvent{OldState: CircuitHalfOpen, NewState: CircuitClosed, Failures: 0})
 }
 
+//nolint:gocognit // Predates the threshold of 15; splitting it is a separate change.
 func circuitBreakerImpl(logger Logger, threshold int, cooldown time.Duration, opts []CircuitBreakerOption) (JobWrapper, *CircuitBreakerHandle) {
 	cfg := applyCircuitBreakerOptions(opts)
 	state := &circuitState{}

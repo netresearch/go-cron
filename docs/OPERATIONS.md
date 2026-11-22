@@ -364,6 +364,16 @@ func main() {
 }
 ```
 
+### CPU Limits and GOMAXPROCS
+
+go-cron does not set `GOMAXPROCS` and does not read cgroup limits. Each job run is its own goroutine, so `GOMAXPROCS` in your binary bounds how many runs execute on CPUs at the same time.
+
+Since Go 1.25 the runtime takes a container's CPU limit into account: on Linux, `GOMAXPROCS` defaults to the cgroup CPU bandwidth limit when that is lower than the number of logical CPUs, and the runtime updates it when the limit changes. In Kubernetes this is the CPU limit; CPU requests are not considered. The default applies when the `go` line of your main module's `go.mod` is 1.25 or later; an older `go` line keeps the previous behaviour (see [GODEBUG](https://go.dev/doc/godebug), settings `containermaxprocs` and `updatemaxprocs`). Setting `GOMAXPROCS` in the environment or calling `runtime.GOMAXPROCS` turns it off, as does `GODEBUG=containermaxprocs=0`. See the [Go 1.25 release notes](https://go.dev/doc/go1.25#container-aware-gomaxprocs).
+
+### Profile-Guided Optimization
+
+Profile-guided optimization (PGO) happens when your binary is built, with your binary's profile. `go build` reads `default.pgo` from the main package's directory, or the file named with `-pgo`, and applies that one profile to every package in the binary, go-cron included. go-cron ships no profile; a profile in a library's repository is not read. If go-cron's code is hot in your CPU profile, such as `(*SpecSchedule).Next` or the run loop, a profile collected from your production binary lets the compiler optimize those paths for your workload. See [Profile-guided optimization](https://go.dev/doc/pgo).
+
 ### Timezone Handling
 
 Always specify timezone explicitly in production:
