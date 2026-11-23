@@ -324,6 +324,7 @@ Reference: [GitHub Actions `schedule`](https://docs.github.com/en/actions/refere
 
 | Spec | Source runs | go-cron runs, unchanged | For go-cron |
 |---|---|---|---|
+| `0 9 * * *`, no time zone set | 09:00 UTC | 09:00 local time | `CRON_TZ=UTC 0 9 * * *` |
 | `0 9 13 * FRI` (both day fields restricted) | the 13th and every Friday | Friday the 13th only | `DowOrDom`, or two entries |
 | `30 2 * * *` on a spring-forward day (GitHub) | 03:00 | 03:30 (see [DST_HANDLING.md](DST_HANDLING.md)) | no option matches; `DSTSkip` skips the run |
 
@@ -578,6 +579,7 @@ NCrontab 3.3 and 3.4.0 were run.
 
 | Spec | Source runs | go-cron runs, unchanged | For go-cron |
 |---|---|---|---|
+| `0 0 9 * * *` (Azure), no `WEBSITE_TIME_ZONE` set | 09:00 UTC | 09:00 local time | `CRON_TZ=UTC 0 0 9 * * *` |
 | `0 0 9 * * 5-1` (reversed range) | Monday to Friday (swapped) | Friday to Monday (wrapped) | `0 0 9 * * 1-5` |
 | `0 0 9 * * 5/2` (a day-of-week step stops at Saturday) | Fridays | Fridays and Sundays | `0 0 9 * * 5`, or `DowStepToSaturday` |
 
