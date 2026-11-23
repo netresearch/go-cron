@@ -105,7 +105,7 @@ go test -tags=integration -v -run "^TestRealTime"
 ## Code style
 
 ### Enforced by golangci-lint
-- **gocyclo**: Max complexity 25 (relaxed for tests)
+- **gocyclo**, **cyclop**, **gocognit**: thresholds and test-file exclusions are in `.golangci.yml` (`linters.settings`, `linters.exclusions`). SonarCloud `go:S3776` counts cognitive complexity differently from gocognit (`parse`: 26 in gocognit, 17 in SonarCloud), and its test-file exclusion for S3776 lives in the SonarCloud project settings (`sonar.issue.ignore.multicriteria`), not in a file
 - **misspell**: US English spelling
 - **staticcheck**: All checks except S1000, S1037
 - **Formatters**: gofmt, gofumpt, goimports, gci
