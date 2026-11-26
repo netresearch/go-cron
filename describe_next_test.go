@@ -896,10 +896,6 @@ func TestDescribeSpecNamesRuns(t *testing.T) {
 	if checked := checkGoldensNameRuns(t); checked < 524 {
 		t.Errorf("checked %d goldens, want at least 524", checked)
 	}
-	if testing.Short() {
-		return // the random specs take about half the test's time
-	}
-
 	r := rand.New(rand.NewPCG(1, 2)) // fixed seed: the same specs on every run
 	field := func(lo, hi int) string { return randomField(r, lo, hi) }
 	days := func() string {
@@ -932,19 +928,26 @@ type randomSpecs struct {
 	spec     func() string
 }
 
-// checkRandomSpecs runs checkSpecNamesRuns on the specs of each case.
+// checkRandomSpecs runs checkSpecNamesRuns on the specs of each case, each
+// case a subtest that -short skips: the random specs take about half the
+// test's time.
 func checkRandomSpecs(t *testing.T, cases []randomSpecs) {
 	t.Helper()
 	for _, c := range cases {
-		checked := 0
-		for range c.n {
-			if checkSpecNamesRuns(t, c.p, c.spec()) {
-				checked++
+		t.Run(c.name, func(t *testing.T) {
+			if testing.Short() {
+				t.Skip("skipping the random specs in short mode")
 			}
-		}
-		if checked < c.least {
-			t.Errorf("%s: checked %d random specs, want at least %d", c.name, checked, c.least)
-		}
+			checked := 0
+			for range c.n {
+				if checkSpecNamesRuns(t, c.p, c.spec()) {
+					checked++
+				}
+			}
+			if checked < c.least {
+				t.Errorf("checked %d random specs, want at least %d", checked, c.least)
+			}
+		})
 	}
 }
 
