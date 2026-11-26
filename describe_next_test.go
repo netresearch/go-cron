@@ -878,13 +878,16 @@ func checkGoldensNameRuns(t *testing.T) int {
 // TestDescribeSpecNamesRuns enforces G1: every clock time, minute, second,
 // day of the month, day of the week, month and year that a description
 // names is one the scheduler runs at, and the shift a zone clause gives is the
-// zone's (zoneMisses), for the goldens with their parse options and for random
-// specs. A golden with H is read for every key
+// zone's (zoneMisses), for the goldens with their parse options and, unless
+// -short, for random specs. A golden with H is read for every key
 // (namesNotRunSpec); only the goldens given field by field (G10) and the
 // specs the parser rejects are not checked.
 func TestDescribeSpecNamesRuns(t *testing.T) {
 	if checked := checkGoldensNameRuns(t); checked < 524 {
 		t.Errorf("checked %d goldens, want at least 524", checked)
+	}
+	if testing.Short() {
+		return // the random specs take about half the test's time
 	}
 
 	r := rand.New(rand.NewPCG(1, 2)) // fixed seed: the same specs on every run
