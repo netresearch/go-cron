@@ -55,7 +55,7 @@ rules part by part, then a rewrite table.
 
 | Section | Fields | Day of week | Both day fields set | `L` / `#` / `W` | Time zone |
 |---|---|---|---|---|---|
-| [Vixie cron, cronie and Cygwin cron](#vixie-cron-cronie-and-cygwin-cron) | 5 | 0 or 7 = Sunday | OR | none (`$` for last day in Vixie cron 4.3) | local; cronie `CRON_TZ=` |
+| [Vixie cron, cronie and Cygwin cron](#vixie-cron-cronie-and-cygwin-cron) | 5 | 0 or 7 = Sunday | OR | none (`$` for last day in Vixie cron at 9cc8ab1) | local; cronie `CRON_TZ=` |
 | [BusyBox crond](#busybox-crond) | 5 | 0 = Sunday, no 7 | OR | none | local |
 | [nnCron](#nncron) | 6 with year, or 5 | 1 = Monday, 7 = Sunday | AND | none | local |
 | [Kubernetes CronJob](#kubernetes-cronjob) | 5 | 0 = Sunday, no 7 | OR | none | `.spec.timeZone` |
@@ -104,11 +104,11 @@ and [`cron.c`](https://github.com/vixie/cron/blob/9cc8ab1087bb9ab861dd5595c41200
 
 **Fails to parse in go-cron**
 
-- `$` in the day of month (Vixie cron 4.3: last day of the month). Write `L`
-  with `DomL`.
+- `$` in the day of month (Vixie cron at commit 9cc8ab1: last day of the
+  month). Write `L` with `DomL`.
 - A step at or above the field's size, such as `*/60` in the minute field, or
   larger than its range, such as `0-5/10`. What the source runs differs:
-  Vixie cron 4.3 selects the whole range when the step is larger than the
+  Vixie cron at 9cc8ab1 selects the whole range when the step is larger than the
   range's end, counted from the field's lowest value (`*/60`: every minute;
   `0-5/10`: minutes 0 to 5), and otherwise the first value (`10-20/15`:
   minute 10; `set_range` in
@@ -130,7 +130,7 @@ and [`cron.c`](https://github.com/vixie/cron/blob/9cc8ab1087bb9ab861dd5595c41200
 - Day of month and day of week: OR when both are restricted, AND when either
   starts with `*`.
 - Special characters: `*` `,` `-` `/` and three-letter names, as go-cron. Vixie
-  cron 4.3 adds `$`; cronie adds `~`. No `L`, `W`, `#`, `?` or `H`.
+  cron at 9cc8ab1 adds `$`; cronie adds `~`. No `L`, `W`, `#`, `?` or `H`.
 - `@` shortcuts: `@yearly`, `@annually`, `@monthly`, `@weekly`, `@daily`,
   `@midnight` and `@hourly` as go-cron with `Descriptor`; `@reboot` has no
   go-cron spec.
@@ -154,7 +154,7 @@ and [`cron.c`](https://github.com/vixie/cron/blob/9cc8ab1087bb9ab861dd5595c41200
 | `0 0 * * mon-fri` | `0 0 * * mon-fri` | Thu 2026-11-19 00:00 |
 | `0 0 $ * *` | `0 0 L * *` | Mon 2026-11-30 00:00: last day of the month (`DomL`) |
 | `0 0 $ * 5` | `0 0 L * 5` | Fri 2026-11-20 00:00: last day of the month or any Friday (`DomL`) |
-| `*/60 * * * *` (Vixie cron 4.3) | `* * * * *` | Wed 2026-11-18 00:01: every minute |
+| `*/60 * * * *` (Vixie cron at 9cc8ab1) | `* * * * *` | Wed 2026-11-18 00:01: every minute |
 | `*/60 * * * *` (cronie, Cygwin cron) | `0 * * * *` | Wed 2026-11-18 01:00: every hour |
 | `*/35 * * * *` | `*/35 * * * *` | Wed 2026-11-18 00:35: minutes 0 and 35 |
 | `6~15 * * * *` (cronie) | `H(6-15) * * * *` | Wed 2026-11-18 00:07: one minute from 6 to 15 for the job key (`Hash`) |
@@ -462,8 +462,9 @@ text dropped.
 - `/15` without a start (Quartz reads `*/15`). Write `*/15` or `0/15`.
 - A `*` year. Leave it out with `YearOptional`, or use `Year`, which then
   requires a year in every spec.
-- Full month or day names (Quartz.NET reads the first three letters, so
-  `JANUARY` works). Write `JAN`.
+- Full month or day names. Quartz reads the first three letters of both.
+  Quartz.NET does so for a month (`JANUARY` works) but rejects a full day
+  name (`FRIDAY`). Write `JAN` and `FRI`.
 - A step larger than its range (`0 0-5/10 * * * ?`); Quartz and Quartz.NET run
   the first value (minute 0). Both reject a step above the field's largest value
   (`*/60`), as go-cron does. Write `0`, or set `LenientSteps`.
