@@ -260,9 +260,10 @@ form (G10) is outside the grammar.
 
 What a context-free grammar can't check is kept by the goldens: the value
 limits (T1, T4, R8–R12), the hour order (T6) and the values themselves (G1).
-`TestDescribeSpecNamesRuns` also checks the values, for the goldens and for
-random specs, from the first year the spec allows, or from 2026 when it allows
-any. Every clock time, minute and second a description names must be a run on
+`TestDescribeSpecNamesRuns` also checks the values, for the goldens and, in a
+run without `-short`, for random specs, from the first year the spec allows,
+or from 2026 when it allows any. Every clock time, minute and second a
+description names must be a run on
 the first day that has one; every day of the month, day of the week and month
 must have a run in the five years from there, or in the year of the first run
 after them, in the spec's zone; and every year must be one the year field
