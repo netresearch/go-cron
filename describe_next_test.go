@@ -30,7 +30,7 @@ const clockPattern = `(?:midnight|noon|\d+(?::\d\d){0,2} [ap]m)`
 // "minute(s)" and "second(s)" or before them ("30 minutes past"), and the
 // hours of a clock range ("9 am thru 5 pm", "the 1 am hour thru the 4 am
 // hour"), or under an hour step ("every 2 hours") the hours it picks from
-// the range's first (T9).
+// the range's first, in the ranges clockRangeMisses gives the step (T9).
 var (
 	namedClock   = regexp.MustCompile(`\b(midnight|noon|(\d+)(?::(\d\d))?(?::(\d\d))? ([ap])m)\b`)
 	namedValues  = regexp.MustCompile(`\b(second|minute)s? (\d+(?:` + listSep + `\d+)*)|\b(\d+) (second|minute)s?\b`)
@@ -98,8 +98,9 @@ func dayRuns(sch Schedule) (hours, minutes, seconds, times map[int]bool) {
 // run, and a bare one ("9 am", "noon") an hour with a run; a named minute or
 // second, and each value of a range of them, must be the minute or second of
 // a run; each hour of a clock range must have a run, or under an hour step
-// ("every 2 hours") each hour the step picks from its first. The check is
-// one-sided: it does not find a run that the description leaves out.
+// ("every 2 hours") each hour the step picks from its first, in the ranges
+// clockRangeMisses gives the step. The check is one-sided: it does not find
+// a run that the description leaves out.
 func checkNamedTimes(desc string, sch Schedule) []string {
 	hours, minutes, seconds, times := dayRuns(sch)
 	desc = intervalNote.ReplaceAllString(desc, "") // "(every 7 minutes, …)" names an interval, not a value
@@ -1144,7 +1145,7 @@ func TestNamesNotRun(t *testing.T) {
 		{five, "0 9,17 * * *", "every 2 hours from 9 am thru 5 pm in every day", "9 am thru 5 pm"}, // 11 am thru 3 pm: no runs
 		{five, "0 9-17/2 * * *", "every 2 hours from 9 am thru 5 pm in every day", ""},
 		{five, "0 0-10/2,20-22/2 * * *", "every 2 hours from midnight thru 10 am and 8 pm thru 10 pm in every day", ""},
-		{five, "0 15-11/5 * * *", "every 5 hours from 1 am thru 11 am and 3 pm thru 8 pm in every day", ""}, // a wrapped step: 8 pm + 5 hours is 1 am
+		{five, "0 5-3/2 * * *", "every 2 hours from 1 am thru 3 am and 5 am thru 11 pm in every day", ""}, // a wrapped step: 11 pm + 2 hours is 1 am
 		// 5 pm + 2 hours is not midnight, so the second range is not the step's: 4 pm has no run
 		{five, "0 0-10/2,15,17 * * *", "every 2 hours from midnight thru 10 am and 3 pm thru 5 pm in every day", "3 pm thru 5 pm"},
 		{five, "0,10 * * * *", "at minutes 0 thru 10 past the hour", "minute 0 thru 10"},
