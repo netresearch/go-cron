@@ -84,7 +84,7 @@ var tzAreas = []string{
 
 // zoneName returns the name a description gives loc: for a name under
 // one of the tz areas its last part with spaces, "New York"; any other name
-// as written, "UTC", "Etc/GMT+5", "US/Eastern". generic is true for a zone
+// as written (Z1), "UTC", "Etc/GMT+5", "US/Eastern". generic is true for a zone
 // with no name of its own, time.Local or an unnamed one, which reads "the
 // scheduler's".
 func zoneName(loc *time.Location) (name string, generic bool) {
@@ -155,7 +155,7 @@ func monthsWords(a, b time.Time, loc *time.Location) string {
 // utcShift names a zone's offset from UTC over the year: "5 hours behind UTC",
 // and for a zone that changes with the season "5 hours behind UTC, 4 hours
 // from March to November". A zone that changes in another way gets its January
-// offset, and the note names the rest of the year (windowNote).
+// offset, and the note names the rest of the year (Z2, Z4).
 func utcShift(z zoneYear, name string) (clause, note string) {
 	clause = shiftWords(z.base, "UTC")
 	switch {
@@ -188,10 +188,11 @@ func windowWords(from, last time.Time) string {
 
 // windowNote names the windows in which subject's zone is off the steady
 // shift the description states, by the dates, in loc, of each window's
-// first and last instant: "Berlin is 5 hours ahead of New York from March 14
-// to 28 and from October 31 to November 7", a list as G8 has it. Each shift
-// gets one sentence. A window under a day is left out. tail says that the
-// windows lie between two zones' clock changes (betweenChanges).
+// first and last instant (Z4): "Berlin is 5 hours ahead of New York from
+// March 14 to 28 and from October 31 to November 7", a list as G8 has it.
+// Each shift gets one sentence. A window under a day is left out, although a
+// run inside it is off the stated shift. tail says that the windows lie
+// between two zones' clock changes (betweenChanges).
 func windowNote(subject, object string, spans []zoneSpan, steady time.Duration, loc *time.Location, tail bool) string {
 	var order []time.Duration
 	windows := map[time.Duration][]string{}
@@ -311,11 +312,11 @@ func steadyOf(spans []zoneSpan, bothSeasonal bool) time.Duration {
 	return best
 }
 
-// schedShift names a spec zone's shift from the scheduler's zone: one
+// schedShift names a spec zone's shift from the scheduler's zone (Z3): one
 // value when it holds all year; the months form when one zone changes with
-// the season and the other does not, "8 hours ahead of Los Angeles time, 7
-// hours from March to November"; otherwise the steady value, and the note
-// names the windows off it (windowNote). name is the spec zone's name; sname is the
+// the season and the other has no clock change in the year, "8 hours ahead of
+// Los Angeles time, 7 hours from March to November"; otherwise the steady
+// value, and the note names the windows off it (Z4). name is the spec zone's name; sname is the
 // scheduler's, generic when it has none of its own.
 func schedShift(spec, sched zoneYear, name, sname string, generic bool) (clause, note string) {
 	other := sname + " time"
@@ -341,13 +342,12 @@ func schedShift(spec, sched zoneYear, name, sname string, generic bool) (clause,
 }
 
 // zoneClause returns the clause that names the zone a spec wrote, its shift
-// from UTC and its shift from the scheduler's zone (zoneName, utcShift,
-// schedShift), with its leading space, and the note for the windows off those
-// shifts (windowNote). Both are "" for a spec with no zone and for TZ=Local,
-// which reads as no zone does. The scheduler's shift is left out when sched is
-// nil, as the scheduler may run in another process and zone than the caller,
-// and when the scheduler runs on UTC, under any name, or has the spec zone's
-// offsets all year.
+// from UTC and its shift from the scheduler's zone (Z1–Z3), with its leading
+// space, and the note for the windows off those shifts (Z4). Both are "" for a
+// spec with no zone and for TZ=Local, which reads as no zone does (Z6). The
+// scheduler's shift is left out when sched is nil, as the scheduler may run in
+// another process and zone than the caller (Z9), and when the scheduler runs
+// on UTC, under any name, or has the spec zone's offsets all year (Z3).
 func zoneClause(spec, sched *time.Location, now time.Time) (clause, note string) {
 	if spec == nil || spec == time.Local {
 		return "", ""
