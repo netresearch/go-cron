@@ -122,13 +122,23 @@ func checkNamedTimes(desc string, sch Schedule) []string {
 
 // clockRangeMisses returns each clock range in desc with an hour before its
 // last that has no run, of every step-th hour from its first; the last hour
-// is checked as a clock time.
+// is checked as a clock time. The step is the first range's, and a later
+// range's only when it is the other part of a wrapped step (T9): its last
+// hour and one step reach the first range's start. Any other range is read
+// hour by hour.
 func clockRangeMisses(desc string, hours map[int]bool, step int) []string {
 	var bad []string
+	start := -1
 	for _, m := range clockRange.FindAllStringSubmatch(desc, -1) {
 		from, _, _ := namedClockTime(namedClock.FindStringSubmatch(m[1]))
 		to, _, _ := namedClockTime(namedClock.FindStringSubmatch(m[2]))
-		for k := 0; k < (to-from+24)%24; k += step {
+		by := step
+		if start < 0 {
+			start = from
+		} else if (to+step)%24 != start {
+			by = 1
+		}
+		for k := 0; k < (to-from+24)%24; k += by {
 			if !hours[(from+k)%24] {
 				bad = append(bad, m[0])
 				break
@@ -1131,6 +1141,9 @@ func TestNamesNotRun(t *testing.T) {
 		{five, "0 9,17 * * *", "every 2 hours from 9 am thru 5 pm in every day", "9 am thru 5 pm"}, // 11 am thru 3 pm: no runs
 		{five, "0 9-17/2 * * *", "every 2 hours from 9 am thru 5 pm in every day", ""},
 		{five, "0 0-10/2,20-22/2 * * *", "every 2 hours from midnight thru 10 am and 8 pm thru 10 pm in every day", ""},
+		{five, "0 15-11/5 * * *", "every 5 hours from 1 am thru 11 am and 3 pm thru 8 pm in every day", ""}, // a wrapped step: 8 pm + 5 hours is 1 am
+		// 5 pm + 2 hours is not midnight, so the second range is not the step's: 4 pm has no run
+		{five, "0 0-10/2,15,17 * * *", "every 2 hours from midnight thru 10 am and 3 pm thru 5 pm in every day", "3 pm thru 5 pm"},
 		{five, "0,10 * * * *", "at minutes 0 thru 10 past the hour", "minute 0 thru 10"},
 		{five, "* * * * *", "at minutes 0 thru 60 past the hour", "minute 0 thru 60"}, // an end past 59
 		{five, "0 0 * * *", "at midnight on the 1st thru 32nd of the month", "1st thru 32nd"},
