@@ -470,7 +470,8 @@ text dropped.
   requires a year in every spec.
 - Full month or day names. Quartz reads the first three letters of both.
   Quartz.NET does so for a month (`JANUARY` works) but rejects a full day
-  name (`FRIDAY`). Write `JAN` and `FRI`.
+  name (`FRIDAY`), except as the end of a range, where it reads the first
+  three letters (`MON-FRIDAY` is `MON-FRI`). Write `JAN`, `FRI` and `MON-FRI`.
 - A step larger than its range (`0 0-5/10 * * * ?`); Quartz and Quartz.NET run
   the first value (minute 0). Both reject a step above the field's largest value
   (`*/60`), as go-cron does. Write `0`, or set `LenientSteps`.
