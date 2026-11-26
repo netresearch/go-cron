@@ -1258,7 +1258,9 @@ func WithSeconds() Option
 ```
 
 WithSeconds overrides the parser to include a seconds field as the first field.
-Equivalent to Quartz scheduler format.
+Its six fields are in the same order as the Quartz scheduler format; see
+[CRON_SPEC_MIGRATION.md](CRON_SPEC_MIGRATION.md#quartz-and-quartznet) for the
+options a Quartz spec also needs and where Quartz specs run differently.
 
 #### func WithParser
 

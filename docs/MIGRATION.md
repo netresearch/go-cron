@@ -1,6 +1,7 @@
 # Migrating from robfig/cron
 
 This guide helps you migrate from [robfig/cron](https://github.com/robfig/cron) v3 to [netresearch/go-cron](https://github.com/netresearch/go-cron).
+For cron specs written for other schedulers, see [CRON_SPEC_MIGRATION.md](CRON_SPEC_MIGRATION.md).
 
 > [!WARNING]
 > **This fork includes knowingly accepted behavior changes.** While the API is 100%
