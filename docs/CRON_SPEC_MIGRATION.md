@@ -1104,7 +1104,7 @@ Reference: [`schtasks create`](https://learn.microsoft.com/en-us/windows-server/
 | Spec | Source runs | go-cron runs, unchanged | For go-cron |
 |---|---|---|---|
 | `/sc minute /mo 20` (intervals count from the start) | every 20 minutes from when the task starts | `*/20 * * * *`: at :00, :20 and :40 | `@every 20m`, which counts from `Start()`, or from when the job is added to a running scheduler; the same for `/mo n` with hours. Day and week intervals as `@every 24h` steps drift an hour across a DST change, and months have no fixed length: no go-cron spec |
-| 02:30 on a spring-forward day | not documented | 03:30 | no option matches; `DSTSkip` skips the run |
+| 02:30 on a spring-forward day | not documented | 03:30 | the source's run time is unknown, so no option is known to match; `DSTSkip` skips the run |
 
 **Fails to parse in go-cron**
 
