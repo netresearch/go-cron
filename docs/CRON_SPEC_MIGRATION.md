@@ -42,7 +42,8 @@ rules part by part, then a rewrite table.
   key `example-job`. Seconds are shown only for specs with a seconds field.
 - **Sources.** Each section links the scheduler's own reference. Where its
   docs are silent or disagree with what it runs, the section follows the code
-  and links it. Each section says whether the scheduler itself was run.
+  and links it. Where a section does not say that the scheduler itself was
+  run, its lines rest on the linked docs and code.
 - **Two entries.** Where a source runs a job when *either* day field matches,
   go-cron can do the same with `DowOrDom`, or with two entries, one per day
   field. On a day that matches both (a Friday the 13th), both entries run, so
@@ -305,9 +306,10 @@ the Kubernetes docs do not state them.
   `@midnight`, `@hourly`, and `@every <duration>`, which the controller accepts
   though the docs do not list it. As go-cron with `Descriptor`.
 - Time zones: `.spec.timeZone`; without it, the controller manager's local
-  zone. Kubernetes rejects `TZ=` and `CRON_TZ=` in `.spec.schedule` and turns
-  `.spec.timeZone` into a `TZ=` prefix itself
-  ([`validation.go`](https://github.com/kubernetes/kubernetes/blob/v1.31.0/pkg/apis/batch/validation/validation.go)).
+  zone. Kubernetes rejects `TZ=` and `CRON_TZ=` in `.spec.schedule`
+  ([`validation.go`](https://github.com/kubernetes/kubernetes/blob/v1.31.0/pkg/apis/batch/validation/validation.go))
+  and turns `.spec.timeZone` into a `TZ=` prefix itself (`formatSchedule` in
+  [`cronjob_controllerv2.go`](https://github.com/kubernetes/kubernetes/blob/v1.31.0/pkg/controller/cronjob/cronjob_controllerv2.go)).
   In go-cron, write the zone as a `CRON_TZ=` or `TZ=` prefix.
 - Parser setup: `Minute | Hour | Dom | Month | Dow | Descriptor | RobfigCompat`.
 
@@ -332,7 +334,7 @@ Reference: [GitHub Actions `schedule`](https://docs.github.com/en/actions/refere
 |---|---|---|---|
 | `0 9 * * *`, no time zone set | 09:00 UTC | 09:00 local time | `CRON_TZ=UTC 0 9 * * *` |
 | `0 9 13 * FRI` (both day fields restricted) | the 13th and every Friday | Friday the 13th only | `DowOrDom`, or two entries |
-| `30 2 * * *` on a spring-forward day (GitHub) | 03:00 | 03:30 (see [DST_HANDLING.md](DST_HANDLING.md)) | no option matches; `DSTSkip` skips the run |
+| `30 2 * * *` with `timezone: America/New_York`, on a spring-forward day (GitHub) | 03:00 | 03:30 (see [DST_HANDLING.md](DST_HANDLING.md)) | no option matches; `DSTSkip` skips the run |
 
 Cloud Scheduler documents the OR ("unless one of these fields is marked as
 unrestricted by the asterisk"). GitHub's docs say only "POSIX cron syntax";
@@ -596,7 +598,9 @@ The swap is in
 
 **Fails to parse in go-cron**
 
-- Full day and month names (`Monday`, `January`). Write `MON`, `JAN`.
+- Day and month names other than the three-letter form: NCrontab takes any
+  leading part of a name, in any case (`Monday`, `Tues`, `January`, `Sept`).
+  Write `MON`, `TUE`, `JAN`, `SEP`.
 - A step as large as the field (`*/90` in the minute field) or larger than its
   range (`0-5/10`); NCrontab runs the first value (minute 0). Write `0`, or set
   `LenientSteps`.
@@ -719,8 +723,8 @@ second Tuesday.
 - `L` after a range (`MON-FRIL`) and `L-3W` are not in AWS's field table, and
   its docs do not say what AWS does with them. go-cron rejects them; write the
   schedule you meant.
-- `rate(5 minutes)` is not a cron spec; `@every 5m` is the go-cron feature for a
-  fixed interval.
+- `rate(5 minutes)` is not a cron spec; `@every 5m` (with `Descriptor`) is the
+  go-cron feature for a fixed interval.
 
 **Parts**
 
@@ -1093,14 +1097,17 @@ The `~` count is in
 
 Reference: [`schtasks create`](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/schtasks-create),
 [monthly day-of-week trigger](https://learn.microsoft.com/en-us/windows/win32/taskschd/monthlydowtrigger),
-[trigger start boundary](https://learn.microsoft.com/en-us/windows/win32/taskschd/trigger-startboundary).
+[trigger start boundary](https://learn.microsoft.com/en-us/windows/win32/taskschd/trigger-startboundary),
+[`ITrigger::put_StartBoundary`](https://learn.microsoft.com/en-us/windows/win32/api/taskschd/nf-taskschd-itrigger-put_startboundary),
+[weekly trigger](https://learn.microsoft.com/en-us/windows/win32/taskschd/weeklytrigger),
+[monthly trigger](https://learn.microsoft.com/en-us/windows/win32/taskschd/monthlytrigger).
 
 **Runs differently without an error**
 
 | Spec | Source runs | go-cron runs, unchanged | For go-cron |
 |---|---|---|---|
-| `/sc minute /mo 20` (intervals count from the start) | every 20 minutes from when the task starts | `*/20 * * * *`: at :00, :20 and :40 | `@every 20m`, which counts from when the job is added; the same for `/mo n` with hours. Day and week intervals as `@every 24h` steps drift an hour across a DST change, and months have no fixed length: no go-cron spec |
-| 02:30 on a spring-forward day | 03:00 | 03:30 | no option matches; `DSTSkip` skips the run |
+| `/sc minute /mo 20` (intervals count from the start) | every 20 minutes from when the task starts | `*/20 * * * *`: at :00, :20 and :40 | `@every 20m`, which counts from `Start()`, or from when the job is added to a running scheduler; the same for `/mo n` with hours. Day and week intervals as `@every 24h` steps drift an hour across a DST change, and months have no fixed length: no go-cron spec |
+| 02:30 on a spring-forward day (weekly or monthly trigger) | 03:00 | 03:30 | no option matches; `DSTSkip` skips the run |
 
 **Fails to parse in go-cron**
 
