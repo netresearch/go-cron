@@ -73,7 +73,7 @@ rules part by part, then a rewrite table.
 | [node-cron](#node-cron) | 5 or 6, seconds first | 0 or 7 = Sunday | AND | `L`, `#`, `W`, `dL` | option, local |
 | [cron (kelektiv)](#cron-kelektiv) | 5 or 6, seconds first | 0 or 7 = Sunday | OR | none | option, local |
 | [systemd timers](#systemd-timers) | calendar event | names only | AND | `~` from the end | suffix, local |
-| [Windows Task Scheduler](#windows-task-scheduler) | triggers | names only | one per trigger | `LAST`, `LASTDAY` | start boundary |
+| [Windows Task Scheduler](#windows-task-scheduler) | triggers | names only | one per trigger | `LAST`, `LASTDAY` | start boundary, local |
 
 go-cron itself: five fields by default (seconds with `Second` or
 `SecondOptional`, a year with `Year` or `YearOptional`); 0 or 7 = Sunday;
@@ -334,7 +334,7 @@ Reference: [GitHub Actions `schedule`](https://docs.github.com/en/actions/refere
 |---|---|---|---|
 | `0 9 * * *`, no time zone set | 09:00 UTC | 09:00 local time | `CRON_TZ=UTC 0 9 * * *` |
 | `0 9 13 * FRI` (both day fields restricted) | the 13th and every Friday | Friday the 13th only | `DowOrDom`, or two entries |
-| `30 2 * * *` with a `timezone:` that observes DST, on a spring-forward day (GitHub) | 03:00 | 03:30 (see [DST_HANDLING.md](DST_HANDLING.md)) | no option matches; `DSTSkip` skips the run |
+| `30 2 * * *` with `timezone: America/New_York`, on a spring-forward day (GitHub) | 03:00 | 03:30 (see [DST_HANDLING.md](DST_HANDLING.md)) | no option matches; `DSTSkip` skips the run |
 
 Cloud Scheduler documents the OR ("unless one of these fields is marked as
 unrestricted by the asterisk"). GitHub's docs say only "POSIX cron syntax";
@@ -1097,14 +1097,17 @@ The `~` count is in
 
 Reference: [`schtasks create`](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/schtasks-create),
 [monthly day-of-week trigger](https://learn.microsoft.com/en-us/windows/win32/taskschd/monthlydowtrigger),
-[trigger start boundary](https://learn.microsoft.com/en-us/windows/win32/taskschd/trigger-startboundary).
+[trigger start boundary](https://learn.microsoft.com/en-us/windows/win32/taskschd/trigger-startboundary),
+[`ITrigger::put_StartBoundary`](https://learn.microsoft.com/en-us/windows/win32/api/taskschd/nf-taskschd-itrigger-put_startboundary),
+[weekly trigger](https://learn.microsoft.com/en-us/windows/win32/taskschd/weeklytrigger),
+[monthly trigger](https://learn.microsoft.com/en-us/windows/win32/taskschd/monthlytrigger).
 
 **Runs differently without an error**
 
 | Spec | Source runs | go-cron runs, unchanged | For go-cron |
 |---|---|---|---|
 | `/sc minute /mo 20` (intervals count from the start) | every 20 minutes from when the task starts | `*/20 * * * *`: at :00, :20 and :40 | `@every 20m`, which counts from `Start()`, or from when the job is added to a running scheduler; the same for `/mo n` with hours. Day and week intervals as `@every 24h` steps drift an hour across a DST change, and months have no fixed length: no go-cron spec |
-| 02:30 on a spring-forward day | not documented | 03:30 | the source's run time is unknown, so no option is known to match; `DSTSkip` skips the run |
+| 02:30 on a spring-forward day (weekly or monthly trigger) | 03:00 | 03:30 | no option matches; `DSTSkip` skips the run |
 
 **Fails to parse in go-cron**
 
@@ -1125,9 +1128,8 @@ Reference: [`schtasks create`](https://learn.microsoft.com/en-us/windows-server/
   `LAST` under `/d` but not under `/mo`, and does not define "last week of the
   month"; `FRI#L` is the reading here.)
 - `@` shortcuts: none.
-- Time zones: the documented form of a trigger's start boundary carries a
-  fixed UTC offset, which ignores the local zone and DST; the docs do not say
-  what a boundary without an offset means.
+- Time zones: a trigger's start boundary with no offset follows the local zone;
+  with `Z` it is UTC; with a fixed offset it ignores the local zone and DST.
   Write `CRON_TZ=` with an IANA zone, `CRON_TZ=UTC`, or for a fixed offset the
   `Etc/GMT` zone with the sign inverted (`-08:00` is `Etc/GMT+8`).
 - Parser setup: `Minute | Hour | Dom | Month | Dow`, plus `Extended`,
