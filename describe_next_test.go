@@ -30,7 +30,7 @@ const clockPattern = `(?:midnight|noon|\d+(?::\d\d){0,2} [ap]m)`
 // "minute(s)" and "second(s)" or before them ("30 minutes past"), and the
 // hours of a clock range ("9 am thru 5 pm", "the 1 am hour thru the 4 am
 // hour"), or under an hour step ("every 2 hours") the hours it picks from
-// the range's first (T9).
+// the range's first, in the ranges clockRangeMisses gives the step (T9).
 var (
 	namedClock   = regexp.MustCompile(`\b(midnight|noon|(\d+)(?::(\d\d))?(?::(\d\d))? ([ap])m)\b`)
 	namedValues  = regexp.MustCompile(`\b(second|minute)s? (\d+(?:` + listSep + `\d+)*)|\b(\d+) (second|minute)s?\b`)
@@ -98,8 +98,9 @@ func dayRuns(sch Schedule) (hours, minutes, seconds, times map[int]bool) {
 // run, and a bare one ("9 am", "noon") an hour with a run; a named minute or
 // second, and each value of a range of them, must be the minute or second of
 // a run; each hour of a clock range must have a run, or under an hour step
-// ("every 2 hours") each hour the step picks from its first. The check is
-// one-sided: it does not find a run that the description leaves out.
+// ("every 2 hours") each hour the step picks from its first, in the ranges
+// clockRangeMisses gives the step. The check is one-sided: it does not find
+// a run that the description leaves out.
 func checkNamedTimes(desc string, sch Schedule) []string {
 	hours, minutes, seconds, times := dayRuns(sch)
 	desc = intervalNote.ReplaceAllString(desc, "") // "(every 7 minutes, …)" names an interval, not a value
@@ -122,13 +123,23 @@ func checkNamedTimes(desc string, sch Schedule) []string {
 
 // clockRangeMisses returns each clock range in desc with an hour before its
 // last that has no run, of every step-th hour from its first; the last hour
-// is checked as a clock time.
+// is checked as a clock time. The step is the first range's, and a later
+// range's only when it is the other part of a wrapped step (T9): its last
+// hour and one step reach the first range's start. Any other range is read
+// hour by hour.
 func clockRangeMisses(desc string, hours map[int]bool, step int) []string {
 	var bad []string
+	start := -1
 	for _, m := range clockRange.FindAllStringSubmatch(desc, -1) {
 		from, _, _ := namedClockTime(namedClock.FindStringSubmatch(m[1]))
 		to, _, _ := namedClockTime(namedClock.FindStringSubmatch(m[2]))
-		for k := 0; k < (to-from+24)%24; k += step {
+		by := step
+		if start < 0 {
+			start = from
+		} else if (to+step)%24 != start {
+			by = 1
+		}
+		for k := 0; k < (to-from+24)%24; k += by {
 			if !hours[(from+k)%24] {
 				bad = append(bad, m[0])
 				break
@@ -878,15 +889,14 @@ func checkGoldensNameRuns(t *testing.T) int {
 // TestDescribeSpecNamesRuns enforces G1: every clock time, minute, second,
 // day of the month, day of the week, month and year that a description
 // names is one the scheduler runs at, and the shift a zone clause gives is the
-// zone's (zoneMisses), for the goldens with their parse options and for random
-// specs. A golden with H is read for every key
+// zone's (zoneMisses), for the goldens with their parse options and, unless
+// -short, for random specs. A golden with H is read for every key
 // (namesNotRunSpec); only the goldens given field by field (G10) and the
 // specs the parser rejects are not checked.
 func TestDescribeSpecNamesRuns(t *testing.T) {
 	if checked := checkGoldensNameRuns(t); checked < 524 {
 		t.Errorf("checked %d goldens, want at least 524", checked)
 	}
-
 	r := rand.New(rand.NewPCG(1, 2)) // fixed seed: the same specs on every run
 	field := func(lo, hi int) string { return randomField(r, lo, hi) }
 	days := func() string {
@@ -919,19 +929,26 @@ type randomSpecs struct {
 	spec     func() string
 }
 
-// checkRandomSpecs runs checkSpecNamesRuns on the specs of each case.
+// checkRandomSpecs runs checkSpecNamesRuns on the specs of each case, each
+// case a subtest that -short skips: the random specs take about half the
+// test's time.
 func checkRandomSpecs(t *testing.T, cases []randomSpecs) {
 	t.Helper()
 	for _, c := range cases {
-		checked := 0
-		for range c.n {
-			if checkSpecNamesRuns(t, c.p, c.spec()) {
-				checked++
+		t.Run(c.name, func(t *testing.T) {
+			if testing.Short() {
+				t.Skip("skipping the random specs in short mode")
 			}
-		}
-		if checked < c.least {
-			t.Errorf("%s: checked %d random specs, want at least %d", c.name, checked, c.least)
-		}
+			checked := 0
+			for range c.n {
+				if checkSpecNamesRuns(t, c.p, c.spec()) {
+					checked++
+				}
+			}
+			if checked < c.least {
+				t.Errorf("checked %d random specs, want at least %d", checked, c.least)
+			}
+		})
 	}
 }
 
@@ -1128,6 +1145,9 @@ func TestNamesNotRun(t *testing.T) {
 		{five, "0 9,17 * * *", "every 2 hours from 9 am thru 5 pm in every day", "9 am thru 5 pm"}, // 11 am thru 3 pm: no runs
 		{five, "0 9-17/2 * * *", "every 2 hours from 9 am thru 5 pm in every day", ""},
 		{five, "0 0-10/2,20-22/2 * * *", "every 2 hours from midnight thru 10 am and 8 pm thru 10 pm in every day", ""},
+		{five, "0 5-3/2 * * *", "every 2 hours from 1 am thru 3 am and 5 am thru 11 pm in every day", ""}, // a wrapped step: 11 pm + 2 hours is 1 am
+		// 5 pm + 2 hours is not midnight, so the second range is not the step's: 4 pm has no run
+		{five, "0 0-10/2,15,17 * * *", "every 2 hours from midnight thru 10 am and 3 pm thru 5 pm in every day", "3 pm thru 5 pm"},
 		{five, "0,10 * * * *", "at minutes 0 thru 10 past the hour", "minute 0 thru 10"},
 		{five, "* * * * *", "at minutes 0 thru 60 past the hour", "minute 0 thru 60"}, // an end past 59
 		{five, "0 0 * * *", "at midnight on the 1st thru 32nd of the month", "1st thru 32nd"},
